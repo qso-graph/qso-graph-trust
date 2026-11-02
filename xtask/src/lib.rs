@@ -718,7 +718,7 @@ pub fn flags_allowed(flags: &str) -> bool {
 /// unrelated error is not a refusal (found by Codex review, as were the profile
 /// flags a stand-in crate could not see). `extra_env` is for the planted test.
 pub fn canary(root: &Path, extra_env: &[(&str, &str)]) -> Result<(), String> {
-    let work = new_work_dir()?;
+    let work = fresh_temp_dir("qgt-canary")?;
     let result = canary_in(root, &work, extra_env);
     // Only the directory this call created, so cleaning up can never remove
     // anything else (found by Codex review: given a path, it once could).
@@ -730,13 +730,13 @@ pub fn canary(root: &Path, extra_env: &[(&str, &str)]) -> Result<(), String> {
 /// call (never one that already existed), outside the repository wherever
 /// Cargo's output directory is (found by Codex review: inside it, the copy
 /// recursed into itself and left a Cargo configuration the policy then found).
-fn new_work_dir() -> Result<PathBuf, String> {
+pub fn fresh_temp_dir(prefix: &str) -> Result<PathBuf, String> {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let base = std::path::absolute(std::env::temp_dir())
         .map_err(|e| format!("cannot resolve the temporary directory: {e}"))?;
     for _ in 0..100 {
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = base.join(format!("qgt-canary-{}-{n}", std::process::id()));
+        let dir = base.join(format!("{prefix}-{}-{n}", std::process::id()));
         match std::fs::create_dir(&dir) {
             Ok(()) => return Ok(dir),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -775,6 +775,17 @@ fn canary_in(root: &Path, work: &Path, extra_env: &[(&str, &str)]) -> Result<(),
         .and_then(|t| t["src_path"].as_str())
         .map(PathBuf::from)
         .ok_or("the copy has no qso-graph-trust library target")?;
+    // Only ever write inside the copy: a library path that resolves elsewhere, such
+    // as an absolute path back into the checkout, would put the probe into the
+    // real source (found by Codex review).
+    let copy_abs = std::fs::canonicalize(&copy)
+        .map_err(|e| format!("cannot resolve {}: {e}", copy.display()))?;
+    if !std::fs::canonicalize(&lib).is_ok_and(|l| l.starts_with(&copy_abs)) {
+        return Err(format!(
+            "the library's source {} is not inside the canary's copy: use a relative [lib] path",
+            lib.display()
+        ));
+    }
     let mut source =
         std::fs::read_to_string(&lib).map_err(|e| format!("cannot read {}: {e}", lib.display()))?;
     source.push_str("\n/// The canary's probe: the compiler must refuse it.\npub fn qgt_canary() -> u8 {\n    unsafe { core::ptr::read(&7) }\n}\n");

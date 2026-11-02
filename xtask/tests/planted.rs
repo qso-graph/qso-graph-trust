@@ -89,9 +89,9 @@ fn every_planted_way_to_override_the_lints_is_caught() {
     // lints without touching a manifest or a crate root (Codex review, rounds 6
     // and 7). --cap-lints overrides even forbid(unsafe_code).
     // Outside this repository, so its planted files are never part of the
-    // repository's own scan, wherever Cargo's output directory is (found by Codex review).
-    let root = std::env::temp_dir().join(format!("qgt-planted-overrides-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+    // repository's own scan, wherever Cargo's output directory is; and freshly
+    // created, so removing it afterwards removes nothing else (found by Codex review).
+    let root = xtask::fresh_temp_dir("qgt-planted-overrides").expect("a fresh directory");
     let write = |rel: &str, text: &str| {
         let path = root.join(rel);
         std::fs::create_dir_all(path.parent().expect("a parent")).expect("mkdir");
