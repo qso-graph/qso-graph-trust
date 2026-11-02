@@ -13,13 +13,21 @@ every platform:
 - no crate in it declares a native link (`links`);
 - no crate in it depends on a crate whose job is building native code (`cc`, `cmake`, `bindgen` and
   the like);
-- every build script or procedural macro in it is on a reviewed list by **exact name and version**,
-  because a build script can run a compiler itself without declaring anything. A new version is a new
-  review. The list is empty today.
+- every crate in it from outside the workspace comes from crates.io, where a published version can
+  never change, and is on a reviewed list by **exact name and version**. Reading it is the review:
+  no `#[link]` or `extern` block, no assembly, and a build script or procedural macro, if any, that
+  compiles nothing. A build script can run a compiler, and an `extern` block can link a library,
+  without declaring `links`, so no metadata check can stand in for reading. A new version is a new
+  review. The list is empty today;
+- every build script or procedural macro in it, a workspace crate's included, is on that list;
+- as a second line, every file of every crate in it is searched: a `#[link]`, `#[link_name]` or
+  `#[link_section]` attribute, an `extern` block, inline or global assembly, or a native source or
+  object file (`.c`, `.h`, `.s`, `.o`, `.a`, `.so`, `.dll` and the like) fails the check, even in a
+  comment.
 
-What a reviewed build script does is a judgement made by reading it; the check guarantees that
-judgement is made for every one, and made again when its version changes. Planted cases prove each
-rule fails when broken (`xtask/tests/planted.rs`).
+What a reviewed crate does is a judgement made by reading it; the check guarantees that judgement is
+made for every one, and made again when its version changes. Planted cases prove each rule fails when
+broken (`xtask/tests/planted.rs`).
 
 The HTTPS connection to LoTW is the one exception. No production-grade pure-Rust TLS provider exists
 (`rustls-rustcrypto` is 0.0.2-alpha and says not to use it in production), so the upload uses rustls

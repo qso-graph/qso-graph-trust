@@ -2,7 +2,9 @@
 # Planted cases for the policy checks (xtask/tests/planted.rs). Read by
 # `cargo metadata` only: never compiled, never part of QGT.
 [workspace]
-members = ["protected", "native", "optional-native", "build-script", "no-forbid", "no-lints", "commented", "in-a-string"]
+members = ["protected", "native", "optional-native", "build-script", "extern-block", "no-forbid", "no-lints", "commented", "in-a-string"]
+# A crate outside this workspace, as a dependency from crates.io or git would be.
+exclude = ["outside"]
 resolver = "3"
 
 [workspace.lints.rust]

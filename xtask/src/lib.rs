@@ -42,11 +42,37 @@ const NATIVE_BUILD: &[&str] = &[
 /// never a pattern or a prefix.
 const EXEMPT: &[(&str, &str)] = &[];
 
-/// Build scripts and procedural macros allowed in the protected tree, each by
-/// exact crate name and version, read and found to build no native code. A new
-/// version is a new entry, because its build script is new code (found by Codex
-/// review: a build script can run a compiler without declaring `links`).
+/// Crates from outside the workspace allowed in the protected tree, each by exact
+/// name and version from crates.io (where a published version can never change),
+/// read and found to bring no native code: no `#[link]` or `extern` block, no
+/// assembly, and a build script or procedural macro, if it has one, that compiles
+/// nothing. A new version is a new entry, because it is new code (found by Codex
+/// review: a build script can run a compiler, and an `extern` block can link a
+/// library, without declaring `links`).
 const REVIEWED: &[(&str, &str, &str)] = &[];
+
+/// The one registry a reviewed crate may come from.
+const CRATES_IO: &str = "registry+https://github.com/rust-lang/crates.io-index";
+
+/// Rust that links native code or holds assembly, as it reads with whitespace
+/// removed. A match in a comment fails too: the check fails closed, and the crate
+/// is then read and exempted by name.
+const NATIVE_RUST: &[(&str, &str)] = &[
+    ("#[link(", "has a #[link] attribute"),
+    ("#[link_name", "has a #[link_name] attribute"),
+    ("#[link_section", "has a #[link_section] attribute"),
+    ("unsafeextern", "declares foreign functions"),
+    ("extern\"C\"{", "declares foreign functions"),
+    ("extern\"system\"{", "declares foreign functions"),
+    ("asm!(", "holds inline assembly"),
+    ("global_asm!(", "holds assembly"),
+    ("naked_asm!(", "holds assembly"),
+];
+
+/// Native source, assembly and object code, by file extension.
+const NATIVE_FILES: &[&str] = &[
+    "a", "asm", "c", "cc", "cpp", "cxx", "dll", "dylib", "h", "hpp", "lib", "o", "obj", "s", "so",
+];
 
 /// `cargo metadata` for every platform and every feature, of the workspace at
 /// `manifest`, from its committed lockfile: a native dependency behind a feature
@@ -79,10 +105,6 @@ fn exempt(name: &str) -> bool {
     EXEMPT.iter().any(|(n, _)| *n == name)
 }
 
-fn reviewed(name: &str, version: &str) -> bool {
-    REVIEWED.iter().any(|(n, v, _)| *n == name && *v == version)
-}
-
 fn members(meta: &Value) -> BTreeSet<&str> {
     meta["workspace_members"]
         .as_array()
@@ -94,6 +116,13 @@ fn members(meta: &Value) -> BTreeSet<&str> {
 /// build dependencies; never dev-dependencies, which only the tests use) brings
 /// native code, sorted. Empty means the check passes.
 pub fn no_c(meta: &Value, protected: &[&str]) -> Vec<String> {
+    no_c_reviewing(meta, protected, REVIEWED)
+}
+
+/// [`no_c`] with the reviewed list given, so tests can name their own.
+fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)]) -> Vec<String> {
+    let reviewed =
+        |name: &str, version: &str| list.iter().any(|(n, v, _)| *n == name && *v == version);
     let empty = Vec::new();
     let packages: HashMap<&str, &Value> = meta["packages"]
         .as_array()
@@ -150,6 +179,23 @@ pub fn no_c(meta: &Value, protected: &[&str]) -> Vec<String> {
         {
             problems.push(format!("{name} links the native library {links}"));
         }
+        if !workspace.contains(id) {
+            if pkg.and_then(|p| p["source"].as_str()) != Some(CRATES_IO) {
+                problems.push(format!("{name} {version} is not a crates.io crate"));
+            }
+            if !reviewed(&name, &version) {
+                problems.push(format!("{name} {version} has not been reviewed"));
+            }
+        }
+        if !exempt(&name)
+            && let Some(dir) = pkg
+                .and_then(|p| p["manifest_path"].as_str())
+                .and_then(|m| Path::new(m).parent())
+        {
+            for found in native_in(dir) {
+                problems.push(format!("{name} {version}: {found}"));
+            }
+        }
         for target in pkg.and_then(|p| p["targets"].as_array()).unwrap_or(&empty) {
             let kinds = target["kind"].as_array().unwrap_or(&empty);
             for (kind, what) in [
@@ -188,6 +234,61 @@ pub fn no_c(meta: &Value, protected: &[&str]) -> Vec<String> {
     problems.sort();
     problems.dedup();
     problems
+}
+
+/// Every file under a crate's directory that links native code, declares foreign
+/// functions, holds assembly or is native code itself, as "path what", with the
+/// path relative to the crate and '/'-separated. A directory it cannot read is a
+/// finding, never a pass.
+fn native_in(dir: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let entries = match std::fs::read_dir(&d) {
+            Ok(e) => e,
+            Err(e) => {
+                found.push(format!("{} cannot be read: {e}", d.display()));
+                continue;
+            }
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let rel = path
+                .strip_prefix(dir)
+                .unwrap_or(&path)
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            if path.is_dir() {
+                if !matches!(rel.as_str(), "target" | ".git") {
+                    stack.push(path);
+                }
+                continue;
+            }
+            let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase());
+            if let Some(ext) = &ext
+                && NATIVE_FILES.contains(&ext.as_str())
+            {
+                found.push(format!("{rel} is native code"));
+            } else if ext.as_deref() == Some("rs") {
+                let compact: String = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|_| "unreadable".to_string())
+                    .chars()
+                    .filter(|c| !c.is_whitespace())
+                    .collect();
+                if compact == "unreadable" {
+                    found.push(format!("{rel} cannot be read"));
+                }
+                for (pattern, what) in NATIVE_RUST {
+                    if compact.contains(pattern) {
+                        found.push(format!("{rel} {what}"));
+                    }
+                }
+            }
+        }
+    }
+    found
 }
 
 /// Every way unsafe code could get into the workspace, sorted: the workspace not
@@ -277,98 +378,228 @@ pub fn workspace_forbids_unsafe(manifest: &toml::Table) -> bool {
 }
 
 /// Whether a crate root forbids unsafe code with an inner attribute that the
-/// compiler sees. Inner attributes come before the first item, so this reads the
-/// head of the file as Rust does: whitespace, comments (line, block and nested)
-/// and other inner attributes are passed over, and the first item ends the
-/// search. Text inside a comment or a string is never taken for the attribute
-/// (found by Codex review: a line-by-line match accepted one inside `/* */`).
-/// Anything it cannot read counts as absent, so it fails closed.
+/// compiler sees. Inner attributes come before the first item, so this lexes the
+/// head of the file as Rust does (comments, nested comments, string, raw-string,
+/// byte and char literals each become one token or none) and reads each inner
+/// attribute in turn until the first item. Only `forbid(...)` naming the lint
+/// `unsafe_code` itself counts: text in a comment, a string or a `reason` never
+/// does (found by Codex review, twice). Anything it cannot lex fails closed.
 pub fn forbids_unsafe(source: &str) -> bool {
-    let mut s = source.strip_prefix('\u{feff}').unwrap_or(source);
+    let mut src = source.strip_prefix('\u{feff}').unwrap_or(source);
     // A shebang line, which `#![` is not.
-    if s.starts_with("#!") && !s.starts_with("#![") {
-        s = s.find('\n').map_or("", |i| &s[i..]);
+    if src.starts_with("#!") && !src.starts_with("#![") {
+        src = src.find('\n').map_or("", |i| &src[i..]);
     }
+    let mut lex = Lexer {
+        s: src.as_bytes(),
+        i: 0,
+    };
     loop {
-        s = s.trim_start();
-        if let Some(rest) = s.strip_prefix("//") {
-            s = rest.find('\n').map_or("", |i| &rest[i..]);
-        } else if s.starts_with("/*") {
-            match skip_block_comment(s) {
-                Some(rest) => s = rest,
-                None => return false,
+        let (Some(Tok::Punct(b'#')), Some(Tok::Punct(b'!')), Some(Tok::Punct(b'['))) =
+            (lex.next(), lex.next(), lex.next())
+        else {
+            return false; // the first item, the end of the file, or something unreadable
+        };
+        // The attribute's tokens, up to its matching ']'.
+        let mut body = Vec::new();
+        let mut depth = 1usize;
+        loop {
+            let tok = match lex.next() {
+                Some(Tok::Bad) | None => return false,
+                Some(tok) => tok,
+            };
+            match tok {
+                Tok::Punct(b'[') => depth += 1,
+                Tok::Punct(b']') => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
             }
-        } else if s.starts_with("#![") {
-            match take_attribute(s) {
-                Some((attr, _)) if is_forbid_unsafe(attr) => return true,
-                Some((_, rest)) => s = rest,
-                None => return false,
-            }
-        } else {
-            return false;
+            body.push(tok);
+        }
+        if is_forbid_unsafe(&body) {
+            return true;
         }
     }
 }
 
-/// The text after a block comment that `s` starts with, nested comments included.
-fn skip_block_comment(s: &str) -> Option<&str> {
-    let mut depth = 0usize;
-    let mut i = 0;
-    let b = s.as_bytes();
-    while i + 1 < b.len() {
-        match (b[i], b[i + 1]) {
-            (b'/', b'*') => {
-                depth += 1;
-                i += 2;
-            }
-            (b'*', b'/') => {
-                depth -= 1;
-                i += 2;
-                if depth == 0 {
-                    return Some(&s[i..]);
-                }
-            }
-            _ => i += 1,
-        }
+/// Whether an attribute's tokens are `forbid(...)` with `unsafe_code` as one of
+/// its comma-separated arguments.
+fn is_forbid_unsafe(body: &[Tok]) -> bool {
+    let [Tok::Word(w), Tok::Punct(b'('), args @ .., Tok::Punct(b')')] = body else {
+        return false;
+    };
+    if w != "forbid" {
+        return false;
     }
-    None
-}
-
-/// The inner attribute `s` starts with (`#![` to its closing `]`), and the text
-/// after it. Brackets inside string literals don't count.
-fn take_attribute(s: &str) -> Option<(&str, &str)> {
-    let b = s.as_bytes();
     let mut depth = 0usize;
-    let mut i = 2; // at the '['
-    while i < b.len() {
-        match b[i] {
-            b'"' => {
-                i += 1;
-                while i < b.len() && b[i] != b'"' {
-                    i += if b[i] == b'\\' { 2 } else { 1 };
+    let mut arg: Vec<&Tok> = Vec::new();
+    for tok in args.iter().chain(std::iter::once(&Tok::Punct(b','))) {
+        match tok {
+            Tok::Punct(b'(' | b'[' | b'{') => depth += 1,
+            Tok::Punct(b')' | b']' | b'}') => depth = depth.saturating_sub(1),
+            Tok::Punct(b',') if depth == 0 => {
+                if matches!(arg.as_slice(), [Tok::Word(l)] if l == "unsafe_code") {
+                    return true;
                 }
-            }
-            b'[' => depth += 1,
-            b']' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some((&s[..=i], &s[i + 1..]));
-                }
+                arg.clear();
+                continue;
             }
             _ => {}
         }
-        i += 1;
+        arg.push(tok);
     }
-    None
+    false
 }
 
-/// Whether one inner attribute is `forbid(...)` naming `unsafe_code`.
-fn is_forbid_unsafe(attr: &str) -> bool {
-    let compact: String = attr.chars().filter(|c| !c.is_whitespace()).collect();
-    compact
-        .strip_prefix("#![forbid(")
-        .and_then(|r| r.strip_suffix(")]"))
-        .is_some_and(|lints| lints.split(',').any(|l| l == "unsafe_code"))
+/// One token of Rust source, as far as reading inner attributes needs.
+#[derive(Clone, Debug, PartialEq)]
+enum Tok {
+    /// An identifier, keyword, number or lifetime.
+    Word(String),
+    /// A string, raw string, byte string or char literal; its content never matters here.
+    Literal,
+    /// One punctuation byte.
+    Punct(u8),
+    /// Something that cannot be lexed: an unterminated comment or literal.
+    Bad,
+}
+
+struct Lexer<'a> {
+    s: &'a [u8],
+    i: usize,
+}
+
+impl Lexer<'_> {
+    fn peek(&self, k: usize) -> Option<u8> {
+        self.s.get(self.i + k).copied()
+    }
+
+    /// The next token, skipping whitespace and comments; None at the end.
+    fn next(&mut self) -> Option<Tok> {
+        loop {
+            let c = self.peek(0)?;
+            if c.is_ascii_whitespace() {
+                self.i += 1;
+            } else if c == b'/' && self.peek(1) == Some(b'/') {
+                while self.peek(0).is_some_and(|c| c != b'\n') {
+                    self.i += 1;
+                }
+            } else if c == b'/' && self.peek(1) == Some(b'*') {
+                if !self.block_comment() {
+                    return Some(Tok::Bad);
+                }
+            } else {
+                break;
+            }
+        }
+        let c = self.peek(0)?;
+        // Literal prefixes: b"", br"", c"", cr"", r"", r#""#, b''.
+        let prefix = match (c, self.peek(1), self.peek(2)) {
+            (b'b' | b'c', Some(b'r'), Some(b'"' | b'#')) => Some(2),
+            (b'r', Some(b'"' | b'#'), _)
+            | (b'b' | b'c', Some(b'"'), _)
+            | (b'b', Some(b'\''), _) => Some(1),
+            _ => None,
+        };
+        if let Some(n) = prefix {
+            let raw = self.s[self.i..self.i + n].contains(&b'r');
+            let start = self.i;
+            self.i += n;
+            if raw {
+                // r#ident is a raw identifier, not a string.
+                let hashes = self.s[self.i..].iter().take_while(|&&b| b == b'#').count();
+                if self.peek(hashes) != Some(b'"') {
+                    self.i = start;
+                } else {
+                    self.i += hashes + 1;
+                    return Some(self.raw_string_end(hashes));
+                }
+            } else if self.peek(0) == Some(b'"') {
+                self.i += 1;
+                return Some(self.quoted_end(b'"'));
+            } else {
+                self.i += 1;
+                return Some(self.quoted_end(b'\''));
+            }
+        }
+        if c == b'"' {
+            self.i += 1;
+            return Some(self.quoted_end(b'"'));
+        }
+        if c == b'\'' {
+            // A char literal ('x', '\n', '\u{..}') or a lifetime ('a).
+            if self.peek(1) == Some(b'\\') || self.peek(2) == Some(b'\'') {
+                self.i += 1;
+                return Some(self.quoted_end(b'\''));
+            }
+            self.i += 1;
+            return Some(Tok::Word(format!("'{}", self.word())));
+        }
+        if c == b'_' || c.is_ascii_alphanumeric() || c >= 0x80 {
+            return Some(Tok::Word(self.word()));
+        }
+        self.i += 1;
+        Some(Tok::Punct(c))
+    }
+
+    fn word(&mut self) -> String {
+        let start = self.i;
+        while self
+            .peek(0)
+            .is_some_and(|c| c == b'_' || c.is_ascii_alphanumeric() || c >= 0x80)
+        {
+            self.i += 1;
+        }
+        String::from_utf8_lossy(&self.s[start..self.i]).into_owned()
+    }
+
+    fn block_comment(&mut self) -> bool {
+        let mut depth = 0usize;
+        while let Some(c) = self.peek(0) {
+            if c == b'/' && self.peek(1) == Some(b'*') {
+                depth += 1;
+                self.i += 2;
+            } else if c == b'*' && self.peek(1) == Some(b'/') {
+                depth -= 1;
+                self.i += 2;
+                if depth == 0 {
+                    return true;
+                }
+            } else {
+                self.i += 1;
+            }
+        }
+        false
+    }
+
+    /// Past a quoted literal's closing quote, escapes honoured.
+    fn quoted_end(&mut self, quote: u8) -> Tok {
+        while let Some(c) = self.peek(0) {
+            self.i += 1;
+            if c == b'\\' {
+                self.i += 1;
+            } else if c == quote {
+                return Tok::Literal;
+            }
+        }
+        Tok::Bad
+    }
+
+    /// Past a raw string's closing quote and its `hashes` '#'s.
+    fn raw_string_end(&mut self, hashes: usize) -> Tok {
+        while let Some(c) = self.peek(0) {
+            self.i += 1;
+            if c == b'"' && (0..hashes).all(|k| self.peek(k) == Some(b'#')) {
+                self.i += hashes;
+                return Tok::Literal;
+            }
+        }
+        Tok::Bad
+    }
 }
 
 #[cfg(test)]
@@ -381,8 +612,8 @@ mod tests {
             "workspace_members": ["lib"],
             "packages": [
                 {"id": "lib", "name": "qso-graph-trust", "version": "0.1.0", "source": null, "links": null, "targets": [{"kind": ["lib"]}]},
-                {"id": "mid", "name": "middle", "version": "1.0.0", "source": "registry", "links": null, "targets": [{"kind": ["lib"]}]},
-                {"id": "cc", "name": "cc", "version": "1.2.0", "source": "registry", "links": null, "targets": [{"kind": ["lib"]}]}
+                {"id": "mid", "name": "middle", "version": "1.0.0", "source": CRATES_IO, "links": null, "targets": [{"kind": ["lib"]}]},
+                {"id": "cc", "name": "cc", "version": "1.2.0", "source": CRATES_IO, "links": null, "targets": [{"kind": ["lib"]}]}
             ],
             "resolve": {"nodes": [
                 {"id": "lib", "deps": [{"pkg": "mid", "dep_kinds": [{"kind": null}]}]},
@@ -394,43 +625,83 @@ mod tests {
 
     #[test]
     fn a_build_script_or_proc_macro_must_be_reviewed_by_name_and_version() {
+        // Unreviewed, a crate with a build script fails twice: as an outside crate and for the script.
         let mut g = graph(json!("dev"));
         g["packages"][1]["targets"] = json!([{"kind": ["lib"]}, {"kind": ["custom-build"]}]);
         assert_eq!(
             no_c(&g, PROTECTED),
-            vec!["middle 1.0.0 has a build script that has not been reviewed"]
+            vec![
+                "middle 1.0.0 has a build script that has not been reviewed",
+                "middle 1.0.0 has not been reviewed",
+            ]
         );
         g["packages"][1]["targets"] = json!([{"kind": ["proc-macro"]}]);
         assert_eq!(
             no_c(&g, PROTECTED),
-            vec!["middle 1.0.0 has a procedural macro that has not been reviewed"]
+            vec![
+                "middle 1.0.0 has a procedural macro that has not been reviewed",
+                "middle 1.0.0 has not been reviewed",
+            ]
         );
+        // Reviewed, it passes: the review covers the script.
+        assert!(check(&g, PROTECTED).is_empty());
     }
 
     #[test]
     fn a_protected_crate_outside_the_workspace_fails() {
         let mut g = graph(json!("dev"));
         g["workspace_members"] = json!([]);
+        assert!(
+            check(&g, PROTECTED)
+                .contains(&"protected crate qso-graph-trust is not a workspace member".to_string()),
+            "{:?}",
+            check(&g, PROTECTED)
+        );
+    }
+
+    /// The test graph's outside crates, reviewed, so each test sees only its own finding.
+    const TEST_REVIEWED: &[(&str, &str, &str)] =
+        &[("middle", "1.0.0", "test"), ("cc", "1.2.0", "test")];
+
+    fn check(g: &Value, protected: &[&str]) -> Vec<String> {
+        no_c_reviewing(g, protected, TEST_REVIEWED)
+    }
+
+    #[test]
+    fn an_outside_crate_must_be_from_crates_io_and_reviewed() {
+        let mut g = graph(json!("dev"));
         assert_eq!(
             no_c(&g, PROTECTED),
-            vec!["protected crate qso-graph-trust is not a workspace member"]
+            vec!["middle 1.0.0 has not been reviewed"]
+        );
+        g["packages"][1]["source"] = json!("git+https://example.invalid/middle");
+        assert_eq!(
+            check(&g, PROTECTED),
+            vec!["middle 1.0.0 is not a crates.io crate"]
+        );
+        // A reviewed name at another version is new code, so not reviewed.
+        g["packages"][1]["source"] = json!(CRATES_IO);
+        g["packages"][1]["version"] = json!("1.0.1");
+        assert_eq!(
+            check(&g, PROTECTED),
+            vec!["middle 1.0.1 has not been reviewed"]
         );
     }
 
     #[test]
     fn a_build_script_compiling_c_two_levels_down_is_caught() {
-        let problems = no_c(&graph(json!("build")), PROTECTED);
+        let problems = check(&graph(json!("build")), PROTECTED);
         assert_eq!(problems, vec!["middle builds native code through cc"]);
     }
 
     #[test]
     fn a_dev_dependency_is_not_shipped_so_not_caught() {
-        assert!(no_c(&graph(json!("dev")), PROTECTED).is_empty());
+        assert!(check(&graph(json!("dev")), PROTECTED).is_empty());
     }
 
     #[test]
     fn a_missing_protected_crate_fails_rather_than_checking_nothing() {
-        let problems = no_c(&graph(json!("build")), &["renamed"]);
+        let problems = check(&graph(json!("build")), &["renamed"]);
         assert_eq!(
             problems,
             vec!["protected crate renamed is not in this workspace"]
@@ -459,6 +730,38 @@ mod tests {
         ));
         assert!(!forbids_unsafe("fn f() {}\n#![forbid(unsafe_code)]\n"));
         assert!(!forbids_unsafe("/* never closed\n#![forbid(unsafe_code)]"));
+    }
+
+    #[test]
+    fn tricks_found_by_the_second_review_are_not_the_attribute() {
+        // A raw string whose text looks like an attribute (Codex review, round 2).
+        assert!(!forbids_unsafe(
+            "#![doc = r#\"\"\n]\n#![forbid(unsafe_code)]\n\"#]\npub fn f() {}"
+        ));
+        // Brackets inside a comment inside an attribute.
+        assert!(!forbids_unsafe(
+            "#![doc = \"x\" /* ] */]\npub fn f() {}\n#![forbid(unsafe_code)]"
+        ));
+        assert!(!forbids_unsafe(
+            "#![cfg_attr(any(), doc = \"/*]\"\n)] fn f() {} /* #![forbid(unsafe_code)] */"
+        ));
+        // The lint's name in a comment or a reason, not as the lint.
+        assert!(!forbids_unsafe("#![forbid(/*,unsafe_code,*/ dead_code)]"));
+        assert!(!forbids_unsafe(
+            "#![forbid(dead_code, reason = \",unsafe_code,\")]"
+        ));
+        assert!(!forbids_unsafe("#![forbid(unsafe_code = 1)]"));
+        assert!(!forbids_unsafe("#![cfg_attr(test, forbid(unsafe_code))]"));
+        // Char and byte literals don't derail it, either way.
+        assert!(forbids_unsafe(
+            "#![doc = '[']\n#![doc = b']']\n#![forbid(unsafe_code)]"
+        ));
+        assert!(forbids_unsafe(
+            "#![doc = br##\"]\"#\"##]\n#![forbid(unsafe_code)]"
+        ));
+        assert!(forbids_unsafe(
+            "#![forbid(unsafe_code, reason = \"QGT holds keys\")]"
+        ));
     }
 
     #[test]

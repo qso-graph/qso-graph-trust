@@ -11,6 +11,10 @@ name = "planted-commented"
 version = "0.0.0"
 
 [[package]]
+name = "planted-extern-block"
+version = "0.0.0"
+
+[[package]]
 name = "planted-in-a-string"
 version = "0.0.0"
 
@@ -31,10 +35,16 @@ name = "planted-optional-native"
 version = "0.0.0"
 
 [[package]]
+name = "planted-outside"
+version = "0.0.0"
+
+[[package]]
 name = "qso-graph-trust"
 version = "0.0.0"
 dependencies = [
  "planted-build-script",
+ "planted-extern-block",
  "planted-native",
  "planted-optional-native",
+ "planted-outside",
 ]

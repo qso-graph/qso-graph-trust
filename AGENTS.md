@@ -15,9 +15,11 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
 
 ## Rules (each one has a test you can apply)
 
-- **No C or C++ in the library.** Nothing in `qso-graph-trust`'s dependency tree, on any platform,
-  links a native library or builds C, C++ or assembly. *Test: `cargo xtask policy`.* An exemption names
-  one exact crate with a decision record in `docs/decisions/`, never a pattern.
+- **No C or C++ in the library.** Nothing in `qso-graph-trust`'s dependency tree, on any platform or feature,
+  links a native library or builds C, C++ or assembly, and every crate it takes from outside the
+  workspace comes from crates.io and is reviewed by exact name and version before it is added
+  (`REVIEWED` in `xtask/src/lib.rs`). *Test: `cargo xtask policy`.* An exemption names one exact
+  crate with a decision record in `docs/decisions/`, never a pattern.
 - **No unsafe code.** Every crate root says `#![forbid(unsafe_code)]` and every crate takes the
   workspace's lints. *Test: `cargo xtask policy`.*
 - **The key never leaves the OS credential store** except as a signature, or as a backup QGT encrypts

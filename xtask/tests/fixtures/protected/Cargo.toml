@@ -9,6 +9,8 @@ publish = false
 [dependencies]
 planted-native = { path = "../native" }
 planted-build-script = { path = "../build-script" }
+planted-extern-block = { path = "../extern-block" }
+planted-outside = { path = "../outside" }
 planted-optional-native = { path = "../optional-native", optional = true }
 
 [features]
