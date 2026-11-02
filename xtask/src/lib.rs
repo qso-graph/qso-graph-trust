@@ -569,14 +569,23 @@ const REFUSED_IDENTS: &[(&str, &str)] = &[
 /// makes a module of any file.
 pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
     use proc_macro2::TokenTree;
+    const DANGLING: &str = "has a # that does not begin an attribute";
     let mut found = Vec::new();
     // Whether the last token was `#` (an outer attribute) or `#` then `!` (inner).
     let mut after_hash = false;
     let mut last_hash = false;
     for tree in tokens {
+        // In Rust a `#` only ever begins an attribute, `#[...]` or `#![...]`. One
+        // followed by anything else is a piece a macro could join to brackets
+        // passed separately, assembling `#[path]` where no scan sees it (found by
+        // Codex review: `# $a` with `$a` = `[path = "..."]`).
+        let pending = after_hash || last_hash;
         let mut hash_now = false;
         match &tree {
             TokenTree::Ident(i) => {
+                if pending {
+                    found.push(DANGLING);
+                }
                 // Raw identifiers name the same thing: `r#include` is `include`.
                 let name = i.to_string();
                 let name = name.strip_prefix("r#").unwrap_or(&name);
@@ -587,37 +596,49 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                 last_hash = false;
                 continue;
             }
-            TokenTree::Punct(p) if p.as_char() == '#' => hash_now = true,
             TokenTree::Punct(p) if p.as_char() == '!' && last_hash => {
                 // `#!`: the attribute's brackets come next.
                 after_hash = true;
                 last_hash = false;
                 continue;
             }
+            TokenTree::Punct(p) => {
+                if pending {
+                    found.push(DANGLING);
+                }
+                hash_now = p.as_char() == '#';
+            }
             TokenTree::Group(g) => {
+                let attribute = pending && g.delimiter() == proc_macro2::Delimiter::Bracket;
+                if pending && !attribute {
+                    found.push(DANGLING);
+                }
                 // `#[path = "..."]` loads a module from any file, `.rs` or not,
                 // which this scan would not read (found by Codex review); the
                 // workspace's crates do not need it, so it is refused. Only an
-                // attribute: an array `[path]` is not one.
-                let attribute =
-                    (after_hash || last_hash) && g.delimiter() == proc_macro2::Delimiter::Bracket;
-                // `path = ...` anywhere in an attribute, so inside `cfg_attr` too
-                // (found by Codex review).
+                // attribute: an array `[path]` is not one. `path = ...` anywhere in
+                // an attribute, so inside `cfg_attr` too.
                 if attribute && assigns_path(g.stream()) {
                     found.push("uses #[path]");
                 }
                 // An attribute holding a macro variable, `#[$name = ...]` or
                 // `#[cfg_attr(..., $name = ...)]`, could be made `path` by the caller.
-                // Anywhere in it, so inside `cfg_attr` too (found by Codex review).
                 if attribute && has_dollar(g.stream()) {
                     found.push("builds an attribute from a macro variable");
                 }
                 found.extend(unsafe_tokens(g.stream()));
             }
-            _ => {}
+            TokenTree::Literal(_) => {
+                if pending {
+                    found.push(DANGLING);
+                }
+            }
         }
         after_hash = false;
         last_hash = hash_now;
+    }
+    if after_hash || last_hash {
+        found.push(DANGLING);
     }
     found
 }
@@ -1469,6 +1490,22 @@ pub fn proof() {}
         assert_eq!(
             scan("macro_rules! m { ($a:ident) => { #[$a = \"payload.inc\"] mod hidden; } }"),
             vec!["builds an attribute from a macro variable"]
+        );
+        // A # assembled with brackets by a macro (Codex review, round 15).
+        let assembled = scan(
+            "macro_rules! load { ($a:tt) => { # $a pub mod hidden; }; } load!([path = \"hidden.md\"]);",
+        );
+        assert!(
+            assembled.contains(&"has a # that does not begin an attribute"),
+            "{assembled:?}"
+        );
+        assert!(
+            scan("m!(#, [path = \"x\"]);").contains(&"has a # that does not begin an attribute")
+        );
+        // Attributes, inner and outer, raw strings and raw identifiers are not dangling.
+        assert!(
+            scan("#![forbid(unsafe_code)] #[derive(Debug)] struct S; const R: &str = r#\"x\"#;")
+                .is_empty()
         );
         // Inside cfg_attr (Codex review, round 14).
         assert_eq!(

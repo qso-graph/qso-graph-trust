@@ -106,6 +106,8 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
         // A crate root that is not a .rs file.
         lib_root(&meta, "planted-inc-root") + " is a crate root that is not a .rs file",
         fixture(&meta, "planted-inc-root", "src/library.inc") + " is not a .rs, .toml or .md file",
+        // A lone # a macro joins to brackets passed separately: #[path] assembled.
+        lib_root(&meta, "planted-assembled") + " has a # that does not begin an attribute",
         // A source file that is not UTF-8: a finding, not empty text that scans clean.
         fixture(&meta, "planted-decoy", "src/not_utf8.rs")
             + " cannot be read as UTF-8 text: stream did not contain valid UTF-8",
