@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 [alias]
-# The repository's own checks: `cargo xtask policy` (see xtask/src/main.rs).
-xtask = "run --quiet --package xtask --"
+# The repository's own checks: `cargo xtask policy` (see xtask/src/main.rs). --locked, so a manifest
+# changed without its lockfile fails here instead of rewriting Cargo.lock before it is checked and
+# audited (found by Codex review).
+xtask = "run --quiet --locked --package xtask --"
