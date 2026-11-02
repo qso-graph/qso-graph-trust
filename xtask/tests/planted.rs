@@ -73,6 +73,9 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
             "{} does not say #![forbid(unsafe_code)]",
             lib_root(&meta, "planted-no-forbid")
         ),
+        // unsafe in code only a release build compiles, and in an extern block.
+        format!("{} uses unsafe", lib_root(&meta, "planted-cfg-gated")),
+        format!("{} uses unsafe", lib_root(&meta, "planted-extern-block")),
         // The words "[lints] workspace = true" are there, but inside a string.
         "planted-in-a-string does not take the workspace's lints".to_string(),
         "planted-no-lints does not take the workspace's lints".to_string(),

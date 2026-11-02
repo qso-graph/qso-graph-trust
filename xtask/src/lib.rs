@@ -389,6 +389,16 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
             Some(Err(e)) => problems.push(e),
             None => problems.push(format!("{pkg_name} has no manifest path")),
         }
+        // Every source file of the crate, whatever cfg or feature would compile it:
+        // code that no CI build compiles (`#[cfg(not(debug_assertions))]`) is still
+        // code a release build of a consumer compiles, with this crate's lints
+        // capped (found by Codex review).
+        if let Some(dir) = pkg["manifest_path"]
+            .as_str()
+            .and_then(|m| Path::new(m).parent())
+        {
+            problems.extend(unsafe_tokens_in(dir));
+        }
         for target in pkg["targets"].as_array().unwrap_or(&empty) {
             let Some(src) = target["src_path"].as_str() else {
                 continue;
@@ -402,6 +412,81 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
     }
     problems.sort();
     problems
+}
+
+/// Every `.rs` file under a crate's directory that holds the token `unsafe` or a
+/// code `include!`, read as Rust tokens: strings and comments never count, and
+/// cfg, features and macro bodies make no difference. A subdirectory holding its
+/// own `Cargo.toml` is another package and is left to its own check (the planted
+/// fixtures are such a package). A file that does not tokenize is a finding.
+pub fn unsafe_tokens_in(dir: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else {
+            found.push(format!("{} cannot be read", d.display()));
+            continue;
+        };
+        for entry in entries {
+            let Ok(entry) = entry else {
+                found.push(format!("{} has an entry that cannot be read", d.display()));
+                continue;
+            };
+            let path = entry.path();
+            let Ok(kind) = entry.file_type() else {
+                found.push(format!("{} cannot be read", path.display()));
+                continue;
+            };
+            if kind.is_dir() {
+                let own_package = path.join("Cargo.toml").exists();
+                let output = d == dir && entry.file_name() == "target";
+                if !own_package && !output {
+                    stack.push(path);
+                }
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                match text.parse::<proc_macro2::TokenStream>() {
+                    Ok(tokens) => {
+                        for what in unsafe_tokens(tokens) {
+                            found.push(format!("{} {what}", path.display()));
+                        }
+                    }
+                    Err(e) => {
+                        found.push(format!("{} does not tokenize as Rust: {e}", path.display()))
+                    }
+                }
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+/// What in a token stream could bring unsafe code: the keyword `unsafe` anywhere
+/// (blocks, functions, traits, impls, extern blocks, `#[unsafe(...)]`), and
+/// `include!`, which compiles another file's code in place.
+pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
+    use proc_macro2::TokenTree;
+    let mut found = Vec::new();
+    let mut previous_include = false;
+    for tree in tokens {
+        match tree {
+            TokenTree::Ident(i) => {
+                if i == "unsafe" {
+                    found.push("uses unsafe");
+                }
+                previous_include = i == "include";
+                continue;
+            }
+            TokenTree::Punct(p) if p.as_char() == '!' && previous_include => {
+                found.push("uses include!");
+            }
+            TokenTree::Group(g) => found.extend(unsafe_tokens(g.stream())),
+            _ => {}
+        }
+        previous_include = false;
+    }
+    found
 }
 
 fn read_toml(path: &Path) -> Result<toml::Table, String> {
@@ -1191,6 +1276,33 @@ pub fn proof() {}
             assert_eq!(env(&[(var, "/x")]).len(), 1, "{var}");
         }
         assert_eq!(env(&[("RUSTFLAGS", "@/tmp/ci.rsp")]).len(), 1);
+    }
+
+    #[test]
+    fn unsafe_is_found_whatever_would_compile_it() {
+        let scan = |s: &str| unsafe_tokens(s.parse().expect("tokens"));
+        // Code no CI build compiles is still code (Codex review, round 11).
+        assert_eq!(
+            scan(
+                "#[cfg(not(debug_assertions))] pub fn f() -> u8 { unsafe { core::ptr::read(&7) } }"
+            ),
+            vec!["uses unsafe"]
+        );
+        assert_eq!(
+            scan("macro_rules! m { () => { unsafe {} } }"),
+            vec!["uses unsafe"]
+        );
+        assert_eq!(
+            scan("#[unsafe(no_mangle)] pub fn f() {}"),
+            vec!["uses unsafe"]
+        );
+        assert_eq!(
+            scan("include!(\"../elsewhere.rs\");"),
+            vec!["uses include!"]
+        );
+        // Words in strings and comments are not tokens.
+        assert!(scan("// unsafe\nconst S: &str = \"unsafe { }\"; fn r#unsafe() {}").is_empty());
+        assert!(scan("const B: &[u8] = include_bytes!(\"x.bin\");").is_empty());
     }
 
     #[test]

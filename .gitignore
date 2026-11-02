@@ -1,4 +1,2 @@
 /target
 **/target
-# Generator scratch: only the corpus itself is committed.
-/tests/corpus/.work

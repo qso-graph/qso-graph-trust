@@ -17,14 +17,18 @@
 # never part of QGT).
 set -euo pipefail
 
-root=$(cd "$(dirname "$0")/.." && pwd)
-out="$root/tests/corpus/pki"
-work="$root/tests/corpus/.work"
-rm -rf "$work"
-mkdir -p "$out" "$work"
-trap 'rm -rf "$work"' EXIT
+root=$(cd "$(dirname "$0")/.." && pwd -P)
+dest="$root/tests/corpus/pki"
 
 openssl version | grep -q '^OpenSSL 3\.' || { echo "needs OpenSSL 3" >&2; exit 1; }
+
+# Everything is made in a fresh directory of its own, removed when done, so the script never deletes
+# or writes through anything it did not create; the corpus is replaced only at the end, by renaming
+# (found by Codex review).
+work=$(mktemp -d)
+trap 'rm -rf -- "$work"' EXIT
+out="$work/stage"
+mkdir "$out"
 
 CALL=QG0TEST          # Q prefixes are never issued to stations
 DXCC=291              # United States, in LoTW's numbering
@@ -69,7 +73,7 @@ openssl req -new -x509 -key "$work/root.key" -days 36500 -sha256 \
 openssl genpkey -quiet -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$work/ca.key"
 openssl req -new -key "$work/ca.key" -subj "/O=QSO Graph Trust TEST ONLY/OU=Not ARRL/CN=QGT Test CA" \
   -out "$work/ca.csr"
-openssl x509 -req -in "$work/ca.csr" -CA "$out/root.pem" -CAkey "$work/root.key" -CAcreateserial \
+openssl x509 -req -in "$work/ca.csr" -CA "$out/root.pem" -CAkey "$work/root.key" -CAserial "$work/root.srl" -CAcreateserial \
   -days 36500 -sha256 -extfile "$work/ext.cnf" -extensions ca -out "$out/ca.pem"
 
 # One operator certificate per key size: TQSL generates 1024-bit keys, and imported ones can be larger.
@@ -79,7 +83,7 @@ for bits in 1024 2048; do
   openssl req -new -config "$work/req.cnf" -key "$out/$name.key.pem" \
     -subj "/AROcallsign=$CALL/CN=QGT Test Operator $bits/emailAddress=test@example.invalid" \
     -out "$work/$name.csr"
-  openssl x509 -req -in "$work/$name.csr" -CA "$out/ca.pem" -CAkey "$work/ca.key" -CAcreateserial \
+  openssl x509 -req -in "$work/$name.csr" -CA "$out/ca.pem" -CAkey "$work/ca.key" -CAserial "$work/ca.srl" -CAcreateserial \
     -days 36500 -sha256 -extfile "$work/ext.cnf" -extensions user -out "$out/$name.pem"
 
   # The .tq6 ARRL would send: gzipped XML (gzip -n, so no name or time inside). Written as a file
@@ -147,5 +151,17 @@ for bits in 1024 2048; do
       | cmp -s - "$out/${part#*:}.pem" || { echo "user-$bits.tq6: <${part%%:*}> is not ${part#*:}.pem" >&2; exit 1; }
   done
 done
-rm -f "$out"/*.srl
-echo "made $(find "$out" -type f | wc -l) files in tests/corpus/pki"
+# Install: the destination must really be tests/corpus/pki inside this repository, not a link to
+# somewhere else, and each file is renamed into place, which replaces a link there rather than
+# writing through it.
+[ ! -L "$root/tests" ] && [ ! -L "$root/tests/corpus" ] && [ ! -L "$dest" ] \
+  || { echo "tests/corpus/pki or a folder above it is a link: refusing to write" >&2; exit 1; }
+mkdir -p "$dest"
+case "$(cd "$dest" && pwd -P)" in
+  "$root/tests/corpus/pki") ;;
+  *) echo "tests/corpus/pki resolves outside the repository: refusing to write" >&2; exit 1 ;;
+esac
+for f in "$out"/*; do
+  mv -f -- "$f" "$dest/"
+done
+echo "made $(find "$dest" -maxdepth 1 -type f | wc -l) files in tests/corpus/pki"
