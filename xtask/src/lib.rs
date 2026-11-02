@@ -19,7 +19,7 @@
 
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, VecDeque};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The crates that hold the key, the signing and the file parsers.
@@ -454,6 +454,19 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
                     ".cargo/config.toml has [{key}]: only [alias] is allowed"
                 ));
             }
+            // An alias can pass any flag (found by Codex review), so the one alias is
+            // exactly the one this repository needs.
+            let want: toml::Table =
+                [("xtask".to_string(), toml::Value::String(XTASK_ALIAS.into()))]
+                    .into_iter()
+                    .collect();
+            if let Some(alias) = t.get("alias")
+                && alias.as_table() != Some(&want)
+            {
+                problems.push(format!(
+                    ".cargo/config.toml's [alias] must be exactly xtask = \"{XTASK_ALIAS}\""
+                ));
+            }
         }
         Err(e) => problems.push(e),
     }
@@ -484,43 +497,159 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
             let in_workflows = d.ends_with(Path::new(".github").join("workflows"));
             if in_workflows {
                 let text = std::fs::read_to_string(&path).unwrap_or_default();
-                for word in ["cap-lints", "force-warn", "unsafe_code"] {
+                for word in WORKFLOW_REFUSED {
                     if text.contains(word) {
                         problems.push(format!("workflow {name} mentions {word}"));
+                    }
+                }
+                // RUSTFLAGS only as the one workflow-wide line; a job or step setting
+                // it would not reach this check's own environment.
+                for line in text.lines().filter(|l| l.contains("RUSTFLAGS")) {
+                    if line.trim() != "RUSTFLAGS: -D warnings" {
+                        problems.push(format!("workflow {name} sets RUSTFLAGS: {}", line.trim()));
                     }
                 }
             }
         }
     }
-    for (var, value) in std::env::vars() {
-        let flags = var == "RUSTFLAGS"
-            || var == "CARGO_ENCODED_RUSTFLAGS"
-            || var == "CARGO_BUILD_RUSTFLAGS"
-            || (var.starts_with("CARGO_TARGET_") && var.ends_with("_RUSTFLAGS"));
-        if flags && flags_weaken_unsafe(&value) {
-            problems.push(format!("{var} weakens lints: {value}"));
+    problems.extend(env_problems(std::env::vars()));
+    problems.sort();
+    problems
+}
+
+/// The one alias the repository's Cargo configuration may hold.
+pub const XTASK_ALIAS: &str = "run --quiet --locked --package xtask --";
+
+/// Words no workflow may contain: each is a way to hand the compiler flags,
+/// another configuration, another compiler or a linker argument that this
+/// check would not see (found by Codex review). Failing on the word, even in a
+/// comment, fails closed.
+const WORKFLOW_REFUSED: &[&str] = &[
+    "cap-lints",
+    "force-warn",
+    "unsafe_code",
+    "--config",
+    "RUSTC",
+    "cargo rustc",
+    "CARGO_BUILD",
+    "CARGO_TARGET",
+    "CARGO_ENCODED",
+    "link-arg",
+];
+
+/// Every variable in an environment that would change how this repository is
+/// compiled beyond the allowed lint flags: flags outside [`flags_allowed`], or a
+/// different compiler, wrapper or linker (found by Codex review: wrappers and
+/// response files reach rustc without passing through RUSTFLAGS's words).
+pub fn env_problems(vars: impl IntoIterator<Item = (String, String)>) -> Vec<String> {
+    let mut problems = Vec::new();
+    for (var, value) in vars {
+        let rustflags = matches!(
+            var.as_str(),
+            "RUSTFLAGS" | "CARGO_ENCODED_RUSTFLAGS" | "CARGO_BUILD_RUSTFLAGS"
+        ) || (var.starts_with("CARGO_TARGET_") && var.ends_with("_RUSTFLAGS"));
+        let compiler = matches!(
+            var.as_str(),
+            "RUSTC" | "RUSTC_WRAPPER" | "RUSTC_WORKSPACE_WRAPPER" | "RUSTC_LINKER"
+        ) || (var.starts_with("CARGO_BUILD_")
+            && !matches!(var.as_str(), "CARGO_BUILD_JOBS" | "CARGO_BUILD_TARGET_DIR"))
+            || (var.starts_with("CARGO_TARGET_") && var != "CARGO_TARGET_DIR");
+        if rustflags {
+            if !flags_allowed(&value) {
+                problems.push(format!("{var} has flags beyond lint levels: {value}"));
+            }
+        } else if compiler {
+            problems.push(format!(
+                "{var} changes the compiler, wrapper or linker: {value}"
+            ));
         }
     }
     problems.sort();
     problems
 }
 
-/// Whether compiler flags cap lints or lower `unsafe_code` below forbid.
-pub fn flags_weaken_unsafe(flags: &str) -> bool {
+/// Whether compiler flags are only lint levels (`-D`, `-W`, `-A` and their long
+/// forms, each naming a lint), none of them `unsafe_code`. Anything else fails:
+/// a lint cap, a response file (`@path`), a native library (`-l`), a codegen or
+/// linker option, an unstable flag. An allowlist, because each list of refused
+/// flags so far had a way around it (found by Codex review).
+pub fn flags_allowed(flags: &str) -> bool {
     let words: Vec<&str> = flags
         .split(|c: char| c.is_whitespace() || c == '\u{1f}')
         .filter(|w| !w.is_empty())
         .collect();
-    words.iter().enumerate().any(|(i, w)| {
-        let next = words.get(i + 1).copied().unwrap_or("");
-        w.starts_with("--cap-lints")
-            || w.starts_with("--force-warn")
-            || matches!(*w, "-A" | "-W" | "--allow" | "--warn") && next == "unsafe_code"
-            || matches!(
-                *w,
-                "-Aunsafe_code" | "-Wunsafe_code" | "--allow=unsafe_code" | "--warn=unsafe_code"
-            )
-    })
+    let lint = |l: &str| {
+        !l.is_empty()
+            && l != "unsafe_code"
+            && l.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ':')
+    };
+    let mut i = 0;
+    while i < words.len() {
+        let w = words[i];
+        if matches!(w, "-D" | "-W" | "-A" | "--deny" | "--warn" | "--allow") {
+            if !words.get(i + 1).is_some_and(|l| lint(l)) {
+                return false;
+            }
+            i += 2;
+            continue;
+        }
+        let joined = ["-D", "-W", "-A", "--deny=", "--warn=", "--allow="]
+            .iter()
+            .find_map(|p| w.strip_prefix(p));
+        match joined {
+            Some(l) if lint(l) => i += 1,
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// The canary: in this build's real environment (its Cargo configuration, its
+/// flags, any wrapper, run from the repository root), compile a crate that
+/// forbids unsafe code and then uses it, and require the compiler to refuse it.
+/// The other checks look for known ways to weaken the lints; this one measures
+/// the result, so a way nobody listed still fails it (decided after Codex review
+/// found response files, aliases, --config and wrappers in turn). `extra_env`
+/// is for the planted test.
+pub fn canary(root: &Path, target_dir: &Path, extra_env: &[(&str, &str)]) -> Result<(), String> {
+    let dir = target_dir.join("qgt-canary");
+    let src = dir.join("src");
+    std::fs::create_dir_all(&src).map_err(|e| format!("cannot make {}: {e}", src.display()))?;
+    let write = |path: PathBuf, text: &str| {
+        std::fs::write(&path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))
+    };
+    write(
+        dir.join("Cargo.toml"),
+        "[package]\nname = \"qgt-canary\"\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
+         [workspace]\n\n[lints.rust]\nunsafe_code = \"forbid\"\n",
+    )?;
+    write(
+        src.join("lib.rs"),
+        "#![forbid(unsafe_code)]\npub fn canary() -> u8 {\n    unsafe { core::ptr::read(&7) }\n}\n",
+    )?;
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    let out = Command::new(cargo)
+        .current_dir(root)
+        .envs(extra_env.iter().copied())
+        .args(["check", "--quiet", "--manifest-path"])
+        .arg(dir.join("Cargo.toml"))
+        .arg("--target-dir")
+        .arg(dir.join("target"))
+        .output()
+        .map_err(|e| format!("cannot run cargo for the canary: {e}"))?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if out.status.success() {
+        return Err(
+            "the canary compiled: something in this build weakens forbid(unsafe_code)".into(),
+        );
+    }
+    if !stderr.contains("usage of an `unsafe` block") {
+        return Err(format!(
+            "the canary failed, but not on unsafe_code:\n{stderr}"
+        ));
+    }
+    Ok(())
 }
 
 /// Whether a crate root forbids unsafe code with an inner attribute that the
@@ -785,7 +914,17 @@ pub fn proof() {}
     }
 
     #[test]
-    fn flags_that_cap_or_lower_the_lint_are_refused() {
+    fn only_lint_levels_are_allowed_as_flags() {
+        for f in [
+            "",
+            "-D warnings",
+            "-Dwarnings",
+            "-W clippy::all",
+            "-A dead_code",
+            "--deny=warnings",
+        ] {
+            assert!(flags_allowed(f), "{f}");
+        }
         for f in [
             "--cap-lints=allow",
             "-D warnings --cap-lints warn",
@@ -795,18 +934,41 @@ pub fn proof() {}
             "-W unsafe_code",
             "--force-warn unsafe_code",
             "-D warnings\u{1f}--cap-lints=allow",
+            "@/tmp/ci.rsp",
+            "-l static=z",
+            "-lstatic=z",
+            "-L /opt/lib",
+            "-C link-arg=-lz",
+            "-Zunstable-options",
+            "-D",
         ] {
-            assert!(flags_weaken_unsafe(f), "{f}");
+            assert!(!flags_allowed(f), "{f}");
         }
-        for f in [
-            "",
-            "-D warnings",
-            "-C target-cpu=native",
-            "-A dead_code",
-            "-D unsafe_code",
+    }
+
+    #[test]
+    fn a_different_compiler_wrapper_or_linker_is_refused() {
+        let env = |pairs: &[(&str, &str)]| {
+            env_problems(pairs.iter().map(|(a, b)| (a.to_string(), b.to_string())))
+        };
+        assert!(
+            env(&[
+                ("RUSTFLAGS", "-D warnings"),
+                ("CARGO_TARGET_DIR", "/t"),
+                ("CARGO_BUILD_JOBS", "4")
+            ])
+            .is_empty()
+        );
+        for var in [
+            "RUSTC",
+            "RUSTC_WRAPPER",
+            "RUSTC_WORKSPACE_WRAPPER",
+            "CARGO_BUILD_RUSTC_WRAPPER",
+            "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER",
         ] {
-            assert!(!flags_weaken_unsafe(f), "{f}");
+            assert_eq!(env(&[(var, "/x")]).len(), 1, "{var}");
         }
+        assert_eq!(env(&[("RUSTFLAGS", "@/tmp/ci.rsp")]).len(), 1);
     }
 
     #[test]

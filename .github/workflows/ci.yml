@@ -58,6 +58,9 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked
       - name: cargo test
         run: cargo test --workspace --all-features --locked
+      # In this job's own environment: a crate using unsafe code must be refused.
+      - name: canary
+        run: cargo xtask canary
 
   # The repository's own rules: no C in the library's tree on any platform, no
   # unsafe code, and no known vulnerability in a locked crate.
@@ -73,6 +76,8 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - name: cargo xtask policy
         run: cargo xtask policy
+      - name: canary
+        run: cargo xtask canary
       # An exact release: --locked pins its dependencies, not which release
       # runs, so without --version a new one would run unreviewed (found by Codex review).
       - name: cargo audit

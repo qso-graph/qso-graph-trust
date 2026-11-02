@@ -10,11 +10,29 @@ use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().map(String::as_str) != Some("policy") || args.len() > 1 {
-        eprintln!("usage: cargo xtask policy");
-        return ExitCode::from(2);
-    }
     let root_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    match (args.first().map(String::as_str), args.len()) {
+        (Some("policy"), 1) => {}
+        (Some("canary"), 1) => {
+            let target = std::env::var_os("CARGO_TARGET_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| root_dir.join("target"));
+            return match xtask::canary(&root_dir, &target, &[]) {
+                Ok(()) => {
+                    println!("canary: unsafe code was refused: pass");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("canary: FAIL: {e}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
+        _ => {
+            eprintln!("usage: cargo xtask policy | cargo xtask canary");
+            return ExitCode::from(2);
+        }
+    }
     let root = root_dir.join("Cargo.toml");
     let meta = match xtask::metadata(&root) {
         Ok(m) => m,

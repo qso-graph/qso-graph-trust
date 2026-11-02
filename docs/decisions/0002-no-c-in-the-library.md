@@ -27,11 +27,23 @@ every platform:
   object file (`.c`, `.h`, `.s`, `.o`, `.a`, `.so`, `.dll` and the like) fails the check, even in a
   comment.
 
-**Nothing may weaken those lints.** `--cap-lints` overrides even `forbid(unsafe_code)`, so the
-repository's one Cargo configuration file is `.cargo/config.toml` holding only `[alias]`, no other
-Cargo configuration file exists in it, no workflow mentions a lint cap or `unsafe_code`, and the
-check refuses flags in its environment that cap lints or lower `unsafe_code`. CI builds and tests with
-every feature on, so no code hides behind one.
+**Nothing may weaken those lints.** `--cap-lints` overrides even `forbid(unsafe_code)`, and it can
+reach the compiler many ways, so the check works from allowlists rather than lists of refused flags:
+the one Cargo configuration file is `.cargo/config.toml`, holding only the `xtask` alias, exactly; no
+other Cargo configuration file exists; the environment's rustflags may hold only lint levels (`-D`,
+`-W`, `-A` naming a lint other than `unsafe_code`), so no cap, response file (`@path`), native library
+or codegen flag; no other compiler, wrapper or linker may be selected; and no workflow may mention a
+lint cap, `--config`, `RUSTC`, `cargo rustc`, `CARGO_BUILD`, `CARGO_TARGET` or a link argument, or set
+`RUSTFLAGS` other than the one workflow-wide `-D warnings`. CI builds and tests with every feature on.
+
+**And a canary measures the result.** In every CI job, after the tests, `cargo xtask canary` compiles
+a crate that forbids unsafe code and then uses it, in that job's own environment, from the repository
+root. The compiler must refuse it. A way to weaken the lints that nobody listed still fails the
+canary: planted, a compiler wrapper that adds `--cap-lints=allow` made it fail.
+
+**The limit.** A commit could change these checks themselves. No check inside the repository can stop
+that, so the control for it is that every change to `.github/`, `.cargo/` and `xtask/` reaches `main`
+only in a pull request KI7MT merges, where it is read.
 
 **For the workspace's own crates the compiler is the enforcer.** Each is edition 2024 and forbids
 unsafe code (both checked by `cargo xtask policy`), and under those two rules rustc refuses every

@@ -85,9 +85,9 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
 
 #[test]
 fn every_planted_way_to_override_the_lints_is_caught() {
-    // A repository made for the test: a lint cap in the Cargo configuration, a
-    // second configuration file inside a crate, and a workflow passing a cap. A
-    // cap overrides even forbid(unsafe_code) (found by Codex review).
+    // A repository made for the test, planted with each way found to weaken the
+    // lints without touching a manifest or a crate root (Codex review, rounds 6
+    // and 7). --cap-lints overrides even forbid(unsafe_code).
     let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("planted-overrides");
     let _ = std::fs::remove_dir_all(&root);
     let write = |rel: &str, text: &str| {
@@ -95,14 +95,31 @@ fn every_planted_way_to_override_the_lints_is_caught() {
         std::fs::create_dir_all(path.parent().expect("a parent")).expect("mkdir");
         std::fs::write(path, text).expect("write");
     };
+    // A lint cap in the configuration, and an alias that passes one.
     write(
         ".cargo/config.toml",
-        "[alias]\nxtask = \"run\"\n\n[build]\nrustflags = [\"--cap-lints=allow\"]\n",
+        "[alias]\nxtask = \"run --quiet --locked --package xtask --\"\n\
+         unchecked = \"rustc -p qso-graph-trust -- --cap-lints=allow\"\n\n\
+         [build]\nrustflags = [\"--cap-lints=allow\"]\n",
     );
+    // A second configuration file inside a crate.
     write("crates/lib/.cargo/config.toml", "[build]\nrustflags = []\n");
+    // Workflows: a response file, another configuration, a wrapper, a native library.
     write(
-        ".github/workflows/ci.yml",
-        "env:\n  RUSTFLAGS: --cap-lints warn\n",
+        ".github/workflows/a.yml",
+        "env:\n  RUSTFLAGS: \"@ci.rsp\"\n",
+    );
+    write(
+        ".github/workflows/b.yml",
+        "steps:\n  - run: cargo --config ci-flags.toml test\n",
+    );
+    write(
+        ".github/workflows/c.yml",
+        "env:\n  RUSTC_WORKSPACE_WRAPPER: scripts/w.sh\n",
+    );
+    write(
+        ".github/workflows/d.yml",
+        "env:\n  RUSTFLAGS: -l static=z\n",
     );
     let nested = root
         .join("crates/lib/.cargo/config.toml")
@@ -110,11 +127,35 @@ fn every_planted_way_to_override_the_lints_is_caught() {
         .to_string();
     let mut want = vec![
         ".cargo/config.toml has [build]: only [alias] is allowed".to_string(),
+        format!(
+            ".cargo/config.toml's [alias] must be exactly xtask = \"{}\"",
+            xtask::XTASK_ALIAS
+        ),
         format!("{nested} is a Cargo configuration file"),
-        "workflow ci.yml mentions cap-lints".to_string(),
+        "workflow a.yml sets RUSTFLAGS: RUSTFLAGS: \"@ci.rsp\"".to_string(),
+        "workflow b.yml mentions --config".to_string(),
+        "workflow c.yml mentions RUSTC".to_string(),
+        "workflow d.yml sets RUSTFLAGS: RUSTFLAGS: -l static=z".to_string(),
     ];
     want.sort();
     assert_eq!(xtask::no_lint_overrides(&root), want);
+}
+
+#[test]
+fn the_canary_is_refused_here_and_compiles_under_a_lint_cap() {
+    let target = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("canary");
+    let root = here("..");
+    // As this repository builds: refused.
+    assert_eq!(xtask::canary(&root, &target.join("plain"), &[]), Ok(()));
+    // PLANTED: a lint cap in the environment. The canary must notice it compiled.
+    assert_eq!(
+        xtask::canary(
+            &root,
+            &target.join("capped"),
+            &[("RUSTFLAGS", "--cap-lints=allow")]
+        ),
+        Err("the canary compiled: something in this build weakens forbid(unsafe_code)".to_string())
+    );
 }
 
 #[test]
