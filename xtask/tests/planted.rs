@@ -106,6 +106,11 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
         // A crate root that is not a .rs file.
         lib_root(&meta, "planted-inc-root") + " is a crate root that is not a .rs file",
         fixture(&meta, "planted-inc-root", "src/library.inc") + " is not a .rs, .toml or .md file",
+        // A source file that is not UTF-8: a finding, not empty text that scans clean.
+        fixture(&meta, "planted-decoy", "src/not_utf8.rs")
+            + " cannot be read as UTF-8 text: stream did not contain valid UTF-8",
+        // The library root of the planted crate whose source sits outside it.
+        lib_root(&meta, "planted-src-outside") + " is a crate root outside its crate",
         // Excluded by the workspace, but inside a crate, so mod still loads it.
         fixture(&meta, "planted-excluded-inside", "src/hidden/mod.rs") + " uses unsafe",
         // A module from a file the scan would not read.

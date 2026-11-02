@@ -458,6 +458,15 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
             if !src.ends_with(".rs") {
                 problems.push(format!("{src} is a crate root that is not a .rs file"));
             }
+            // And one outside its crate's directory too, for every workspace crate,
+            // not only the library's tree (found by Codex review).
+            if let Some(dir) = pkg["manifest_path"]
+                .as_str()
+                .and_then(|m| Path::new(m).parent())
+                && !within(Path::new(src), dir)
+            {
+                problems.push(format!("{src} is a crate root outside its crate"));
+            }
             match std::fs::read_to_string(src) {
                 Ok(text) if forbids_unsafe(&text) => {}
                 Ok(_) => problems.push(format!("{src} does not say #![forbid(unsafe_code)]")),
@@ -513,7 +522,18 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
                     ));
                 }
             } else {
-                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                // A file that cannot be read is a finding, never empty text that
+                // scans clean (found by Codex review).
+                let text = match std::fs::read_to_string(&path) {
+                    Ok(text) => text,
+                    Err(e) => {
+                        found.push(format!(
+                            "{} cannot be read as UTF-8 text: {e}",
+                            path.display()
+                        ));
+                        continue;
+                    }
+                };
                 match text.parse::<proc_macro2::TokenStream>() {
                     Ok(tokens) => {
                         for what in unsafe_tokens(tokens) {
