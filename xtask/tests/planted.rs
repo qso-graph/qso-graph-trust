@@ -104,6 +104,16 @@ fn every_planted_way_to_override_the_lints_is_caught() {
          unchecked = \"rustc -p qso-graph-trust -- --cap-lints=allow\"\n\n\
          [build]\nrustflags = [\"--cap-lints=allow\"]\n",
     );
+    // A nightly toolchain, which allows cargo-features, and profile flags with them.
+    write(
+        "rust-toolchain.toml",
+        "[toolchain]\nchannel = \"nightly-2026-10-01\"\n",
+    );
+    write(
+        "Cargo.toml",
+        "cargo-features = [\"profile-rustflags\"]\n\n[workspace]\n\n\
+         [profile.dev.package.qso-graph-trust]\nrustflags = [\"--cap-lints=allow\"]\n",
+    );
     // A second configuration file inside a crate.
     write("crates/lib/.cargo/config.toml", "[build]\nrustflags = []\n");
     // Workflows: a response file, another configuration, a wrapper, a native library.
@@ -134,6 +144,10 @@ fn every_planted_way_to_override_the_lints_is_caught() {
             xtask::XTASK_ALIAS
         ),
         format!("{nested} is a Cargo configuration file"),
+        "Cargo.toml has cargo-features".to_string(),
+        "Cargo.toml sets profile.dev.package.qso-graph-trust.rustflags".to_string(),
+        "rust-toolchain.toml must name an exact stable release, not Some(\"nightly-2026-10-01\")"
+            .to_string(),
         "workflow a.yml sets RUSTFLAGS: RUSTFLAGS: \"@ci.rsp\"".to_string(),
         "workflow b.yml mentions --config".to_string(),
         "workflow c.yml mentions RUSTC".to_string(),
@@ -159,6 +173,18 @@ fn the_canary_is_refused_here_and_compiles_under_a_lint_cap() {
             &[("RUSTFLAGS", "--cap-lints=allow")]
         ),
         Err("the canary compiled: something in this build weakens forbid(unsafe_code)".to_string())
+    );
+    // unsafe_code forced to a warning: the workspace's forbid still wins in a
+    // real build of the library, so it is refused (checked against rustc 1.99.1).
+    // A warning beside another error is not taken for a refusal either:
+    // refused_by_unsafe_code's own test.
+    assert_eq!(
+        xtask::canary(
+            &root,
+            &target.join("warned"),
+            &[("RUSTFLAGS", "--force-warn=unsafe_code")]
+        ),
+        Ok(())
     );
 }
 

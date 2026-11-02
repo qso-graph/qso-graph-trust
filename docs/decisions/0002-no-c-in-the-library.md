@@ -36,10 +36,13 @@ or codegen flag; no other compiler, wrapper or linker may be selected; and no wo
 lint cap, `--config`, `RUSTC`, `cargo rustc`, `CARGO_BUILD`, `CARGO_TARGET` or a link argument, or set
 `RUSTFLAGS` other than the one workflow-wide `-D warnings`. CI builds and tests with every feature on.
 
-**And a canary measures the result.** In every CI job, after the tests, `cargo xtask canary` compiles
-a crate that forbids unsafe code and then uses it, in that job's own environment, from the repository
-root. The compiler must refuse it. A way to weaken the lints that nobody listed still fails the
-canary: planted, a compiler wrapper that adds `--cap-lints=allow` made it fail.
+**And a canary measures the result.** In every CI job, after the tests, `cargo xtask canary` copies
+the repository (its manifests and profiles, its Cargo configuration, its toolchain file), adds an
+`unsafe` block to the real library in the copy, and builds it in that job's own environment. The
+compiler must refuse it with an `unsafe_code` error, read from its JSON diagnostics. A way to weaken
+the lints that nobody listed still fails the canary: planted, a compiler wrapper that adds
+`--cap-lints=allow` made it fail. The toolchain must be an exact stable release, which refuses
+`cargo-features`, and no profile may set `rustflags`.
 
 **The limit.** A commit could change these checks themselves. No check inside the repository can stop
 that, so the control for it is that every change to `.github/`, `.cargo/` and `xtask/` reaches `main`

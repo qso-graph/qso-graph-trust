@@ -19,7 +19,7 @@
 
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, VecDeque};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 /// The crates that hold the key, the signing and the file parsers.
@@ -470,6 +470,36 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
         }
         Err(e) => problems.push(e),
     }
+    // The pinned stable toolchain, which refuses `cargo-features`, so manifest
+    // profile flags and other unstable Cargo features cannot be switched on;
+    // and no `rustflags` in any profile (found by Codex review).
+    match read_toml(&root.join("rust-toolchain.toml")) {
+        Ok(t) => {
+            let channel = t
+                .get("toolchain")
+                .and_then(|c| c.get("channel"))
+                .and_then(toml::Value::as_str);
+            if !channel.is_some_and(is_stable_version) {
+                problems.push(format!(
+                    "rust-toolchain.toml must name an exact stable release, not {channel:?}"
+                ));
+            }
+        }
+        Err(e) => problems.push(e),
+    }
+    match read_toml(&root.join("Cargo.toml")) {
+        Ok(t) => {
+            if t.contains_key("cargo-features") {
+                problems.push("Cargo.toml has cargo-features".to_string());
+            }
+            if let Some(profiles) = t.get("profile") {
+                for path in rustflags_in(profiles, "profile") {
+                    problems.push(format!("Cargo.toml sets {path}"));
+                }
+            }
+        }
+        Err(e) => problems.push(e),
+    }
     let mut stack = vec![root.to_path_buf()];
     while let Some(d) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&d) else {
@@ -515,6 +545,31 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
     problems.extend(env_problems(std::env::vars()));
     problems.sort();
     problems
+}
+
+/// Whether a toolchain channel is an exact stable release, such as `1.99.1`.
+fn is_stable_version(channel: &str) -> bool {
+    let parts: Vec<&str> = channel.split('.').collect();
+    parts.len() == 3
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// Every `rustflags` key anywhere under a TOML value, as a dotted path.
+fn rustflags_in(value: &toml::Value, path: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    if let Some(table) = value.as_table() {
+        for (key, inner) in table {
+            let here = format!("{path}.{key}");
+            if key == "rustflags" {
+                found.push(here);
+            } else {
+                found.extend(rustflags_in(inner, &here));
+            }
+        }
+    }
+    found
 }
 
 /// The one alias the repository's Cargo configuration may hold.
@@ -605,53 +660,112 @@ pub fn flags_allowed(flags: &str) -> bool {
     true
 }
 
-/// The canary: in this build's real environment (its Cargo configuration, its
-/// flags, any wrapper, run from the repository root), compile a crate that
-/// forbids unsafe code and then uses it, and require the compiler to refuse it.
+/// The canary: build the real library, in a copy of this repository (its
+/// manifests and profiles, its Cargo configuration, its toolchain file) with an
+/// `unsafe` block added, in this build's real environment (its flags and any
+/// wrapper), and require the compiler to refuse it with an `unsafe_code` error.
 /// The other checks look for known ways to weaken the lints; this one measures
-/// the result, so a way nobody listed still fails it (decided after Codex review
-/// found response files, aliases, --config and wrappers in turn). `extra_env`
-/// is for the planted test.
+/// the result on the crate that matters, so a way nobody listed still fails it.
+/// It reads the compiler's JSON diagnostics: an `unsafe_code` warning beside an
+/// unrelated error is not a refusal (found by Codex review, as were the profile
+/// flags a stand-in crate could not see). `extra_env` is for the planted test.
 pub fn canary(root: &Path, target_dir: &Path, extra_env: &[(&str, &str)]) -> Result<(), String> {
-    // Absolute, because the child Cargo runs from the repository root, not from
-    // where this was called (found by Codex review).
+    // Absolute, because the child Cargo runs from the copy, not from where this
+    // was called (found by Codex review).
     let target_dir = std::path::absolute(target_dir)
         .map_err(|e| format!("cannot resolve {}: {e}", target_dir.display()))?;
-    let dir = target_dir.join("qgt-canary");
-    let src = dir.join("src");
-    std::fs::create_dir_all(&src).map_err(|e| format!("cannot make {}: {e}", src.display()))?;
-    let write = |path: PathBuf, text: &str| {
-        std::fs::write(&path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))
-    };
-    write(
-        dir.join("Cargo.toml"),
-        "[package]\nname = \"qgt-canary\"\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
-         [workspace]\n\n[lints.rust]\nunsafe_code = \"forbid\"\n",
-    )?;
-    write(
-        src.join("lib.rs"),
-        "#![forbid(unsafe_code)]\npub fn canary() -> u8 {\n    unsafe { core::ptr::read(&7) }\n}\n",
-    )?;
+    let copy = target_dir.join("qgt-canary");
+    if copy.exists() {
+        std::fs::remove_dir_all(&copy)
+            .map_err(|e| format!("cannot clear {}: {e}", copy.display()))?;
+    }
+    copy_repository(root, &copy, &target_dir)?;
+    let lib = copy
+        .join("crates")
+        .join("qso-graph-trust")
+        .join("src")
+        .join("lib.rs");
+    let mut source =
+        std::fs::read_to_string(&lib).map_err(|e| format!("cannot read {}: {e}", lib.display()))?;
+    source.push_str("\n/// The canary's probe: the compiler must refuse it.\npub fn qgt_canary() -> u8 {\n    unsafe { core::ptr::read(&7) }\n}\n");
+    std::fs::write(&lib, source).map_err(|e| format!("cannot write {}: {e}", lib.display()))?;
+
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let out = Command::new(cargo)
-        .current_dir(root)
+        .current_dir(&copy)
         .envs(extra_env.iter().copied())
-        .args(["check", "--quiet", "--manifest-path"])
-        .arg(dir.join("Cargo.toml"))
-        .arg("--target-dir")
-        .arg(dir.join("target"))
+        .args([
+            "check",
+            "--quiet",
+            "--locked",
+            "--all-features",
+            "--package",
+            "qso-graph-trust",
+            "--message-format",
+            "json",
+            "--target-dir",
+        ])
+        .arg(copy.join("target"))
         .output()
         .map_err(|e| format!("cannot run cargo for the canary: {e}"))?;
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let refused = refused_by_unsafe_code(&String::from_utf8_lossy(&out.stdout));
     if out.status.success() {
         return Err(
             "the canary compiled: something in this build weakens forbid(unsafe_code)".into(),
         );
     }
-    if !stderr.contains("usage of an `unsafe` block") {
+    if !refused {
         return Err(format!(
-            "the canary failed, but not on unsafe_code:\n{stderr}"
+            "the canary failed to build, but not with an unsafe_code error:\n{}",
+            String::from_utf8_lossy(&out.stderr)
         ));
+    }
+    Ok(())
+}
+
+/// Whether Cargo's JSON messages hold an `unsafe_code` diagnostic at level
+/// `error`: a warning of it beside some other error is not a refusal (found by
+/// Codex review).
+pub fn refused_by_unsafe_code(json_lines: &str) -> bool {
+    json_lines.lines().any(|line| {
+        serde_json::from_str::<Value>(line).is_ok_and(|m| {
+            m["reason"] == "compiler-message"
+                && m["message"]["level"] == "error"
+                && m["message"]["code"]["code"] == "unsafe_code"
+        })
+    })
+}
+
+/// Copy this repository's files to `to`, leaving out `.git`, every `target`
+/// directory and Cargo's output directory, so the canary builds what a commit
+/// holds. Symbolic links are not followed.
+fn copy_repository(from: &Path, to: &Path, output: &Path) -> Result<(), String> {
+    let output = std::fs::canonicalize(output).ok();
+    let mut stack = vec![(from.to_path_buf(), to.to_path_buf())];
+    while let Some((src, dst)) = stack.pop() {
+        std::fs::create_dir_all(&dst).map_err(|e| format!("cannot make {}: {e}", dst.display()))?;
+        let entries =
+            std::fs::read_dir(&src).map_err(|e| format!("cannot read {}: {e}", src.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("cannot read {}: {e}", src.display()))?;
+            let path = entry.path();
+            let name = entry.file_name();
+            let kind = entry
+                .file_type()
+                .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+            if kind.is_dir() {
+                let is_output = output
+                    .as_ref()
+                    .is_some_and(|o| std::fs::canonicalize(&path).is_ok_and(|p| p == *o));
+                if name == ".git" || name == "target" || is_output {
+                    continue;
+                }
+                stack.push((path, dst.join(name)));
+            } else if kind.is_file() {
+                std::fs::copy(&path, dst.join(&name))
+                    .map_err(|e| format!("cannot copy {}: {e}", path.display()))?;
+            }
+        }
     }
     Ok(())
 }
@@ -973,6 +1087,25 @@ pub fn proof() {}
             assert_eq!(env(&[(var, "/x")]).len(), 1, "{var}");
         }
         assert_eq!(env(&[("RUSTFLAGS", "@/tmp/ci.rsp")]).len(), 1);
+    }
+
+    #[test]
+    fn only_an_unsafe_code_error_is_a_refusal() {
+        let msg = |level: &str, code: &str| {
+            format!(
+                "{{\"reason\":\"compiler-message\",\"message\":{{\"level\":\"{level}\",\"code\":{{\"code\":\"{code}\"}}}}}}"
+            )
+        };
+        assert!(refused_by_unsafe_code(&msg("error", "unsafe_code")));
+        // A warning of it, beside an unrelated error, is not a refusal.
+        let mixed = format!(
+            "{}\n{}",
+            msg("warning", "unsafe_code"),
+            msg("error", "missing_docs")
+        );
+        assert!(!refused_by_unsafe_code(&mixed));
+        assert!(!refused_by_unsafe_code("usage of an `unsafe` block"));
+        assert!(!refused_by_unsafe_code(""));
     }
 
     #[test]
