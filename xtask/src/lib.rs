@@ -438,251 +438,35 @@ pub fn workspace_forbids_unsafe(manifest: &toml::Table) -> bool {
 }
 
 /// Whether a crate root forbids unsafe code with an inner attribute that the
-/// compiler sees. Inner attributes come before the first item, so this lexes the
-/// head of the file as Rust does (comments, nested comments, string, raw-string,
-/// byte and char literals each become one token or none) and reads each inner
-/// attribute in turn until the first item. Only `forbid(...)` naming the lint
-/// `unsafe_code` itself counts: text in a comment, a string or a `reason` never
-/// does (found by Codex review, twice). Anything it cannot lex fails closed.
+/// compiler applies: `#![forbid(...)]` naming the lint `unsafe_code`, not under
+/// `cfg_attr`. The file is parsed by `syn`, a complete Rust parser, so shebangs,
+/// comments, raw strings, raw identifiers and raw lifetimes are read as Rust reads
+/// them; text inside any of them is never taken for the attribute. A hand-written
+/// lexer was tried first and each of four Codex review rounds found a construct it
+/// misread, so it was replaced. A file `syn` cannot parse counts as absent: the
+/// check fails closed.
 pub fn forbids_unsafe(source: &str) -> bool {
-    let mut src = source.strip_prefix('\u{feff}').unwrap_or(source);
-    // A shebang line, as Rust decides it: `#!` whose next token, past whitespace
-    // and comments, is not `[` (found by Codex review: `#! /* ... */ [` is an
-    // attribute, not a shebang).
-    if src.starts_with("#!") {
-        let mut ahead = Lexer {
-            s: src.as_bytes(),
-            i: 2,
-        };
-        if ahead.next() != Some(Tok::Punct(b'[')) {
-            src = src.find('\n').map_or("", |i| &src[i..]);
-        }
-    }
-    let mut lex = Lexer {
-        s: src.as_bytes(),
-        i: 0,
-    };
-    loop {
-        let (Some(Tok::Punct(b'#')), Some(Tok::Punct(b'!')), Some(Tok::Punct(b'['))) =
-            (lex.next(), lex.next(), lex.next())
-        else {
-            return false; // the first item, the end of the file, or something unreadable
-        };
-        // The attribute's tokens, up to its matching ']'.
-        let mut body = Vec::new();
-        let mut depth = 1usize;
-        loop {
-            let tok = match lex.next() {
-                Some(Tok::Bad) | None => return false,
-                Some(tok) => tok,
-            };
-            match tok {
-                Tok::Punct(b'[') => depth += 1,
-                Tok::Punct(b']') => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-                _ => {}
-            }
-            body.push(tok);
-        }
-        if is_forbid_unsafe(&body) {
-            return true;
-        }
-    }
-}
-
-/// Whether an attribute's tokens are `forbid(...)` with `unsafe_code` as one of
-/// its comma-separated arguments.
-fn is_forbid_unsafe(body: &[Tok]) -> bool {
-    let [Tok::Word(w), Tok::Punct(b'('), args @ .., Tok::Punct(b')')] = body else {
+    let Ok(file) = syn::parse_file(source) else {
         return false;
     };
-    if w != "forbid" {
-        return false;
-    }
-    let mut depth = 0usize;
-    let mut arg: Vec<&Tok> = Vec::new();
-    for tok in args.iter().chain(std::iter::once(&Tok::Punct(b','))) {
-        match tok {
-            Tok::Punct(b'(' | b'[' | b'{') => depth += 1,
-            Tok::Punct(b')' | b']' | b'}') => depth = depth.saturating_sub(1),
-            Tok::Punct(b',') if depth == 0 => {
-                if matches!(arg.as_slice(), [Tok::Word(l)] if l == "unsafe_code") {
-                    return true;
+    file.attrs
+        .iter()
+        .filter(|a| matches!(a.style, syn::AttrStyle::Inner(_)) && a.path().is_ident("forbid"))
+        .any(|a| {
+            let mut found = false;
+            let parsed = a.parse_nested_meta(|meta| {
+                if meta.input.peek(syn::Token![=]) {
+                    // `name = value`, such as `reason = "..."`: not a lint.
+                    meta.value()?.parse::<syn::Expr>()?;
+                } else if meta.path.is_ident("unsafe_code") && meta.input.is_empty()
+                    || meta.path.is_ident("unsafe_code") && meta.input.peek(syn::Token![,])
+                {
+                    found = true;
                 }
-                arg.clear();
-                continue;
-            }
-            _ => {}
-        }
-        arg.push(tok);
-    }
-    false
-}
-
-/// One token of Rust source, as far as reading inner attributes needs.
-#[derive(Clone, Debug, PartialEq)]
-enum Tok {
-    /// An identifier, keyword, number or lifetime.
-    Word(String),
-    /// A string, raw string, byte string or char literal; its content never matters here.
-    Literal,
-    /// One punctuation byte.
-    Punct(u8),
-    /// Something that cannot be lexed: an unterminated comment or literal.
-    Bad,
-}
-
-struct Lexer<'a> {
-    s: &'a [u8],
-    i: usize,
-}
-
-impl Lexer<'_> {
-    fn peek(&self, k: usize) -> Option<u8> {
-        self.s.get(self.i + k).copied()
-    }
-
-    /// The next token, skipping whitespace and comments; None at the end.
-    fn next(&mut self) -> Option<Tok> {
-        loop {
-            let c = self.peek(0)?;
-            if c.is_ascii_whitespace() {
-                self.i += 1;
-            } else if c == b'/' && self.peek(1) == Some(b'/') {
-                while self.peek(0).is_some_and(|c| c != b'\n') {
-                    self.i += 1;
-                }
-            } else if c == b'/' && self.peek(1) == Some(b'*') {
-                if !self.block_comment() {
-                    return Some(Tok::Bad);
-                }
-            } else {
-                break;
-            }
-        }
-        let c = self.peek(0)?;
-        // Literal prefixes: b"", br"", c"", cr"", r"", r#""#, b''.
-        let prefix = match (c, self.peek(1), self.peek(2)) {
-            (b'b' | b'c', Some(b'r'), Some(b'"' | b'#')) => Some(2),
-            (b'r', Some(b'"' | b'#'), _)
-            | (b'b' | b'c', Some(b'"'), _)
-            | (b'b', Some(b'\''), _) => Some(1),
-            _ => None,
-        };
-        if let Some(n) = prefix {
-            let raw = self.s[self.i..self.i + n].contains(&b'r');
-            self.i += n;
-            if raw {
-                let hashes = self.s[self.i..].iter().take_while(|&&b| b == b'#').count();
-                if self.peek(hashes) != Some(b'"') {
-                    // r#ident is one raw identifier, read whole: split, its last
-                    // letter could pass for a raw-string prefix (found by Codex
-                    // review: `r#r"..."`). Anything else here is not Rust.
-                    let ident = self
-                        .peek(1)
-                        .is_some_and(|c| c == b'_' || c.is_ascii_alphabetic() || c >= 0x80);
-                    if n == 1 && hashes == 1 && ident {
-                        self.i += 1;
-                        return Some(Tok::Word(format!("r#{}", self.word())));
-                    }
-                    return Some(Tok::Bad);
-                } else {
-                    self.i += hashes + 1;
-                    return Some(self.raw_string_end(hashes));
-                }
-            } else if self.peek(0) == Some(b'"') {
-                self.i += 1;
-                return Some(self.quoted_end(b'"'));
-            } else {
-                self.i += 1;
-                return Some(self.quoted_end(b'\''));
-            }
-        }
-        if c == b'"' {
-            self.i += 1;
-            return Some(self.quoted_end(b'"'));
-        }
-        if c == b'\'' {
-            // A char literal ('x', '\n', '\u{..}') or a lifetime ('a).
-            if self.peek(1) == Some(b'\\') || self.peek(2) == Some(b'\'') {
-                self.i += 1;
-                return Some(self.quoted_end(b'\''));
-            }
-            self.i += 1;
-            return Some(Tok::Word(format!("'{}", self.word())));
-        }
-        if c == b'_' || c.is_ascii_alphanumeric() || c >= 0x80 {
-            return Some(Tok::Word(self.word()));
-        }
-        self.i += 1;
-        Some(Tok::Punct(c))
-    }
-
-    fn word(&mut self) -> String {
-        let start = self.i;
-        while self
-            .peek(0)
-            .is_some_and(|c| c == b'_' || c.is_ascii_alphanumeric() || c >= 0x80)
-        {
-            self.i += 1;
-        }
-        String::from_utf8_lossy(&self.s[start..self.i]).into_owned()
-    }
-
-    fn block_comment(&mut self) -> bool {
-        let mut depth = 0usize;
-        while let Some(c) = self.peek(0) {
-            if c == b'/' && self.peek(1) == Some(b'*') {
-                depth += 1;
-                self.i += 2;
-            } else if c == b'*' && self.peek(1) == Some(b'/') {
-                depth -= 1;
-                self.i += 2;
-                if depth == 0 {
-                    return true;
-                }
-            } else {
-                self.i += 1;
-            }
-        }
-        false
-    }
-
-    /// Past a quoted literal's closing quote, escapes honoured.
-    fn quoted_end(&mut self, quote: u8) -> Tok {
-        while let Some(c) = self.peek(0) {
-            self.i += 1;
-            if c == b'\\' {
-                self.i += 1;
-            } else if c == quote {
-                return self.suffix();
-            }
-        }
-        Tok::Bad
-    }
-
-    /// A literal's suffix (`""r`, `1u8`) belongs to the literal: Rust reads `""r"x"`
-    /// as a suffixed empty string then `"x"`, never a raw string (found by Codex review).
-    fn suffix(&mut self) -> Tok {
-        self.word();
-        Tok::Literal
-    }
-
-    /// Past a raw string's closing quote and its `hashes` '#'s.
-    fn raw_string_end(&mut self, hashes: usize) -> Tok {
-        while let Some(c) = self.peek(0) {
-            self.i += 1;
-            if c == b'"' && (0..hashes).all(|k| self.peek(k) == Some(b'#')) {
-                self.i += hashes;
-                return self.suffix();
-            }
-        }
-        Tok::Bad
-    }
+                Ok(())
+            });
+            parsed.is_ok() && found
+        })
 }
 
 #[cfg(test)]
@@ -885,6 +669,18 @@ pub fn proof() {}
         assert!(forbids_unsafe("#![doc(r#type)]\n#![forbid(unsafe_code)]"));
         // Not Rust: fails closed.
         assert!(!forbids_unsafe("#![doc(r##x)]\n#![forbid(unsafe_code)]"));
+    }
+
+    #[test]
+    fn a_raw_lifetime_is_one_token() {
+        // `'r#r` is a raw lifetime; the string after it is ordinary (Codex review, round 5).
+        assert!(!forbids_unsafe(
+            r##"#![cfg_attr(any(), arbitrary('r#r"\"))]
+#![forbid(unsafe_code)]
+"))]
+pub fn proof() {}
+"##
+        ));
     }
 
     #[test]
