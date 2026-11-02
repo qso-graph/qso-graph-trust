@@ -48,6 +48,13 @@ the lints that nobody listed still fails the canary: planted, a compiler wrapper
 that, so the control for it is that every change to `.github/`, `.cargo/` and `xtask/` reaches `main`
 only in a pull request KI7MT merges, where it is read.
 
+**Code no build compiles is still read.** CI builds debug, and a consumer's release build caps this
+crate's lints, which overrides `forbid`, so code behind `#[cfg(not(debug_assertions))]` would never
+meet the compiler's refusal. Every source file of every workspace crate is therefore read as Rust
+tokens, whatever its `cfg`: the identifiers `unsafe`, `include`, `asm`, `global_asm` and `naked_asm`
+(raw identifiers and import aliases included) and a `#[path]` attribute fail the check. A directory
+is left out only when Cargo itself treats it as another package or the workspace excludes it.
+
 **For the workspace's own crates the compiler is the enforcer.** Each is edition 2024 and forbids
 unsafe code (both checked by `cargo xtask policy`), and under those two rules rustc refuses every
 `extern` block, `#[link]`ed or not, all inline and global assembly, and `no_mangle`: checked against

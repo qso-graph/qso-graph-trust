@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: a comment-only Cargo.toml in src/hidden, which makes no package, beside a file using
+# unsafe. The token scan must not skip that directory.
+[package]
+name = "planted-decoy"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true

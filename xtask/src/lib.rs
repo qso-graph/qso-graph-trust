@@ -361,6 +361,32 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
         }
         None => problems.push("cargo metadata names no workspace root".to_string()),
     }
+    // Directories Cargo treats as other packages: each member's own directory,
+    // and each path the workspace's manifest excludes.
+    let mut skip: Vec<PathBuf> = meta["packages"]
+        .as_array()
+        .unwrap_or(&empty)
+        .iter()
+        .filter(|p| p["id"].as_str().is_some_and(|id| workspace.contains(id)))
+        .filter_map(|p| p["manifest_path"].as_str())
+        .filter_map(|m| {
+            Path::new(m)
+                .parent()
+                .and_then(|d| std::fs::canonicalize(d).ok())
+        })
+        .collect();
+    if let Some(root) = meta["workspace_root"].as_str() {
+        let excluded = read_toml(&Path::new(root).join("Cargo.toml"))
+            .ok()
+            .and_then(|t| t.get("workspace")?.get("exclude")?.as_array().cloned())
+            .unwrap_or_default();
+        skip.extend(
+            excluded
+                .iter()
+                .filter_map(toml::Value::as_str)
+                .filter_map(|e| std::fs::canonicalize(Path::new(root).join(e)).ok()),
+        );
+    }
     for pkg in meta["packages"].as_array().unwrap_or(&empty) {
         if !pkg["id"].as_str().is_some_and(|id| workspace.contains(id)) {
             continue;
@@ -397,7 +423,7 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
             .as_str()
             .and_then(|m| Path::new(m).parent())
         {
-            problems.extend(unsafe_tokens_in(dir));
+            problems.extend(unsafe_tokens_in(dir, &skip));
         }
         for target in pkg["targets"].as_array().unwrap_or(&empty) {
             let Some(src) = target["src_path"].as_str() else {
@@ -419,7 +445,7 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
 /// cfg, features and macro bodies make no difference. A subdirectory holding its
 /// own `Cargo.toml` is another package and is left to its own check (the planted
 /// fixtures are such a package). A file that does not tokenize is a finding.
-pub fn unsafe_tokens_in(dir: &Path) -> Vec<String> {
+pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
     let mut found = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
@@ -438,9 +464,14 @@ pub fn unsafe_tokens_in(dir: &Path) -> Vec<String> {
                 continue;
             };
             if kind.is_dir() {
-                let own_package = path.join("Cargo.toml").exists();
+                // Left out only when Cargo itself treats it as something else:
+                // another package of the workspace, or a path its manifest
+                // excludes (the planted fixtures). A Cargo.toml alone is not
+                // enough (found by Codex review: a decoy one hid a directory).
+                let canon = std::fs::canonicalize(&path).ok();
+                let other = canon.as_ref().is_some_and(|c| skip.iter().any(|s| s == c));
                 let output = d == dir && entry.file_name() == "target";
-                if !own_package && !output {
+                if !other && !output {
                     stack.push(path);
                 }
             } else if path.extension().is_some_and(|e| e == "rs") {
@@ -462,6 +493,18 @@ pub fn unsafe_tokens_in(dir: &Path) -> Vec<String> {
     found
 }
 
+/// Identifiers no workspace source may contain, wherever they appear, with what
+/// each brings: matched as identifiers, never text, after removing `r#`, so a
+/// raw identifier, an import alias (`use core::include as load` names
+/// `include`) and any macro delimiter are all caught (found by Codex review).
+const REFUSED_IDENTS: &[(&str, &str)] = &[
+    ("unsafe", "uses unsafe"),
+    ("include", "uses include"),
+    ("asm", "uses asm"),
+    ("global_asm", "uses global_asm"),
+    ("naked_asm", "uses naked_asm"),
+];
+
 /// What in a token stream could bring unsafe code: the keyword `unsafe` anywhere
 /// (blocks, functions, traits, impls, extern blocks, `#[unsafe(...)]`), and
 /// `include!`, which compiles another file's code in place; and `#[path]`, which
@@ -469,7 +512,6 @@ pub fn unsafe_tokens_in(dir: &Path) -> Vec<String> {
 pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
     use proc_macro2::TokenTree;
     let mut found = Vec::new();
-    let mut previous_include = false;
     // Whether the last token was `#` (an outer attribute) or `#` then `!` (inner).
     let mut after_hash = false;
     let mut last_hash = false;
@@ -477,21 +519,19 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
         let mut hash_now = false;
         match &tree {
             TokenTree::Ident(i) => {
-                if i == "unsafe" {
-                    found.push("uses unsafe");
+                // Raw identifiers name the same thing: `r#include` is `include`.
+                let name = i.to_string();
+                let name = name.strip_prefix("r#").unwrap_or(&name);
+                if let Some((_, what)) = REFUSED_IDENTS.iter().find(|(n, _)| *n == name) {
+                    found.push(*what);
                 }
-                previous_include = i == "include";
                 after_hash = false;
                 last_hash = false;
                 continue;
             }
-            TokenTree::Punct(p) if p.as_char() == '!' && previous_include => {
-                found.push("uses include!");
-            }
             TokenTree::Punct(p) if p.as_char() == '#' => hash_now = true,
             TokenTree::Punct(p) if p.as_char() == '!' && last_hash => {
                 // `#!`: the attribute's brackets come next.
-                previous_include = false;
                 after_hash = true;
                 last_hash = false;
                 continue;
@@ -511,7 +551,6 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
             }
             _ => {}
         }
-        previous_include = false;
         after_hash = false;
         last_hash = hash_now;
     }
@@ -1325,18 +1364,26 @@ pub fn proof() {}
             scan("#[unsafe(no_mangle)] pub fn f() {}"),
             vec!["uses unsafe"]
         );
-        assert_eq!(
-            scan("include!(\"../elsewhere.rs\");"),
-            vec!["uses include!"]
-        );
+        assert_eq!(scan("include!(\"../elsewhere.rs\");"), vec!["uses include"]);
         // A module from a file the scan would not read (Codex review, round 12).
         assert_eq!(
             scan("#[cfg(not(debug_assertions))] #[path = \"release.inc\"] mod release;"),
             vec!["uses #[path]"]
         );
         assert!(scan("let path = [1]; let v = [path];").is_empty());
+        // Raw identifiers, aliases and any delimiter (Codex review, round 12).
+        assert_eq!(scan("r#include!(\"payload.txt\");"), vec!["uses include"]);
+        assert_eq!(
+            scan("use core::include as load; load!(\"payload.txt\");"),
+            vec!["uses include"]
+        );
+        assert_eq!(
+            scan("#[cfg(not(debug_assertions))] core::arch::global_asm! { \".byte 0\" }"),
+            vec!["uses global_asm"]
+        );
+        assert_eq!(scan("fn f() { r#unsafe { } }"), vec!["uses unsafe"]);
         // Words in strings and comments are not tokens.
-        assert!(scan("// unsafe\nconst S: &str = \"unsafe { }\"; fn r#unsafe() {}").is_empty());
+        assert!(scan("// unsafe\nconst S: &str = \"unsafe { }\";").is_empty());
         assert!(scan("const B: &[u8] = include_bytes!(\"x.bin\");").is_empty());
     }
 

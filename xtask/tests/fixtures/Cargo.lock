@@ -15,6 +15,10 @@ name = "planted-commented"
 version = "0.0.0"
 
 [[package]]
+name = "planted-decoy"
+version = "0.0.0"
+
+[[package]]
 name = "planted-extern-block"
 version = "0.0.0"
 
