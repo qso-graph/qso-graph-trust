@@ -27,6 +27,12 @@ every platform:
   object file (`.c`, `.h`, `.s`, `.o`, `.a`, `.so`, `.dll` and the like) fails the check, even in a
   comment.
 
+**Nothing may weaken those lints.** `--cap-lints` overrides even `forbid(unsafe_code)`, so the
+repository's one Cargo configuration file is `.cargo/config.toml` holding only `[alias]`, no other
+Cargo configuration file exists in it, no workflow mentions a lint cap or `unsafe_code`, and the
+check refuses flags in its environment that cap lints or lower `unsafe_code`. CI builds and tests with
+every feature on, so no code hides behind one.
+
 **For the workspace's own crates the compiler is the enforcer.** Each is edition 2024 and forbids
 unsafe code (both checked by `cargo xtask policy`), and under those two rules rustc refuses every
 `extern` block, `#[link]`ed or not, all inline and global assembly, and `no_mangle`: checked against

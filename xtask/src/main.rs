@@ -14,7 +14,8 @@ fn main() -> ExitCode {
         eprintln!("usage: cargo xtask policy");
         return ExitCode::from(2);
     }
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../Cargo.toml");
+    let root_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    let root = root_dir.join("Cargo.toml");
     let meta = match xtask::metadata(&root) {
         Ok(m) => m,
         Err(e) => {
@@ -26,6 +27,7 @@ fn main() -> ExitCode {
     for (check, problems) in [
         ("no C in the library", xtask::no_c(&meta, xtask::PROTECTED)),
         ("no unsafe code", xtask::no_unsafe(&meta)),
+        ("no lint overrides", xtask::no_lint_overrides(&root_dir)),
     ] {
         if problems.is_empty() {
             println!("policy: {check}: pass");

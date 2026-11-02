@@ -437,6 +437,92 @@ pub fn workspace_forbids_unsafe(manifest: &toml::Table) -> bool {
     }
 }
 
+/// Every way a build of this repository could have its lints weakened, sorted.
+/// `--cap-lints` overrides even `forbid(unsafe_code)` (found by Codex review, and
+/// checked against rustc 1.99.1), as do `-A`/`-W`/`--force-warn unsafe_code`. So:
+/// the repository's one Cargo configuration file is `.cargo/config.toml`, holding
+/// only `[alias]`; no other Cargo configuration file exists anywhere in it; no
+/// workflow mentions a lint cap or the lint itself; and the environment the check
+/// runs in (CI's, in CI) passes no such flag.
+pub fn no_lint_overrides(root: &Path) -> Vec<String> {
+    let mut problems = Vec::new();
+    let config = root.join(".cargo").join("config.toml");
+    match read_toml(&config) {
+        Ok(t) => {
+            for key in t.keys().filter(|k| k.as_str() != "alias") {
+                problems.push(format!(
+                    ".cargo/config.toml has [{key}]: only [alias] is allowed"
+                ));
+            }
+        }
+        Err(e) => problems.push(e),
+    }
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else {
+            problems.push(format!("{} cannot be read", d.display()));
+            continue;
+        };
+        for entry in entries {
+            let Ok(entry) = entry else {
+                problems.push(format!("{} has an entry that cannot be read", d.display()));
+                continue;
+            };
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
+            if is_dir {
+                if !(d == root && matches!(name.as_str(), "target" | ".git")) {
+                    stack.push(path);
+                }
+                continue;
+            }
+            let in_cargo_dir = d.file_name().is_some_and(|n| n == ".cargo");
+            if in_cargo_dir && matches!(name.as_str(), "config" | "config.toml") && path != config {
+                problems.push(format!("{} is a Cargo configuration file", path.display()));
+            }
+            let in_workflows = d.ends_with(Path::new(".github").join("workflows"));
+            if in_workflows {
+                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                for word in ["cap-lints", "force-warn", "unsafe_code"] {
+                    if text.contains(word) {
+                        problems.push(format!("workflow {name} mentions {word}"));
+                    }
+                }
+            }
+        }
+    }
+    for (var, value) in std::env::vars() {
+        let flags = var == "RUSTFLAGS"
+            || var == "CARGO_ENCODED_RUSTFLAGS"
+            || var == "CARGO_BUILD_RUSTFLAGS"
+            || (var.starts_with("CARGO_TARGET_") && var.ends_with("_RUSTFLAGS"));
+        if flags && flags_weaken_unsafe(&value) {
+            problems.push(format!("{var} weakens lints: {value}"));
+        }
+    }
+    problems.sort();
+    problems
+}
+
+/// Whether compiler flags cap lints or lower `unsafe_code` below forbid.
+pub fn flags_weaken_unsafe(flags: &str) -> bool {
+    let words: Vec<&str> = flags
+        .split(|c: char| c.is_whitespace() || c == '\u{1f}')
+        .filter(|w| !w.is_empty())
+        .collect();
+    words.iter().enumerate().any(|(i, w)| {
+        let next = words.get(i + 1).copied().unwrap_or("");
+        w.starts_with("--cap-lints")
+            || w.starts_with("--force-warn")
+            || matches!(*w, "-A" | "-W" | "--allow" | "--warn") && next == "unsafe_code"
+            || matches!(
+                *w,
+                "-Aunsafe_code" | "-Wunsafe_code" | "--allow=unsafe_code" | "--warn=unsafe_code"
+            )
+    })
+}
+
 /// Whether a crate root forbids unsafe code with an inner attribute that the
 /// compiler applies: `#![forbid(...)]` naming the lint `unsafe_code`, not under
 /// `cfg_attr`. The file is parsed by `syn`, a complete Rust parser, so shebangs,
@@ -449,24 +535,32 @@ pub fn forbids_unsafe(source: &str) -> bool {
     let Ok(file) = syn::parse_file(source) else {
         return false;
     };
-    file.attrs
-        .iter()
-        .filter(|a| matches!(a.style, syn::AttrStyle::Inner(_)) && a.path().is_ident("forbid"))
-        .any(|a| {
-            let mut found = false;
-            let parsed = a.parse_nested_meta(|meta| {
-                if meta.input.peek(syn::Token![=]) {
-                    // `name = value`, such as `reason = "..."`: not a lint.
-                    meta.value()?.parse::<syn::Expr>()?;
-                } else if meta.path.is_ident("unsafe_code") && meta.input.is_empty()
-                    || meta.path.is_ident("unsafe_code") && meta.input.peek(syn::Token![,])
-                {
-                    found = true;
-                }
-                Ok(())
-            });
-            parsed.is_ok() && found
-        })
+    file.attrs.iter().any(|a| {
+        if !matches!(a.style, syn::AttrStyle::Inner(_)) || !a.path().is_ident("forbid") {
+            return false;
+        }
+        // `forbid(...)` only: rustc rejects `forbid[...]` and `forbid{...}` (found by
+        // Codex review), so neither may count.
+        let syn::Meta::List(list) = &a.meta else {
+            return false;
+        };
+        if !matches!(list.delimiter, syn::MacroDelimiter::Paren(_)) {
+            return false;
+        }
+        let mut found = false;
+        let parsed = list.parse_nested_meta(|meta| {
+            if meta.input.peek(syn::Token![=]) {
+                // `name = value`, such as `reason = "..."`: not a lint.
+                meta.value()?.parse::<syn::Expr>()?;
+            } else if meta.path.is_ident("unsafe_code")
+                && (meta.input.is_empty() || meta.input.peek(syn::Token![,]))
+            {
+                found = true;
+            }
+            Ok(())
+        });
+        parsed.is_ok() && found
+    })
 }
 
 #[cfg(test)]
@@ -681,6 +775,38 @@ pub fn proof() {}
 pub fn proof() {}
 "##
         ));
+    }
+
+    #[test]
+    fn only_parentheses_make_a_lint_list() {
+        assert!(!forbids_unsafe("#![forbid{unsafe_code}]"));
+        assert!(!forbids_unsafe("#![forbid[unsafe_code]]"));
+        assert!(!forbids_unsafe("#![forbid = \"unsafe_code\"]"));
+    }
+
+    #[test]
+    fn flags_that_cap_or_lower_the_lint_are_refused() {
+        for f in [
+            "--cap-lints=allow",
+            "-D warnings --cap-lints warn",
+            "-A unsafe_code",
+            "-Aunsafe_code",
+            "--allow=unsafe_code",
+            "-W unsafe_code",
+            "--force-warn unsafe_code",
+            "-D warnings\u{1f}--cap-lints=allow",
+        ] {
+            assert!(flags_weaken_unsafe(f), "{f}");
+        }
+        for f in [
+            "",
+            "-D warnings",
+            "-C target-cpu=native",
+            "-A dead_code",
+            "-D unsafe_code",
+        ] {
+            assert!(!flags_weaken_unsafe(f), "{f}");
+        }
     }
 
     #[test]

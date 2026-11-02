@@ -84,8 +84,43 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
 }
 
 #[test]
+fn every_planted_way_to_override_the_lints_is_caught() {
+    // A repository made for the test: a lint cap in the Cargo configuration, a
+    // second configuration file inside a crate, and a workflow passing a cap. A
+    // cap overrides even forbid(unsafe_code) (found by Codex review).
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("planted-overrides");
+    let _ = std::fs::remove_dir_all(&root);
+    let write = |rel: &str, text: &str| {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().expect("a parent")).expect("mkdir");
+        std::fs::write(path, text).expect("write");
+    };
+    write(
+        ".cargo/config.toml",
+        "[alias]\nxtask = \"run\"\n\n[build]\nrustflags = [\"--cap-lints=allow\"]\n",
+    );
+    write("crates/lib/.cargo/config.toml", "[build]\nrustflags = []\n");
+    write(
+        ".github/workflows/ci.yml",
+        "env:\n  RUSTFLAGS: --cap-lints warn\n",
+    );
+    let nested = root
+        .join("crates/lib/.cargo/config.toml")
+        .display()
+        .to_string();
+    let mut want = vec![
+        ".cargo/config.toml has [build]: only [alias] is allowed".to_string(),
+        format!("{nested} is a Cargo configuration file"),
+        "workflow ci.yml mentions cap-lints".to_string(),
+    ];
+    want.sort();
+    assert_eq!(xtask::no_lint_overrides(&root), want);
+}
+
+#[test]
 fn this_repository_passes() {
     let meta = xtask::metadata(&here("../Cargo.toml")).expect("workspace metadata");
     assert_eq!(xtask::no_c(&meta, xtask::PROTECTED), Vec::<String>::new());
     assert_eq!(xtask::no_unsafe(&meta), Vec::<String>::new());
+    assert_eq!(xtask::no_lint_overrides(&here("..")), Vec::<String>::new());
 }
