@@ -14,7 +14,7 @@ fn main() -> ExitCode {
     match (args.first().map(String::as_str), args.len()) {
         (Some("policy"), 1) => {}
         (Some("canary"), 1) => {
-            return match xtask::canary(&root_dir, &xtask::canary_work("ci"), &[]) {
+            return match xtask::canary(&root_dir, &[]) {
                 Ok(()) => {
                     println!("canary: unsafe code was refused: pass");
                     ExitCode::SUCCESS
@@ -43,6 +43,7 @@ fn main() -> ExitCode {
         ("no C in the library", xtask::no_c(&meta, xtask::PROTECTED)),
         ("no unsafe code", xtask::no_unsafe(&meta)),
         ("no lint overrides", xtask::no_lint_overrides(&root_dir)),
+        ("the pinned compiler", xtask::pinned_compiler(&root_dir)),
     ] {
         if problems.is_empty() {
             println!("policy: {check}: pass");

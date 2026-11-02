@@ -114,6 +114,12 @@ fn every_planted_way_to_override_the_lints_is_caught() {
         "cargo-features = [\"profile-rustflags\"]\n\n[workspace]\n\n\
          [profile.dev.package.qso-graph-trust]\nrustflags = [\"--cap-lints=allow\"]\n",
     );
+    // An extensionless toolchain file, which rustup reads first, and one in a crate.
+    write("rust-toolchain", "nightly\n");
+    write(
+        "crates/lib/rust-toolchain.toml",
+        "[toolchain]\nchannel = \"nightly\"\n",
+    );
     // A second configuration file inside a crate.
     write("crates/lib/.cargo/config.toml", "[build]\nrustflags = []\n");
     // Workflows: a response file, another configuration, a wrapper, a native library.
@@ -137,13 +143,19 @@ fn every_planted_way_to_override_the_lints_is_caught() {
         .join("crates/lib/.cargo/config.toml")
         .display()
         .to_string();
-    let mut want = vec![
+    let mut want =
+        vec![
         ".cargo/config.toml has [build]: only [alias] is allowed".to_string(),
         format!(
             ".cargo/config.toml's [alias] must be exactly xtask = \"{}\"",
             xtask::XTASK_ALIAS
         ),
         format!("{nested} is a Cargo configuration file"),
+        format!("{} is a toolchain file", root.join("rust-toolchain").display()),
+        format!(
+            "{} is a toolchain file",
+            root.join("crates/lib/rust-toolchain.toml").display()
+        ),
         "Cargo.toml has cargo-features".to_string(),
         "Cargo.toml sets profile.dev.package.qso-graph-trust.rustflags".to_string(),
         "rust-toolchain.toml must name an exact stable release, not Some(\"nightly-2026-10-01\")"
@@ -162,20 +174,11 @@ fn every_planted_way_to_override_the_lints_is_caught() {
 #[test]
 fn the_canary_is_refused_here_and_compiles_under_a_lint_cap() {
     let root = here("..");
-    // Never inside the repository: it refuses to work there.
-    assert!(xtask::canary(&root, &root.join("target").join("inside"), &[]).is_err());
     // As this repository builds: refused.
-    assert_eq!(
-        xtask::canary(&root, &xtask::canary_work("plain"), &[]),
-        Ok(())
-    );
+    assert_eq!(xtask::canary(&root, &[]), Ok(()));
     // PLANTED: a lint cap in the environment. The canary must notice it compiled.
     assert_eq!(
-        xtask::canary(
-            &root,
-            &xtask::canary_work("capped"),
-            &[("RUSTFLAGS", "--cap-lints=allow")]
-        ),
+        xtask::canary(&root, &[("RUSTFLAGS", "--cap-lints=allow")]),
         Err("the canary compiled: something in this build weakens forbid(unsafe_code)".to_string())
     );
     // unsafe_code forced to a warning: the workspace's forbid still wins in a
@@ -183,11 +186,7 @@ fn the_canary_is_refused_here_and_compiles_under_a_lint_cap() {
     // A warning beside another error is not taken for a refusal either:
     // refused_by_unsafe_code's own test.
     assert_eq!(
-        xtask::canary(
-            &root,
-            &xtask::canary_work("warned"),
-            &[("RUSTFLAGS", "--force-warn=unsafe_code")]
-        ),
+        xtask::canary(&root, &[("RUSTFLAGS", "--force-warn=unsafe_code")]),
         Ok(())
     );
 }
@@ -198,4 +197,5 @@ fn this_repository_passes() {
     assert_eq!(xtask::no_c(&meta, xtask::PROTECTED), Vec::<String>::new());
     assert_eq!(xtask::no_unsafe(&meta), Vec::<String>::new());
     assert_eq!(xtask::no_lint_overrides(&here("..")), Vec::<String>::new());
+    assert_eq!(xtask::pinned_compiler(&here("..")), Vec::<String>::new());
 }

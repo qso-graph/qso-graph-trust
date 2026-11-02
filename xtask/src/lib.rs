@@ -520,6 +520,12 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
                 }
                 continue;
             }
+            // rustup reads `rust-toolchain` before `rust-toolchain.toml`, and the
+            // nearest one to where Cargo runs, so the root's `.toml` is the only
+            // toolchain file there may be (found by Codex review).
+            if name == "rust-toolchain" || (name == "rust-toolchain.toml" && d != root) {
+                problems.push(format!("{} is a toolchain file", path.display()));
+            }
             let in_cargo_dir = d.file_name().is_some_and(|n| n == ".cargo");
             if in_cargo_dir && matches!(name.as_str(), "config" | "config.toml") && path != config {
                 problems.push(format!("{} is a Cargo configuration file", path.display()));
@@ -570,6 +576,48 @@ fn rustflags_in(value: &toml::Value, path: &str) -> Vec<String> {
         }
     }
     found
+}
+
+/// Whether the compiler that actually runs from the repository's root is the
+/// release `rust-toolchain.toml` pins, and a stable one: whatever file, override
+/// or environment selected it, this is the compiler that builds QGT.
+pub fn pinned_compiler(root: &Path) -> Vec<String> {
+    let pinned = match read_toml(&root.join("rust-toolchain.toml")) {
+        Ok(t) => t
+            .get("toolchain")
+            .and_then(|c| c.get("channel"))
+            .and_then(toml::Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        Err(e) => return vec![e],
+    };
+    let out = Command::new("rustc").current_dir(root).arg("-vV").output();
+    match out {
+        Ok(o) if o.status.success() => {
+            compiler_problems(&String::from_utf8_lossy(&o.stdout), &pinned)
+        }
+        Ok(o) => vec![format!(
+            "rustc -vV failed: {}",
+            String::from_utf8_lossy(&o.stderr)
+        )],
+        Err(e) => vec![format!("cannot run rustc: {e}")],
+    }
+}
+
+/// What is wrong with `rustc -vV`'s report against the pinned release.
+pub fn compiler_problems(report: &str, pinned: &str) -> Vec<String> {
+    let release = report
+        .lines()
+        .find_map(|l| l.strip_prefix("release: "))
+        .unwrap_or("")
+        .trim();
+    if release == pinned && is_stable_version(release) {
+        Vec::new()
+    } else {
+        vec![format!(
+            "the compiler that runs is {release:?}, not the pinned stable {pinned:?}"
+        )]
+    }
 }
 
 /// The one alias the repository's Cargo configuration may hold.
@@ -669,48 +717,64 @@ pub fn flags_allowed(flags: &str) -> bool {
 /// It reads the compiler's JSON diagnostics: an `unsafe_code` warning beside an
 /// unrelated error is not a refusal (found by Codex review, as were the profile
 /// flags a stand-in crate could not see). `extra_env` is for the planted test.
-pub fn canary(root: &Path, work: &Path, extra_env: &[(&str, &str)]) -> Result<(), String> {
-    let result = canary_in(root, work, extra_env);
-    let _ = std::fs::remove_dir_all(work);
+pub fn canary(root: &Path, extra_env: &[(&str, &str)]) -> Result<(), String> {
+    let work = new_work_dir()?;
+    let result = canary_in(root, &work, extra_env);
+    // Only the directory this call created, so cleaning up can never remove
+    // anything else (found by Codex review: given a path, it once could).
+    let _ = std::fs::remove_dir_all(&work);
     result
 }
 
-/// The directory the canary works in: under the system's temporary directory,
-/// so never inside the repository, wherever Cargo's output directory is (found by
-/// Codex review: inside it, the copy recursed into itself and left a Cargo
-/// configuration the policy then found).
-pub fn canary_work(label: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("qgt-canary-{}-{label}", std::process::id()))
+/// A fresh directory under the system's temporary directory, created by this
+/// call (never one that already existed), outside the repository wherever
+/// Cargo's output directory is (found by Codex review: inside it, the copy
+/// recursed into itself and left a Cargo configuration the policy then found).
+fn new_work_dir() -> Result<PathBuf, String> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let base = std::path::absolute(std::env::temp_dir())
+        .map_err(|e| format!("cannot resolve the temporary directory: {e}"))?;
+    for _ in 0..100 {
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = base.join(format!("qgt-canary-{}-{n}", std::process::id()));
+        match std::fs::create_dir(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("cannot make {}: {e}", dir.display())),
+        }
+    }
+    Err("cannot find a free directory for the canary".into())
 }
 
 fn canary_in(root: &Path, work: &Path, extra_env: &[(&str, &str)]) -> Result<(), String> {
-    // Absolute, because the child Cargo runs from the copy, not from where this
-    // was called (found by Codex review).
-    let work =
-        std::path::absolute(work).map_err(|e| format!("cannot resolve {}: {e}", work.display()))?;
     let root_abs = std::fs::canonicalize(root)
         .map_err(|e| format!("cannot resolve {}: {e}", root.display()))?;
-    if work.starts_with(&root_abs)
-        || std::fs::canonicalize(&work).is_ok_and(|w| w.starts_with(&root_abs))
-    {
+    if std::fs::canonicalize(work).is_ok_and(|w| w.starts_with(&root_abs)) {
         return Err(format!(
-            "the canary must work outside the repository, not in {}",
+            "the canary must work outside the repository, not in {} (is TMPDIR inside it?)",
             work.display()
         ));
-    }
-    if work.exists() {
-        std::fs::remove_dir_all(&work)
-            .map_err(|e| format!("cannot clear {}: {e}", work.display()))?;
     }
     let copy = work.join("repo");
     // Cargo's output directory, if it is inside the repository, is left out of the copy.
     let output = std::env::var_os("CARGO_TARGET_DIR").map(|d| root.join(d));
     copy_repository(root, &copy, output.as_deref())?;
-    let lib = copy
-        .join("crates")
-        .join("qso-graph-trust")
-        .join("src")
-        .join("lib.rs");
+    // The library's root as Cargo has it, not an assumed path (found by Codex review).
+    let meta = metadata(&copy.join("Cargo.toml"))?;
+    let lib = meta["packages"]
+        .as_array()
+        .and_then(|ps| ps.iter().find(|p| p["name"] == "qso-graph-trust"))
+        .and_then(|p| p["targets"].as_array())
+        .and_then(|ts| {
+            ts.iter().find(|t| {
+                t["kind"]
+                    .as_array()
+                    .is_some_and(|k| k.iter().any(|k| k == "lib"))
+            })
+        })
+        .and_then(|t| t["src_path"].as_str())
+        .map(PathBuf::from)
+        .ok_or("the copy has no qso-graph-trust library target")?;
     let mut source =
         std::fs::read_to_string(&lib).map_err(|e| format!("cannot read {}: {e}", lib.display()))?;
     source.push_str("\n/// The canary's probe: the compiler must refuse it.\npub fn qgt_canary() -> u8 {\n    unsafe { core::ptr::read(&7) }\n}\n");
@@ -784,7 +848,9 @@ fn copy_repository(from: &Path, to: &Path, output: Option<&Path>) -> Result<(), 
                 let is_output = output
                     .as_ref()
                     .is_some_and(|o| std::fs::canonicalize(&path).is_ok_and(|p| p == *o));
-                if name == ".git" || name == "target" || is_output {
+                // `target` only at the root, where Cargo puts it: a source module
+                // may be named `target` (found by Codex review).
+                if name == ".git" || (src == from && name == "target") || is_output {
                     continue;
                 }
                 stack.push((path, dst.join(name)));
@@ -1114,6 +1180,24 @@ pub fn proof() {}
             assert_eq!(env(&[(var, "/x")]).len(), 1, "{var}");
         }
         assert_eq!(env(&[("RUSTFLAGS", "@/tmp/ci.rsp")]).len(), 1);
+    }
+
+    #[test]
+    fn only_the_pinned_stable_compiler_passes() {
+        let report = |r: &str| {
+            format!("rustc {r} (abc 2026-10-13)\nbinary: rustc\nrelease: {r}\nLLVM version: 21\n")
+        };
+        assert!(compiler_problems(&report("1.99.1"), "1.99.1").is_empty());
+        assert_eq!(
+            compiler_problems(&report("1.100.0-nightly"), "1.99.1").len(),
+            1
+        );
+        assert_eq!(compiler_problems(&report("1.99.0"), "1.99.1").len(), 1);
+        assert_eq!(
+            compiler_problems(&report("1.99.1-beta.2"), "1.99.1-beta.2").len(),
+            1
+        );
+        assert_eq!(compiler_problems("", "1.99.1").len(), 1);
     }
 
     #[test]
