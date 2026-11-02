@@ -7,8 +7,7 @@ seriously as a security problem gets.
 
 **Report it privately**, never in a public issue or pull request: use GitHub's
 [private vulnerability reporting](https://github.com/qso-graph/qso-graph-trust/security/advisories/new)
-for this repository (GitHub offers it once the repository is public; until then, tell KI7MT
-directly, with no details in an issue). Say what you found, how to reproduce it with test data, and what you think it
+for this repository. Say what you found, how to reproduce it with test data, and what you think it
 allows. Don't include a real certificate, key or password; describe its shape instead.
 
 You'll get an answer, and a fix is made before the details are published.
