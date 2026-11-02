@@ -384,24 +384,34 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
     // Cargo's output directory, by where Cargo says it is, never a directory
     // that merely has its name: a source module may be called `target` (found by
     // Codex review).
+    let member_dirs = skip.clone();
+    let mut outside: Vec<PathBuf> = Vec::new();
     if let Some(out) = meta["target_directory"]
         .as_str()
         .and_then(|t| std::fs::canonicalize(t).ok())
     {
-        skip.push(out);
+        outside.push(out);
     }
     if let Some(root) = meta["workspace_root"].as_str() {
         let excluded = read_toml(&Path::new(root).join("Cargo.toml"))
             .ok()
             .and_then(|t| t.get("workspace")?.get("exclude")?.as_array().cloned())
             .unwrap_or_default();
-        skip.extend(
+        outside.extend(
             excluded
                 .iter()
                 .filter_map(toml::Value::as_str)
                 .filter_map(|e| std::fs::canonicalize(Path::new(root).join(e)).ok()),
         );
     }
+    // The output directory and excluded paths are skipped only when they lie
+    // outside every crate: inside one, `mod` can still load them, so they are
+    // scanned like any other source (found by Codex review).
+    skip.extend(
+        outside
+            .into_iter()
+            .filter(|o| !member_dirs.iter().any(|m| o.starts_with(m))),
+    );
     for pkg in meta["packages"].as_array().unwrap_or(&empty) {
         if !pkg["id"].as_str().is_some_and(|id| workspace.contains(id)) {
             continue;
@@ -444,6 +454,10 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
             let Some(src) = target["src_path"].as_str() else {
                 continue;
             };
+            // A crate root of another extension would escape the token scan.
+            if !src.ends_with(".rs") {
+                problems.push(format!("{src} is a crate root that is not a .rs file"));
+            }
             match std::fs::read_to_string(src) {
                 Ok(text) if forbids_unsafe(&text) => {}
                 Ok(_) => problems.push(format!("{src} does not say #![forbid(unsafe_code)]")),
@@ -488,7 +502,17 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
                 if !other {
                     stack.push(path);
                 }
-            } else if path.extension().is_some_and(|e| e == "rs") {
+            } else if !path.extension().is_some_and(|e| e == "rs") {
+                // Only Rust, manifests and notes in a crate: a file of any other
+                // kind could be compiled as code through a path this scan cannot
+                // follow, so it is not allowed there (found by Codex review).
+                if !path.extension().is_some_and(|e| e == "toml" || e == "md") {
+                    found.push(format!(
+                        "{} is not a .rs, .toml or .md file",
+                        path.display()
+                    ));
+                }
+            } else {
                 let text = std::fs::read_to_string(&path).unwrap_or_default();
                 match text.parse::<proc_macro2::TokenStream>() {
                     Ok(tokens) => {
@@ -561,6 +585,12 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                 // (found by Codex review).
                 if attribute && assigns_path(g.stream()) {
                     found.push("uses #[path]");
+                }
+                // An attribute named by a macro variable, `#[$name = ...]`, could be
+                // made `path` by the caller (found by Codex review).
+                let first = g.stream().into_iter().next();
+                if attribute && matches!(&first, Some(TokenTree::Punct(p)) if p.as_char() == '$') {
+                    found.push("builds an attribute from a macro variable");
                 }
                 found.extend(unsafe_tokens(g.stream()));
             }
@@ -1401,6 +1431,15 @@ pub fn proof() {}
             vec!["uses #[path]"]
         );
         assert!(scan("let path = [1]; let v = [path];").is_empty());
+        // Codex review, round 13: a raw `path`, and an attribute named by a macro variable.
+        assert_eq!(
+            scan("#[r#path = \"payload.inc\"] mod hidden;"),
+            vec!["uses #[path]"]
+        );
+        assert_eq!(
+            scan("macro_rules! m { ($a:ident) => { #[$a = \"payload.inc\"] mod hidden; } }"),
+            vec!["builds an attribute from a macro variable"]
+        );
         // Inside cfg_attr (Codex review, round 13).
         assert_eq!(
             scan("#[cfg_attr(not(debug_assertions), path = \"release.inc\")] mod release;"),

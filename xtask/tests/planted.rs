@@ -2,7 +2,7 @@
 // Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 
 //! Each policy check against a workspace planted with exactly what it must
-//! catch (tests/fixtures), then against this repository, which must pass.
+//! catch (tests/policy-fixtures at the repository root), then against this repository, which must pass.
 
 #![forbid(unsafe_code)]
 
@@ -13,8 +13,17 @@ fn here(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel)
 }
 
+/// A file in the planted fixtures, by its resolved path, as the checks report it.
+fn fixture(rel: &str) -> String {
+    std::fs::canonicalize(here("../tests/policy-fixtures"))
+        .expect("the fixtures")
+        .join(rel)
+        .display()
+        .to_string()
+}
+
 fn fixtures() -> Value {
-    xtask::metadata(&here("tests/fixtures/Cargo.toml")).expect("fixture metadata")
+    xtask::metadata(&here("../tests/policy-fixtures/Cargo.toml")).expect("fixture metadata")
 }
 
 /// A fixture crate's library root as Cargo reports it, separators and all, so
@@ -77,15 +86,17 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
         format!("{} uses unsafe", lib_root(&meta, "planted-cfg-gated")),
         format!("{} uses unsafe", lib_root(&meta, "planted-extern-block")),
         // Beside a comment-only Cargo.toml, which makes no package.
-        here("tests/fixtures/decoy/src/hidden/payload.rs")
-            .display()
-            .to_string()
-            + " uses unsafe",
+        fixture("decoy/src/hidden/payload.rs") + " uses unsafe",
         // A real module in a directory named target.
-        here("tests/fixtures/target-module/target/mod.rs")
-            .display()
-            .to_string()
-            + " uses unsafe",
+        fixture("target-module/target/mod.rs") + " uses unsafe",
+        // Files of other kinds, which a path or include could compile.
+        fixture("extern-block/src/planted.c") + " is not a .rs, .toml or .md file",
+        fixture("path-module/src/release.inc") + " is not a .rs, .toml or .md file",
+        // A crate root that is not a .rs file.
+        fixture("inc-root/src/library.inc") + " is a crate root that is not a .rs file",
+        fixture("inc-root/src/library.inc") + " is not a .rs, .toml or .md file",
+        // Excluded by the workspace, but inside a crate, so mod still loads it.
+        fixture("excluded-inside/src/hidden/mod.rs") + " uses unsafe",
         // A module from a file the scan would not read.
         format!("{} uses #[path]", lib_root(&meta, "planted-path-module")),
         // The words "[lints] workspace = true" are there, but inside a string.

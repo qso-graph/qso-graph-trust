@@ -19,11 +19,19 @@ name = "planted-decoy"
 version = "0.0.0"
 
 [[package]]
+name = "planted-excluded-inside"
+version = "0.0.0"
+
+[[package]]
 name = "planted-extern-block"
 version = "0.0.0"
 
 [[package]]
 name = "planted-in-a-string"
+version = "0.0.0"
+
+[[package]]
+name = "planted-inc-root"
 version = "0.0.0"
 
 [[package]]

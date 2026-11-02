@@ -3,7 +3,7 @@
 [workspace]
 members = ["crates/qso-graph-trust", "crates/qgt", "xtask"]
 # The planted cases the policy checks must catch: a workspace of their own, never built here.
-exclude = ["xtask/tests/fixtures"]
+exclude = ["tests/policy-fixtures"]
 resolver = "3"
 
 [workspace.package]

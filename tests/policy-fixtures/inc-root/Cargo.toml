@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: a crate root that is not a .rs file, which the token scan would not read. Must be caught.
+[package]
+name = "planted-inc-root"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/library.inc"
+
+[lints]
+workspace = true
