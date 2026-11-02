@@ -144,6 +144,11 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
             .to_string()
     };
     let workspace = members(meta);
+    let output_dir: Vec<PathBuf> = meta["target_directory"]
+        .as_str()
+        .and_then(|t| std::fs::canonicalize(t).ok())
+        .into_iter()
+        .collect();
 
     let mut problems = Vec::new();
     let mut queue: VecDeque<&str> = VecDeque::new();
@@ -206,7 +211,7 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
                 }
             }
             if !exempt(&name) {
-                for found in native_in(dir) {
+                for found in native_in(dir, &output_dir) {
                     problems.push(format!("{name} {version}: {found}"));
                 }
             }
@@ -265,7 +270,7 @@ fn within(path: &Path, dir: &Path) -> bool {
 /// path relative to the crate and '/'-separated. A directory it cannot read is a
 /// finding, never a pass. Symbolic links are not followed, since one could point
 /// anywhere, and are findings themselves: a crate from crates.io never has one.
-fn native_in(dir: &Path) -> Vec<String> {
+fn native_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
     let mut found = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
@@ -307,7 +312,8 @@ fn native_in(dir: &Path) -> Vec<String> {
                 continue;
             }
             if kind.is_dir() {
-                if !matches!(rel.as_str(), "target" | ".git") {
+                let output = std::fs::canonicalize(&path).is_ok_and(|c| skip.contains(&c));
+                if rel != ".git" && !output {
                     stack.push(path);
                 }
                 continue;
@@ -375,6 +381,15 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
                 .and_then(|d| std::fs::canonicalize(d).ok())
         })
         .collect();
+    // Cargo's output directory, by where Cargo says it is, never a directory
+    // that merely has its name: a source module may be called `target` (found by
+    // Codex review).
+    if let Some(out) = meta["target_directory"]
+        .as_str()
+        .and_then(|t| std::fs::canonicalize(t).ok())
+    {
+        skip.push(out);
+    }
     if let Some(root) = meta["workspace_root"].as_str() {
         let excluded = read_toml(&Path::new(root).join("Cargo.toml"))
             .ok()
@@ -470,8 +485,7 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
                 // enough (found by Codex review: a decoy one hid a directory).
                 let canon = std::fs::canonicalize(&path).ok();
                 let other = canon.as_ref().is_some_and(|c| skip.iter().any(|s| s == c));
-                let output = d == dir && entry.file_name() == "target";
-                if !other && !output {
+                if !other {
                     stack.push(path);
                 }
             } else if path.extension().is_some_and(|e| e == "rs") {
@@ -543,8 +557,9 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                 // attribute: an array `[path]` is not one.
                 let attribute =
                     (after_hash || last_hash) && g.delimiter() == proc_macro2::Delimiter::Bracket;
-                let first = g.stream().into_iter().next();
-                if attribute && matches!(&first, Some(TokenTree::Ident(i)) if i == "path") {
+                // `path = ...` anywhere in an attribute, so inside `cfg_attr` too
+                // (found by Codex review).
+                if attribute && assigns_path(g.stream()) {
                     found.push("uses #[path]");
                 }
                 found.extend(unsafe_tokens(g.stream()));
@@ -555,6 +570,21 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
         last_hash = hash_now;
     }
     found
+}
+
+/// Whether a token stream holds `path =` at any depth.
+fn assigns_path(tokens: proc_macro2::TokenStream) -> bool {
+    use proc_macro2::TokenTree;
+    let trees: Vec<TokenTree> = tokens.into_iter().collect();
+    trees.iter().enumerate().any(|(i, tree)| match tree {
+        TokenTree::Ident(id) => {
+            let name = id.to_string();
+            name.strip_prefix("r#").unwrap_or(&name) == "path"
+                && matches!(trees.get(i + 1), Some(TokenTree::Punct(p)) if p.as_char() == '=')
+        }
+        TokenTree::Group(g) => assigns_path(g.stream()),
+        _ => false,
+    })
 }
 
 fn read_toml(path: &Path) -> Result<toml::Table, String> {
@@ -1371,6 +1401,11 @@ pub fn proof() {}
             vec!["uses #[path]"]
         );
         assert!(scan("let path = [1]; let v = [path];").is_empty());
+        // Inside cfg_attr (Codex review, round 13).
+        assert_eq!(
+            scan("#[cfg_attr(not(debug_assertions), path = \"release.inc\")] mod release;"),
+            vec!["uses #[path]"]
+        );
         // Raw identifiers, aliases and any delimiter (Codex review, round 12).
         assert_eq!(scan("r#include!(\"payload.txt\");"), vec!["uses include"]);
         assert_eq!(

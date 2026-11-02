@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: a real source module in a directory named target, holding unsafe behind a release-only cfg.
+# The token scan must read it: only Cargo's actual output directory is left out.
+[package]
+name = "planted-target-module"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "lib.rs"
+
+[lints]
+workspace = true

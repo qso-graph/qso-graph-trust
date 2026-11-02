@@ -81,6 +81,11 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
             .display()
             .to_string()
             + " uses unsafe",
+        // A real module in a directory named target.
+        here("tests/fixtures/target-module/target/mod.rs")
+            .display()
+            .to_string()
+            + " uses unsafe",
         // A module from a file the scan would not read.
         format!("{} uses #[path]", lib_root(&meta, "planted-path-module")),
         // The words "[lints] workspace = true" are there, but inside a string.

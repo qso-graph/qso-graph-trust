@@ -1,2 +1,2 @@
+# Cargo's output directory, at the root only: a source module may be called target.
 /target
-**/target
