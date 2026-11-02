@@ -19,7 +19,7 @@
 
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, VecDeque};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The crates that hold the key, the signing and the file parsers.
@@ -669,17 +669,43 @@ pub fn flags_allowed(flags: &str) -> bool {
 /// It reads the compiler's JSON diagnostics: an `unsafe_code` warning beside an
 /// unrelated error is not a refusal (found by Codex review, as were the profile
 /// flags a stand-in crate could not see). `extra_env` is for the planted test.
-pub fn canary(root: &Path, target_dir: &Path, extra_env: &[(&str, &str)]) -> Result<(), String> {
+pub fn canary(root: &Path, work: &Path, extra_env: &[(&str, &str)]) -> Result<(), String> {
+    let result = canary_in(root, work, extra_env);
+    let _ = std::fs::remove_dir_all(work);
+    result
+}
+
+/// The directory the canary works in: under the system's temporary directory,
+/// so never inside the repository, wherever Cargo's output directory is (found by
+/// Codex review: inside it, the copy recursed into itself and left a Cargo
+/// configuration the policy then found).
+pub fn canary_work(label: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("qgt-canary-{}-{label}", std::process::id()))
+}
+
+fn canary_in(root: &Path, work: &Path, extra_env: &[(&str, &str)]) -> Result<(), String> {
     // Absolute, because the child Cargo runs from the copy, not from where this
     // was called (found by Codex review).
-    let target_dir = std::path::absolute(target_dir)
-        .map_err(|e| format!("cannot resolve {}: {e}", target_dir.display()))?;
-    let copy = target_dir.join("qgt-canary");
-    if copy.exists() {
-        std::fs::remove_dir_all(&copy)
-            .map_err(|e| format!("cannot clear {}: {e}", copy.display()))?;
+    let work =
+        std::path::absolute(work).map_err(|e| format!("cannot resolve {}: {e}", work.display()))?;
+    let root_abs = std::fs::canonicalize(root)
+        .map_err(|e| format!("cannot resolve {}: {e}", root.display()))?;
+    if work.starts_with(&root_abs)
+        || std::fs::canonicalize(&work).is_ok_and(|w| w.starts_with(&root_abs))
+    {
+        return Err(format!(
+            "the canary must work outside the repository, not in {}",
+            work.display()
+        ));
     }
-    copy_repository(root, &copy, &target_dir)?;
+    if work.exists() {
+        std::fs::remove_dir_all(&work)
+            .map_err(|e| format!("cannot clear {}: {e}", work.display()))?;
+    }
+    let copy = work.join("repo");
+    // Cargo's output directory, if it is inside the repository, is left out of the copy.
+    let output = std::env::var_os("CARGO_TARGET_DIR").map(|d| root.join(d));
+    copy_repository(root, &copy, output.as_deref())?;
     let lib = copy
         .join("crates")
         .join("qso-graph-trust")
@@ -705,7 +731,8 @@ pub fn canary(root: &Path, target_dir: &Path, extra_env: &[(&str, &str)]) -> Res
             "json",
             "--target-dir",
         ])
-        .arg(copy.join("target"))
+        .arg(work.join("target"))
+        .env_remove("CARGO_TARGET_DIR")
         .output()
         .map_err(|e| format!("cannot run cargo for the canary: {e}"))?;
     let refused = refused_by_unsafe_code(&String::from_utf8_lossy(&out.stdout));
@@ -739,8 +766,8 @@ pub fn refused_by_unsafe_code(json_lines: &str) -> bool {
 /// Copy this repository's files to `to`, leaving out `.git`, every `target`
 /// directory and Cargo's output directory, so the canary builds what a commit
 /// holds. Symbolic links are not followed.
-fn copy_repository(from: &Path, to: &Path, output: &Path) -> Result<(), String> {
-    let output = std::fs::canonicalize(output).ok();
+fn copy_repository(from: &Path, to: &Path, output: Option<&Path>) -> Result<(), String> {
+    let output = output.and_then(|o| std::fs::canonicalize(o).ok());
     let mut stack = vec![(from.to_path_buf(), to.to_path_buf())];
     while let Some((src, dst)) = stack.pop() {
         std::fs::create_dir_all(&dst).map_err(|e| format!("cannot make {}: {e}", dst.display()))?;

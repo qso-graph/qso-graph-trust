@@ -161,15 +161,19 @@ fn every_planted_way_to_override_the_lints_is_caught() {
 
 #[test]
 fn the_canary_is_refused_here_and_compiles_under_a_lint_cap() {
-    let target = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("canary");
     let root = here("..");
+    // Never inside the repository: it refuses to work there.
+    assert!(xtask::canary(&root, &root.join("target").join("inside"), &[]).is_err());
     // As this repository builds: refused.
-    assert_eq!(xtask::canary(&root, &target.join("plain"), &[]), Ok(()));
+    assert_eq!(
+        xtask::canary(&root, &xtask::canary_work("plain"), &[]),
+        Ok(())
+    );
     // PLANTED: a lint cap in the environment. The canary must notice it compiled.
     assert_eq!(
         xtask::canary(
             &root,
-            &target.join("capped"),
+            &xtask::canary_work("capped"),
             &[("RUSTFLAGS", "--cap-lints=allow")]
         ),
         Err("the canary compiled: something in this build weakens forbid(unsafe_code)".to_string())
@@ -181,7 +185,7 @@ fn the_canary_is_refused_here_and_compiles_under_a_lint_cap() {
     assert_eq!(
         xtask::canary(
             &root,
-            &target.join("warned"),
+            &xtask::canary_work("warned"),
             &[("RUSTFLAGS", "--force-warn=unsafe_code")]
         ),
         Ok(())

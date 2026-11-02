@@ -14,10 +14,7 @@ fn main() -> ExitCode {
     match (args.first().map(String::as_str), args.len()) {
         (Some("policy"), 1) => {}
         (Some("canary"), 1) => {
-            let target = std::env::var_os("CARGO_TARGET_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| root_dir.join("target"));
-            return match xtask::canary(&root_dir, &target, &[]) {
+            return match xtask::canary(&root_dir, &xtask::canary_work("ci"), &[]) {
                 Ok(()) => {
                     println!("canary: unsafe code was refused: pass");
                     ExitCode::SUCCESS
