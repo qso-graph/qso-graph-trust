@@ -575,13 +575,21 @@ impl Lexer<'_> {
         };
         if let Some(n) = prefix {
             let raw = self.s[self.i..self.i + n].contains(&b'r');
-            let start = self.i;
             self.i += n;
             if raw {
-                // r#ident is a raw identifier, not a string.
                 let hashes = self.s[self.i..].iter().take_while(|&&b| b == b'#').count();
                 if self.peek(hashes) != Some(b'"') {
-                    self.i = start;
+                    // r#ident is one raw identifier, read whole: split, its last
+                    // letter could pass for a raw-string prefix (found by Codex
+                    // review: `r#r"..."`). Anything else here is not Rust.
+                    let ident = self
+                        .peek(1)
+                        .is_some_and(|c| c == b'_' || c.is_ascii_alphabetic() || c >= 0x80);
+                    if n == 1 && hashes == 1 && ident {
+                        self.i += 1;
+                        return Some(Tok::Word(format!("r#{}", self.word())));
+                    }
+                    return Some(Tok::Bad);
                 } else {
                     self.i += hashes + 1;
                     return Some(self.raw_string_end(hashes));
@@ -862,6 +870,21 @@ mod tests {
         assert!(forbids_unsafe(
             "#![doc = \"x\"suffix]\n#![forbid(unsafe_code)]"
         ));
+    }
+
+    #[test]
+    fn a_raw_identifier_is_one_token() {
+        // `r#r` is a raw identifier; the string after it is ordinary (Codex review, round 4).
+        assert!(!forbids_unsafe(
+            r##"#![cfg_attr(any(), arbitrary(r#r"\"))]
+#![forbid(unsafe_code)]
+"))]
+pub fn proof() {}
+"##
+        ));
+        assert!(forbids_unsafe("#![doc(r#type)]\n#![forbid(unsafe_code)]"));
+        // Not Rust: fails closed.
+        assert!(!forbids_unsafe("#![doc(r##x)]\n#![forbid(unsafe_code)]"));
     }
 
     #[test]
