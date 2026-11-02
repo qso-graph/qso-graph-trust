@@ -586,10 +586,10 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                 if attribute && assigns_path(g.stream()) {
                     found.push("uses #[path]");
                 }
-                // An attribute named by a macro variable, `#[$name = ...]`, could be
-                // made `path` by the caller (found by Codex review).
-                let first = g.stream().into_iter().next();
-                if attribute && matches!(&first, Some(TokenTree::Punct(p)) if p.as_char() == '$') {
+                // An attribute holding a macro variable, `#[$name = ...]` or
+                // `#[cfg_attr(..., $name = ...)]`, could be made `path` by the caller.
+                // Anywhere in it, so inside `cfg_attr` too (found by Codex review).
+                if attribute && has_dollar(g.stream()) {
                     found.push("builds an attribute from a macro variable");
                 }
                 found.extend(unsafe_tokens(g.stream()));
@@ -600,6 +600,16 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
         last_hash = hash_now;
     }
     found
+}
+
+/// Whether a token stream holds a `$` at any depth.
+fn has_dollar(tokens: proc_macro2::TokenStream) -> bool {
+    use proc_macro2::TokenTree;
+    tokens.into_iter().any(|tree| match tree {
+        TokenTree::Punct(p) => p.as_char() == '$',
+        TokenTree::Group(g) => has_dollar(g.stream()),
+        _ => false,
+    })
 }
 
 /// Whether a token stream holds `path =` at any depth.
@@ -1438,6 +1448,13 @@ pub fn proof() {}
         );
         assert_eq!(
             scan("macro_rules! m { ($a:ident) => { #[$a = \"payload.inc\"] mod hidden; } }"),
+            vec!["builds an attribute from a macro variable"]
+        );
+        // Inside cfg_attr (Codex review, round 14).
+        assert_eq!(
+            scan(
+                "macro_rules! m { ($a:ident) => { #[cfg_attr(not(debug_assertions), $a = \"hidden.md\")] mod hidden; } }"
+            ),
             vec!["builds an attribute from a macro variable"]
         );
         // Inside cfg_attr (Codex review, round 13).

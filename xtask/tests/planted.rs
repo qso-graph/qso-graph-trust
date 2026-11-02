@@ -13,13 +13,22 @@ fn here(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel)
 }
 
-/// A file in the planted fixtures, by its resolved path, as the checks report it.
-fn fixture(rel: &str) -> String {
-    std::fs::canonicalize(here("../tests/policy-fixtures"))
-        .expect("the fixtures")
-        .join(rel)
-        .display()
-        .to_string()
+/// A file of a fixture crate, from the crate's directory as Cargo reports it,
+/// joined part by part, so the text is what the checks print on every platform:
+/// canonicalize gives `\\?\` paths on Windows, which Cargo does not (found by
+/// Codex review).
+fn fixture(meta: &Value, package: &str, rel: &str) -> String {
+    let manifest = meta["packages"]
+        .as_array()
+        .and_then(|ps| ps.iter().find(|p| p["name"] == package))
+        .and_then(|p| p["manifest_path"].as_str())
+        .unwrap_or_else(|| panic!("{package} is not a fixture crate"));
+    let mut path = PathBuf::from(manifest);
+    path.pop();
+    for part in rel.split('/') {
+        path.push(part);
+    }
+    path.display().to_string()
 }
 
 fn fixtures() -> Value {
@@ -86,17 +95,19 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
         format!("{} uses unsafe", lib_root(&meta, "planted-cfg-gated")),
         format!("{} uses unsafe", lib_root(&meta, "planted-extern-block")),
         // Beside a comment-only Cargo.toml, which makes no package.
-        fixture("decoy/src/hidden/payload.rs") + " uses unsafe",
+        fixture(&meta, "planted-decoy", "src/hidden/payload.rs") + " uses unsafe",
         // A real module in a directory named target.
-        fixture("target-module/target/mod.rs") + " uses unsafe",
+        fixture(&meta, "planted-target-module", "target/mod.rs") + " uses unsafe",
         // Files of other kinds, which a path or include could compile.
-        fixture("extern-block/src/planted.c") + " is not a .rs, .toml or .md file",
-        fixture("path-module/src/release.inc") + " is not a .rs, .toml or .md file",
+        fixture(&meta, "planted-extern-block", "src/planted.c")
+            + " is not a .rs, .toml or .md file",
+        fixture(&meta, "planted-path-module", "src/release.inc")
+            + " is not a .rs, .toml or .md file",
         // A crate root that is not a .rs file.
-        fixture("inc-root/src/library.inc") + " is a crate root that is not a .rs file",
-        fixture("inc-root/src/library.inc") + " is not a .rs, .toml or .md file",
+        lib_root(&meta, "planted-inc-root") + " is a crate root that is not a .rs file",
+        fixture(&meta, "planted-inc-root", "src/library.inc") + " is not a .rs, .toml or .md file",
         // Excluded by the workspace, but inside a crate, so mod still loads it.
-        fixture("excluded-inside/src/hidden/mod.rs") + " uses unsafe",
+        fixture(&meta, "planted-excluded-inside", "src/hidden/mod.rs") + " uses unsafe",
         // A module from a file the scan would not read.
         format!("{} uses #[path]", lib_root(&meta, "planted-path-module")),
         // The words "[lints] workspace = true" are there, but inside a string.
@@ -166,7 +177,10 @@ fn every_planted_way_to_override_the_lints_is_caught() {
         "env:\n  RUSTFLAGS: -l static=z\n",
     );
     let nested = root
-        .join("crates/lib/.cargo/config.toml")
+        .join("crates")
+        .join("lib")
+        .join(".cargo")
+        .join("config.toml")
         .display()
         .to_string();
     let mut want =
@@ -180,7 +194,7 @@ fn every_planted_way_to_override_the_lints_is_caught() {
         format!("{} is a toolchain file", root.join("rust-toolchain").display()),
         format!(
             "{} is a toolchain file",
-            root.join("crates/lib/rust-toolchain.toml").display()
+            root.join("crates").join("lib").join("rust-toolchain.toml").display()
         ),
         "Cargo.toml has cargo-features".to_string(),
         "Cargo.toml sets profile.dev.package.qso-graph-trust.rustflags".to_string(),
