@@ -6,8 +6,20 @@ Decided 2026-11-02 by KI7MT.
 
 Nothing in the dependency tree of `qso-graph-trust`, the crate that holds the key, the signing and
 every file parser, may link a native library or build C, C++ or assembly, on any platform.
-`cargo xtask policy` enforces it on every pull request, and a planted case proves the check works
-(`xtask/tests/planted.rs`).
+
+`cargo xtask policy` enforces it on every pull request, over that tree with every feature on and on
+every platform:
+
+- no crate in it declares a native link (`links`);
+- no crate in it depends on a crate whose job is building native code (`cc`, `cmake`, `bindgen` and
+  the like);
+- every build script or procedural macro in it is on a reviewed list by **exact name and version**,
+  because a build script can run a compiler itself without declaring anything. A new version is a new
+  review. The list is empty today.
+
+What a reviewed build script does is a judgement made by reading it; the check guarantees that
+judgement is made for every one, and made again when its version changes. Planted cases prove each
+rule fails when broken (`xtask/tests/planted.rs`).
 
 The HTTPS connection to LoTW is the one exception. No production-grade pure-Rust TLS provider exists
 (`rustls-rustcrypto` is 0.0.2-alpha and says not to use it in production), so the upload uses rustls

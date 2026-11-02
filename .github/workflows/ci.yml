@@ -71,9 +71,11 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - name: cargo xtask policy
         run: cargo xtask policy
+      # An exact release: --locked pins its dependencies, not which release
+      # runs, so without --version a new one would run unreviewed (found by Codex review).
       - name: cargo audit
         run: |
-          cargo install cargo-audit --locked --quiet
+          cargo install cargo-audit --version 0.22.2 --locked --quiet
           cargo audit --file Cargo.lock
 
   ci-all-green:

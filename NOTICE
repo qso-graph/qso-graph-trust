@@ -15,4 +15,4 @@ BSD-style terms. Where QGT carries data or text derived from TrustedQSL, that fi
 copyright notice and licence terms as they require.
 
 The crates QGT depends on are not part of this repository and are used under each one's own licence,
-recorded in Cargo.lock's sources.
+as each crate's manifest and licence files state. Cargo.lock names each one and where it came from.

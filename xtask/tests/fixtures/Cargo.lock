@@ -3,6 +3,18 @@
 version = 4
 
 [[package]]
+name = "planted-build-script"
+version = "0.0.0"
+
+[[package]]
+name = "planted-commented"
+version = "0.0.0"
+
+[[package]]
+name = "planted-in-a-string"
+version = "0.0.0"
+
+[[package]]
 name = "planted-native"
 version = "0.0.0"
 
@@ -15,8 +27,14 @@ name = "planted-no-lints"
 version = "0.0.0"
 
 [[package]]
+name = "planted-optional-native"
+version = "0.0.0"
+
+[[package]]
 name = "qso-graph-trust"
 version = "0.0.0"
 dependencies = [
+ "planted-build-script",
  "planted-native",
+ "planted-optional-native",
 ]

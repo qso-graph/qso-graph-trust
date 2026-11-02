@@ -82,23 +82,28 @@ for bits in 1024 2048; do
   openssl x509 -req -in "$work/$name.csr" -CA "$out/ca.pem" -CAkey "$work/ca.key" -CAcreateserial \
     -days 36500 -sha256 -extfile "$work/ext.cnf" -extensions user -out "$out/$name.pem"
 
-  # The .tq6 ARRL would send: gzipped XML (gzip -n, so no name or time inside).
-  {
-    printf '<?xml version="1.0" encoding="UTF-8"?>\n<tqsldata>\n<tqslcerts>\n'
-    printf '<rootcert>\n%s</rootcert>\n' "$(cat "$out/root.pem")
-"
-    printf '<cacert>\n%s</cacert>\n' "$(cat "$out/ca.pem")
-"
-    printf '<usercert>\n%s</usercert>\n' "$(cat "$out/$name.pem")
-"
-    printf '</tqslcerts>\n</tqsldata>\n'
-  } | gzip -n -9 > "$out/$name.tq6"
+  # The .tq6 ARRL would send: gzipped XML (gzip -n, so no name or time inside). Written as a file
+  # first, one command at a time, so a failed read stops the script instead of leaving an empty
+  # element (found by Codex review).
+  xml="$work/$name.xml"
+  printf '<?xml version="1.0" encoding="UTF-8"?>\n<tqsldata>\n<tqslcerts>\n' > "$xml"
+  for part in "rootcert:root" "cacert:ca" "usercert:$name"; do
+    printf '<%s>\n' "${part%%:*}" >> "$xml"
+    cat "$out/${part#*:}.pem" >> "$xml"
+    printf '</%s>\n' "${part%%:*}" >> "$xml"
+  done
+  printf '</tqslcerts>\n</tqsldata>\n' >> "$xml"
+  gzip -n -9 -c "$xml" > "$out/$name.tq6"
 
-  # PKCS#12 backups: TQSL's default (AES-256, PBES2) and its weak-crypto option (RC2-40 for the
-  # certificate, 3DES for the key, SHA-1 MAC), src/openssl_cert.cpp:2436-2469.
-  openssl pkcs12 -export -inkey "$out/$name.key.pem" -in "$out/$name.pem" -certfile "$out/ca.pem" \
+  # PKCS#12 files made by OpenSSL with the two encryptions TQSL uses: its default (AES-256, PBES2)
+  # and its weak-crypto option (RC2-40 for the certificates, 3DES for the key, SHA-1 MAC),
+  # src/openssl_cert.cpp:2436-2469, with the chain to the root. They are not TQSL's own backups:
+  # TQSL also adds bag attributes (callsign, QSO dates, DXCC), so its backups are made by tqsllib
+  # itself in phase 2 (found by Codex review).
+  cat "$out/ca.pem" "$out/root.pem" > "$work/chain.pem"
+  openssl pkcs12 -export -inkey "$out/$name.key.pem" -in "$out/$name.pem" -certfile "$work/chain.pem" \
     -name "$CALL" -passout "pass:$P12_PASSWORD" -out "$out/$name-aes.p12"
-  openssl pkcs12 -export -legacy -inkey "$out/$name.key.pem" -in "$out/$name.pem" -certfile "$out/ca.pem" \
+  openssl pkcs12 -export -legacy -inkey "$out/$name.key.pem" -in "$out/$name.pem" -certfile "$work/chain.pem" \
     -name "$CALL" -passout "pass:$P12_PASSWORD" -out "$out/$name-legacy.p12"
 done
 
@@ -108,16 +113,39 @@ for bits in 1024 2048; do
   subject=$(openssl x509 -in "$out/user-$bits.pem" -noout -subject -nameopt oid,sep_comma_plus)
   grep -q "1\.3\.6\.1\.4\.1\.12348\.1\.1=$CALL," <<<"$subject"
   text=$(openssl x509 -in "$out/user-$bits.pem" -noout -text)
-  # Each extension's value, on the line under its own OID.
+  # Each extension's value, exactly: the whole octet string, read from the DER, must be the text's
+  # own bytes and nothing more (found by Codex review: a printed first word accepted trailing data).
+  der="$work/user-$bits.der"
+  openssl x509 -in "$out/user-$bits.pem" -outform DER -out "$der"
+  asn=$(openssl asn1parse -inform DER -in "$der")
   for pair in "2:$NOT_BEFORE" "3:$NOT_AFTER" "4:$DXCC"; do
-    got=$(awk -v oid="1.3.6.1.4.1.12348.1.${pair%%:*}:" '$1 == oid { getline; print $1; exit }' <<<"$text")
-    [ "$got" = "${pair#*:}" ] || { echo "extension .${pair%%:*} is '$got', not '${pair#*:}'" >&2; exit 1; }
+    oid="1.3.6.1.4.1.12348.1.${pair%%:*}"
+    # The OCTET STRING after the OID: its offset, header length and length, as asn1parse prints them.
+    read -r off hl len < <(awk -v oid=":$oid" '
+      index($0, oid) && substr($0, length($0) - length(oid) + 1) == oid { f = 1; next }
+      f && /prim: OCTET STRING/ {
+        o = $0; sub(/^ */, "", o); sub(/:.*/, "", o)
+        match($0, /hl= *[0-9]+/); h = substr($0, RSTART + 3, RLENGTH - 3)
+        match($0, / l= *[0-9]+/); l = substr($0, RSTART + 3, RLENGTH - 3)
+        print o + 0, h + 0, l + 0; exit }' <<<"$asn")
+    [ -n "${len:-}" ] || { echo "extension $oid not found" >&2; exit 1; }
+    got=$(od -An -tx1 -j $((off + hl)) -N "$len" "$der" | tr -d ' \n' | tr 'a-f' 'A-F')
+    want=$(hex "${pair#*:}" | tr 'a-f' 'A-F')
+    [ "$got" = "$want" ] || { echo "extension $oid holds '$got', not '$want' ('${pair#*:}')" >&2; exit 1; }
   done
   keytext=$(openssl rsa -in "$out/user-$bits.key.pem" -noout -text 2>/dev/null)
   [ "${keytext%%$'\n'*}" = "Private-Key: ($bits bit, 2 primes)" ]
   openssl pkcs12 -in "$out/user-$bits-aes.p12" -passin "pass:$P12_PASSWORD" -noout
   openssl pkcs12 -legacy -in "$out/user-$bits-legacy.p12" -passin "pass:$P12_PASSWORD" -noout
-  gzip -t "$out/user-$bits.tq6"
+  # The .tq6 holds exactly the three elements, in order, each exactly its certificate.
+  tq6=$(gzip -dc "$out/user-$bits.tq6")
+  tags=$(grep -o '^</\?[a-z]*>' <<<"$tq6" | tr '\n' ' ')
+  [ "$tags" = "<tqsldata> <tqslcerts> <rootcert> </rootcert> <cacert> </cacert> <usercert> </usercert> </tqslcerts> </tqsldata> " ] \
+    || { echo "user-$bits.tq6 has the wrong elements: $tags" >&2; exit 1; }
+  for part in "rootcert:root" "cacert:ca" "usercert:user-$bits"; do
+    awk -v t="${part%%:*}" '$0 == "</" t ">" { f = 0 } f { print } $0 == "<" t ">" { f = 1 }' <<<"$tq6" \
+      | cmp -s - "$out/${part#*:}.pem" || { echo "user-$bits.tq6: <${part%%:*}> is not ${part#*:}.pem" >&2; exit 1; }
+  done
 done
 rm -f "$out"/*.srl
 echo "made $(find "$out" -type f | wc -l) files in tests/corpus/pki"

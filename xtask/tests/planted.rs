@@ -13,26 +13,40 @@ fn here(rel: &str) -> PathBuf {
 }
 
 #[test]
-fn the_planted_native_library_is_caught() {
+fn every_planted_way_to_bring_native_code_is_caught() {
     let meta = xtask::metadata(&here("tests/fixtures/Cargo.toml")).expect("fixture metadata");
-    let problems = xtask::no_c(&meta, xtask::PROTECTED);
     assert_eq!(
-        problems,
-        vec!["planted-native links the native library planted_native"]
+        xtask::no_c(&meta, xtask::PROTECTED),
+        vec![
+            // A build script with no `links`: it could run a compiler itself.
+            "planted-build-script 0.0.0 has a build script that has not been reviewed",
+            "planted-native 0.0.0 has a build script that has not been reviewed",
+            "planted-native links the native library planted_native",
+            // Reached only through an optional feature: every feature is checked.
+            "planted-optional-native 0.0.0 has a build script that has not been reviewed",
+            "planted-optional-native links the native library planted_optional_native",
+        ]
     );
 }
 
 #[test]
-fn the_planted_unsafe_gaps_are_caught() {
+fn every_planted_way_to_allow_unsafe_code_is_caught() {
     let meta = xtask::metadata(&here("tests/fixtures/Cargo.toml")).expect("fixture metadata");
-    let problems = xtask::no_unsafe(&meta);
-    assert_eq!(problems.len(), 2, "{problems:#?}");
-    assert!(problems.iter().any(|p| p.contains("no-forbid") && p.ends_with("does not say #![forbid(unsafe_code)]")), "{problems:#?}");
-    assert!(
-        problems
-            .iter()
-            .any(|p| p == "planted-no-lints does not take the workspace's lints"),
-        "{problems:#?}"
+    let root = |dir: &str| {
+        here(&format!("tests/fixtures/{dir}/src/lib.rs"))
+            .display()
+            .to_string()
+    };
+    assert_eq!(
+        xtask::no_unsafe(&meta),
+        vec![
+            // The attribute is there, but inside a block comment.
+            format!("{} does not say #![forbid(unsafe_code)]", root("commented")),
+            format!("{} does not say #![forbid(unsafe_code)]", root("no-forbid")),
+            // The words "[lints] workspace = true" are there, but inside a string.
+            "planted-in-a-string does not take the workspace's lints".to_string(),
+            "planted-no-lints does not take the workspace's lints".to_string(),
+        ]
     );
 }
 

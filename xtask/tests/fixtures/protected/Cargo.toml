@@ -8,6 +8,11 @@ publish = false
 
 [dependencies]
 planted-native = { path = "../native" }
+planted-build-script = { path = "../build-script" }
+planted-optional-native = { path = "../optional-native", optional = true }
+
+[features]
+extra = ["dep:planted-optional-native"]
 
 [lints]
 workspace = true
