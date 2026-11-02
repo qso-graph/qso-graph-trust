@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "qso-graph-trust"
+description = "Sign and upload logs for ARRL's Logbook of The World, with the key in the OS credential store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The key, signing and every file parser live in this crate, so no C or C++ may
+# be anywhere in its dependency tree, on any platform: `cargo xtask policy`
+# fails the build if one is (docs/decisions/0002-no-c-in-the-library.md).
+[dependencies]
+
+[lints]
+workspace = true

@@ -1,0 +1,4 @@
+# Left out of release archives: CI that only runs in this repository.
+.github export-ignore
+# The corpus is test data: kept byte for byte.
+tests/corpus/** -text

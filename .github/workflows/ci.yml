@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# CI for QSO Graph Trust. A pull request's run is the one check of a change
+# (KI7MT, 2026-11-02: "we should be able to merge a PR if it can pass checks and
+# build"), so a merge into main runs nothing. Once a week main is checked again,
+# so a newly published advisory against a locked crate fails even when nothing
+# changed. ci-all-green, the name every qso-graph repository uses, is the one
+# result a merge waits for.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # Formatting, lints and tests, on each platform the library ships for: its
+  # dependency tree differs per platform (the OS credential stores), so each is built.
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # rust-toolchain.toml names the version; rustup installs it here.
+      - name: Rust
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+      - name: cargo fmt
+        run: cargo fmt --all --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked
+      - name: cargo test
+        run: cargo test --workspace --locked
+
+  # The repository's own rules: no C in the library's tree on any platform, no
+  # unsafe code, and no known vulnerability in a locked crate.
+  policy:
+    name: policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: cargo xtask policy
+        run: cargo xtask policy
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked --quiet
+          cargo audit --file Cargo.lock
+
+  ci-all-green:
+    name: ci-all-green
+    needs: [check, policy]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do [ "$r" = success ] || { echo "a job did not pass: $r"; exit 1; }; done

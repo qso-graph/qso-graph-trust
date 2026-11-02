@@ -1,0 +1,51 @@
+name: Feature
+description: Functionality QGT should have and does not.
+labels: ["type:feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never attach a real certificate, private key, `.p12`, `.tbk`, password or log of real QSOs.
+        Use the test certificates in `tests/corpus`, or describe the file's shape.
+  - type: dropdown
+    id: part
+    attributes:
+      label: Part
+      options:
+        - Library
+        - CLI (qgt)
+        - App
+        - QSO Graph Desktop integration
+        - Repository, CI or docs
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is missing, in a sentence or two, and what a ham can do with it.
+    validations:
+      required: true
+  - type: textarea
+    id: work
+    attributes:
+      label: Remaining work
+      description: A checklist of what is left to do.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance
+      description: How we know it is done. Each item is checkable.
+      placeholder: |
+        - [ ] ...
+    validations:
+      required: true
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Credentials and keys
+      options:
+        - label: No real certificate, private key, password, token or real QSO log appears in this issue or its evidence.
+          required: true

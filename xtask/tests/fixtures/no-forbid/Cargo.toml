@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: its crate root lacks #![forbid(unsafe_code)]. The no-unsafe check must catch it.
+[package]
+name = "planted-no-forbid"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true

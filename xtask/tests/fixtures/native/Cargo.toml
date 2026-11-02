@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: links a native library, as a -sys crate does. The no-C check must catch it.
+[package]
+name = "planted-native"
+version = "0.0.0"
+edition = "2024"
+publish = false
+links = "planted_native"
+
+[lints]
+workspace = true
