@@ -31,11 +31,19 @@ name = "planted-no-lints"
 version = "0.0.0"
 
 [[package]]
+name = "planted-old-edition"
+version = "0.0.0"
+
+[[package]]
 name = "planted-optional-native"
 version = "0.0.0"
 
 [[package]]
 name = "planted-outside"
+version = "0.0.0"
+
+[[package]]
+name = "planted-src-outside"
 version = "0.0.0"
 
 [[package]]
@@ -47,4 +55,5 @@ dependencies = [
  "planted-native",
  "planted-optional-native",
  "planted-outside",
+ "planted-src-outside",
 ]

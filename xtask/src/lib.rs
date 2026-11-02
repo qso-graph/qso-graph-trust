@@ -187,13 +187,28 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
                 problems.push(format!("{name} {version} has not been reviewed"));
             }
         }
-        if !exempt(&name)
-            && let Some(dir) = pkg
-                .and_then(|p| p["manifest_path"].as_str())
-                .and_then(|m| Path::new(m).parent())
+        if let Some(dir) = pkg
+            .and_then(|p| p["manifest_path"].as_str())
+            .and_then(|m| Path::new(m).parent())
         {
-            for found in native_in(dir) {
-                problems.push(format!("{name} {version}: {found}"));
+            // A target's source outside its crate's directory would be outside the
+            // search below (found by Codex review).
+            for target in pkg.and_then(|p| p["targets"].as_array()).unwrap_or(&empty) {
+                // Compared canonically: Cargo reports `crate/../elsewhere/lib.rs`
+                // as written, which starts with `crate` lexically. A path that
+                // cannot be resolved counts as outside.
+                if let Some(src) = target["src_path"].as_str()
+                    && !within(Path::new(src), dir)
+                {
+                    problems.push(format!(
+                        "{name} {version}: a target's source is outside the crate: {src}"
+                    ));
+                }
+            }
+            if !exempt(&name) {
+                for found in native_in(dir) {
+                    problems.push(format!("{name} {version}: {found}"));
+                }
             }
         }
         for target in pkg.and_then(|p| p["targets"].as_array()).unwrap_or(&empty) {
@@ -236,10 +251,20 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
     problems
 }
 
+/// Whether `path` is inside `dir`, both resolved by the file system (`..` and
+/// links followed). One that cannot be resolved is not inside.
+fn within(path: &Path, dir: &Path) -> bool {
+    match (std::fs::canonicalize(path), std::fs::canonicalize(dir)) {
+        (Ok(p), Ok(d)) => p.starts_with(d),
+        _ => false,
+    }
+}
+
 /// Every file under a crate's directory that links native code, declares foreign
 /// functions, holds assembly or is native code itself, as "path what", with the
 /// path relative to the crate and '/'-separated. A directory it cannot read is a
-/// finding, never a pass.
+/// finding, never a pass. Symbolic links are not followed, since one could point
+/// anywhere, and are findings themselves: a crate from crates.io never has one.
 fn native_in(dir: &Path) -> Vec<String> {
     let mut found = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
@@ -251,7 +276,17 @@ fn native_in(dir: &Path) -> Vec<String> {
                 continue;
             }
         };
-        for entry in entries.flatten() {
+        for entry in entries {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => {
+                    found.push(format!(
+                        "{} has an entry that cannot be read: {e}",
+                        d.display()
+                    ));
+                    continue;
+                }
+            };
             let path = entry.path();
             let rel = path
                 .strip_prefix(dir)
@@ -260,7 +295,18 @@ fn native_in(dir: &Path) -> Vec<String> {
                 .map(|c| c.as_os_str().to_string_lossy())
                 .collect::<Vec<_>>()
                 .join("/");
-            if path.is_dir() {
+            let kind = match entry.file_type() {
+                Ok(k) => k,
+                Err(e) => {
+                    found.push(format!("{rel} cannot be read: {e}"));
+                    continue;
+                }
+            };
+            if kind.is_symlink() {
+                found.push(format!("{rel} is a symbolic link"));
+                continue;
+            }
+            if kind.is_dir() {
                 if !matches!(rel.as_str(), "target" | ".git") {
                     stack.push(path);
                 }
@@ -320,6 +366,20 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
             continue;
         }
         let pkg_name = pkg["name"].as_str().unwrap_or("?");
+        // Edition 2024 makes an `extern` block without `unsafe` a hard error, so with
+        // unsafe code forbidden the compiler refuses every foreign block, all
+        // assembly and `no_mangle` in a workspace crate. Edition 2021 accepts
+        // `extern "C" {}` without `unsafe` even under forbid (found by Codex review,
+        // and checked against rustc 1.99.1).
+        for target in pkg["targets"].as_array().unwrap_or(&empty) {
+            let edition = target["edition"].as_str().unwrap_or("?");
+            if edition != "2024" {
+                let name = target["name"].as_str().unwrap_or("?");
+                problems.push(format!(
+                    "{pkg_name}: target {name} is edition {edition}, not 2024"
+                ));
+            }
+        }
         match pkg["manifest_path"]
             .as_str()
             .map(|m| read_toml(Path::new(m)))
@@ -386,9 +446,17 @@ pub fn workspace_forbids_unsafe(manifest: &toml::Table) -> bool {
 /// does (found by Codex review, twice). Anything it cannot lex fails closed.
 pub fn forbids_unsafe(source: &str) -> bool {
     let mut src = source.strip_prefix('\u{feff}').unwrap_or(source);
-    // A shebang line, which `#![` is not.
-    if src.starts_with("#!") && !src.starts_with("#![") {
-        src = src.find('\n').map_or("", |i| &src[i..]);
+    // A shebang line, as Rust decides it: `#!` whose next token, past whitespace
+    // and comments, is not `[` (found by Codex review: `#! /* ... */ [` is an
+    // attribute, not a shebang).
+    if src.starts_with("#!") {
+        let mut ahead = Lexer {
+            s: src.as_bytes(),
+            i: 2,
+        };
+        if ahead.next() != Some(Tok::Punct(b'[')) {
+            src = src.find('\n').map_or("", |i| &src[i..]);
+        }
     }
     let mut lex = Lexer {
         s: src.as_bytes(),
@@ -583,10 +651,17 @@ impl Lexer<'_> {
             if c == b'\\' {
                 self.i += 1;
             } else if c == quote {
-                return Tok::Literal;
+                return self.suffix();
             }
         }
         Tok::Bad
+    }
+
+    /// A literal's suffix (`""r`, `1u8`) belongs to the literal: Rust reads `""r"x"`
+    /// as a suffixed empty string then `"x"`, never a raw string (found by Codex review).
+    fn suffix(&mut self) -> Tok {
+        self.word();
+        Tok::Literal
     }
 
     /// Past a raw string's closing quote and its `hashes` '#'s.
@@ -595,7 +670,7 @@ impl Lexer<'_> {
             self.i += 1;
             if c == b'"' && (0..hashes).all(|k| self.peek(k) == Some(b'#')) {
                 self.i += hashes;
-                return Tok::Literal;
+                return self.suffix();
             }
         }
         Tok::Bad
@@ -761,6 +836,31 @@ mod tests {
         ));
         assert!(forbids_unsafe(
             "#![forbid(unsafe_code, reason = \"QGT holds keys\")]"
+        ));
+    }
+
+    #[test]
+    fn tricks_found_by_the_third_review_are_not_the_attribute() {
+        // `#!` then a comment then `[` is an attribute, not a shebang.
+        assert!(!forbids_unsafe(
+            r##"#! /*
+#![forbid(unsafe_code)]
+*/ [allow(dead_code)]
+"##
+        ));
+        // A literal's suffix is not a raw-string prefix: `""r` then a plain string.
+        assert!(!forbids_unsafe(
+            r##"#![cfg_attr(any(), arbitrary(""r"\"))]
+#![forbid(unsafe_code)]
+"))]
+"##
+        ));
+        // A real shebang is still passed over, and a suffixed literal still lexes.
+        assert!(forbids_unsafe(
+            "#!/usr/bin/env cargo\n#![forbid(unsafe_code)]"
+        ));
+        assert!(forbids_unsafe(
+            "#![doc = \"x\"suffix]\n#![forbid(unsafe_code)]"
         ));
     }
 

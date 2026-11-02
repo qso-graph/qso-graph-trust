@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: edition 2021, where `extern "C" {}` compiles without `unsafe` even under
+# forbid(unsafe_code). The no-unsafe check must catch it.
+[package]
+name = "planted-old-edition"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lints]
+workspace = true

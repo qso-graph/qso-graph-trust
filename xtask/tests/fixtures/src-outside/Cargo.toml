@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: its library's source is outside its own directory, where the native search would not look.
+# The no-C check must catch it.
+[package]
+name = "planted-src-outside"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "../outside-src/lib.rs"
+
+[lints]
+workspace = true

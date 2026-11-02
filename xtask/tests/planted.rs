@@ -32,23 +32,30 @@ fn lib_root(meta: &Value, package: &str) -> String {
 
 #[test]
 fn every_planted_way_to_bring_native_code_is_caught() {
+    let meta = fixtures();
     assert_eq!(
-        xtask::no_c(&fixtures(), xtask::PROTECTED),
+        xtask::no_c(&meta, xtask::PROTECTED),
         vec![
             // A build script with no `links`: it could run a compiler itself.
-            "planted-build-script 0.0.0 has a build script that has not been reviewed",
+            "planted-build-script 0.0.0 has a build script that has not been reviewed".to_string(),
             // No `links` and no build script, but an extern block and a C file.
-            "planted-extern-block 0.0.0: src/lib.rs declares foreign functions",
-            "planted-extern-block 0.0.0: src/lib.rs has a #[link] attribute",
-            "planted-extern-block 0.0.0: src/planted.c is native code",
-            "planted-native 0.0.0 has a build script that has not been reviewed",
-            "planted-native links the native library planted_native",
+            "planted-extern-block 0.0.0: src/lib.rs declares foreign functions".to_string(),
+            "planted-extern-block 0.0.0: src/lib.rs has a #[link] attribute".to_string(),
+            "planted-extern-block 0.0.0: src/planted.c is native code".to_string(),
+            "planted-native 0.0.0 has a build script that has not been reviewed".to_string(),
+            "planted-native links the native library planted_native".to_string(),
             // Reached only through an optional feature: every feature is checked.
-            "planted-optional-native 0.0.0 has a build script that has not been reviewed",
-            "planted-optional-native links the native library planted_optional_native",
+            "planted-optional-native 0.0.0 has a build script that has not been reviewed"
+                .to_string(),
+            "planted-optional-native links the native library planted_optional_native".to_string(),
             // From outside the workspace, and not from crates.io.
-            "planted-outside 0.0.0 has not been reviewed",
-            "planted-outside 0.0.0 is not a crates.io crate",
+            "planted-outside 0.0.0 has not been reviewed".to_string(),
+            "planted-outside 0.0.0 is not a crates.io crate".to_string(),
+            // Its library's source is outside its own directory, beyond the search.
+            format!(
+                "planted-src-outside 0.0.0: a target's source is outside the crate: {}",
+                lib_root(&meta, "planted-src-outside")
+            ),
         ]
     );
 }
@@ -69,6 +76,8 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
         // The words "[lints] workspace = true" are there, but inside a string.
         "planted-in-a-string does not take the workspace's lints".to_string(),
         "planted-no-lints does not take the workspace's lints".to_string(),
+        // Edition 2021 compiles `extern "C" {}` without `unsafe`, even under forbid.
+        "planted-old-edition: target planted_old_edition is edition 2021, not 2024".to_string(),
     ];
     want.sort();
     assert_eq!(xtask::no_unsafe(&meta), want);

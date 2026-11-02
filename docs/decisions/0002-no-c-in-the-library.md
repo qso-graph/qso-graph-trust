@@ -20,10 +20,18 @@ every platform:
   without declaring `links`, so no metadata check can stand in for reading. A new version is a new
   review. The list is empty today;
 - every build script or procedural macro in it, a workspace crate's included, is on that list;
+- every crate in it keeps its sources inside its own directory, compared after resolving `..` and
+  links, and holds no symbolic links;
 - as a second line, every file of every crate in it is searched: a `#[link]`, `#[link_name]` or
   `#[link_section]` attribute, an `extern` block, inline or global assembly, or a native source or
   object file (`.c`, `.h`, `.s`, `.o`, `.a`, `.so`, `.dll` and the like) fails the check, even in a
   comment.
+
+**For the workspace's own crates the compiler is the enforcer.** Each is edition 2024 and forbids
+unsafe code (both checked by `cargo xtask policy`), and under those two rules rustc refuses every
+`extern` block, `#[link]`ed or not, all inline and global assembly, and `no_mangle`: checked against
+rustc 1.99.1. Edition 2021 is not enough: it compiles `extern "C" {}` without `unsafe`, even under
+forbid.
 
 What a reviewed crate does is a judgement made by reading it; the check guarantees that judgement is
 made for every one, and made again when its version changes. Planted cases prove each rule fails when
