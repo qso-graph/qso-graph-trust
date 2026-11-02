@@ -88,7 +88,9 @@ fn every_planted_way_to_override_the_lints_is_caught() {
     // A repository made for the test, planted with each way found to weaken the
     // lints without touching a manifest or a crate root (Codex review, rounds 6
     // and 7). --cap-lints overrides even forbid(unsafe_code).
-    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("planted-overrides");
+    // Outside this repository, so its planted files are never part of the
+    // repository's own scan, wherever Cargo's output directory is (found by Codex review).
+    let root = std::env::temp_dir().join(format!("qgt-planted-overrides-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let write = |rel: &str, text: &str| {
         let path = root.join(rel);
@@ -138,7 +140,9 @@ fn every_planted_way_to_override_the_lints_is_caught() {
         "workflow d.yml sets RUSTFLAGS: RUSTFLAGS: -l static=z".to_string(),
     ];
     want.sort();
-    assert_eq!(xtask::no_lint_overrides(&root), want);
+    let got = xtask::no_lint_overrides(&root);
+    let _ = std::fs::remove_dir_all(&root);
+    assert_eq!(got, want);
 }
 
 #[test]

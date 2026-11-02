@@ -613,6 +613,10 @@ pub fn flags_allowed(flags: &str) -> bool {
 /// found response files, aliases, --config and wrappers in turn). `extra_env`
 /// is for the planted test.
 pub fn canary(root: &Path, target_dir: &Path, extra_env: &[(&str, &str)]) -> Result<(), String> {
+    // Absolute, because the child Cargo runs from the repository root, not from
+    // where this was called (found by Codex review).
+    let target_dir = std::path::absolute(target_dir)
+        .map_err(|e| format!("cannot resolve {}: {e}", target_dir.display()))?;
     let dir = target_dir.join("qgt-canary");
     let src = dir.join("src");
     std::fs::create_dir_all(&src).map_err(|e| format!("cannot make {}: {e}", src.display()))?;
