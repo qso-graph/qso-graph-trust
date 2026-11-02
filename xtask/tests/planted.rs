@@ -76,6 +76,8 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
         // unsafe in code only a release build compiles, and in an extern block.
         format!("{} uses unsafe", lib_root(&meta, "planted-cfg-gated")),
         format!("{} uses unsafe", lib_root(&meta, "planted-extern-block")),
+        // A module from a file the scan would not read.
+        format!("{} uses #[path]", lib_root(&meta, "planted-path-module")),
         // The words "[lints] workspace = true" are there, but inside a string.
         "planted-in-a-string does not take the workspace's lints".to_string(),
         "planted-no-lints does not take the workspace's lints".to_string(),

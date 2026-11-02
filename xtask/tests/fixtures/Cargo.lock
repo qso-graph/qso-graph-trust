@@ -47,6 +47,10 @@ name = "planted-outside"
 version = "0.0.0"
 
 [[package]]
+name = "planted-path-module"
+version = "0.0.0"
+
+[[package]]
 name = "planted-src-outside"
 version = "0.0.0"
 

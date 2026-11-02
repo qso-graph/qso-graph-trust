@@ -464,27 +464,56 @@ pub fn unsafe_tokens_in(dir: &Path) -> Vec<String> {
 
 /// What in a token stream could bring unsafe code: the keyword `unsafe` anywhere
 /// (blocks, functions, traits, impls, extern blocks, `#[unsafe(...)]`), and
-/// `include!`, which compiles another file's code in place.
+/// `include!`, which compiles another file's code in place; and `#[path]`, which
+/// makes a module of any file.
 pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
     use proc_macro2::TokenTree;
     let mut found = Vec::new();
     let mut previous_include = false;
+    // Whether the last token was `#` (an outer attribute) or `#` then `!` (inner).
+    let mut after_hash = false;
+    let mut last_hash = false;
     for tree in tokens {
-        match tree {
+        let mut hash_now = false;
+        match &tree {
             TokenTree::Ident(i) => {
                 if i == "unsafe" {
                     found.push("uses unsafe");
                 }
                 previous_include = i == "include";
+                after_hash = false;
+                last_hash = false;
                 continue;
             }
             TokenTree::Punct(p) if p.as_char() == '!' && previous_include => {
                 found.push("uses include!");
             }
-            TokenTree::Group(g) => found.extend(unsafe_tokens(g.stream())),
+            TokenTree::Punct(p) if p.as_char() == '#' => hash_now = true,
+            TokenTree::Punct(p) if p.as_char() == '!' && last_hash => {
+                // `#!`: the attribute's brackets come next.
+                previous_include = false;
+                after_hash = true;
+                last_hash = false;
+                continue;
+            }
+            TokenTree::Group(g) => {
+                // `#[path = "..."]` loads a module from any file, `.rs` or not,
+                // which this scan would not read (found by Codex review); the
+                // workspace's crates do not need it, so it is refused. Only an
+                // attribute: an array `[path]` is not one.
+                let attribute =
+                    (after_hash || last_hash) && g.delimiter() == proc_macro2::Delimiter::Bracket;
+                let first = g.stream().into_iter().next();
+                if attribute && matches!(&first, Some(TokenTree::Ident(i)) if i == "path") {
+                    found.push("uses #[path]");
+                }
+                found.extend(unsafe_tokens(g.stream()));
+            }
             _ => {}
         }
         previous_include = false;
+        after_hash = false;
+        last_hash = hash_now;
     }
     found
 }
@@ -1300,6 +1329,12 @@ pub fn proof() {}
             scan("include!(\"../elsewhere.rs\");"),
             vec!["uses include!"]
         );
+        // A module from a file the scan would not read (Codex review, round 12).
+        assert_eq!(
+            scan("#[cfg(not(debug_assertions))] #[path = \"release.inc\"] mod release;"),
+            vec!["uses #[path]"]
+        );
+        assert!(scan("let path = [1]; let v = [path];").is_empty());
         // Words in strings and comments are not tokens.
         assert!(scan("// unsafe\nconst S: &str = \"unsafe { }\"; fn r#unsafe() {}").is_empty());
         assert!(scan("const B: &[u8] = include_bytes!(\"x.bin\");").is_empty());
