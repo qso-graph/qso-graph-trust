@@ -12,6 +12,9 @@ use crate::lotw::{self, FieldKind};
 
 /// The most fields a location is given: more than any DXCC entity's pages hold, all together.
 pub const MAX_FIELDS: usize = 32;
+/// The longest name or value given, in bytes, checked before anything is copied: longer than any
+/// field the configuration defines.
+pub const MAX_LEN: usize = 64;
 
 /// A station location, its fields in the order LoTW's configuration lists them.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,6 +65,15 @@ impl StationLocation {
     pub fn new(given: &[(&str, &str)]) -> Result<Self, StationError> {
         if given.len() > MAX_FIELDS {
             return Err(StationError::TooManyFields);
+        }
+        if let Some((name, v)) = given
+            .iter()
+            .find(|(n, v)| n.len() > MAX_LEN || v.len() > MAX_LEN)
+        {
+            return Err(match lotw::loc_field(name) {
+                Some(f) => invalid(f.id, v),
+                None => StationError::NotAField(name.chars().take(MAX_LEN).collect()),
+            });
         }
         let value = |name: &str| {
             given
@@ -137,6 +149,21 @@ impl StationLocation {
         Ok(Self { fields, dxcc })
     }
 
+    /// Whether this grid is one of the location's, compared as precisely as both are given: a
+    /// subsquare against a subsquare, else the square.
+    fn has_grid(&self, grid: &str) -> bool {
+        self.get("GRIDSQUARE").is_some_and(|grids| {
+            grids.split(',').map(str::trim).any(|ours| {
+                let n = ours.len().min(grid.len());
+                n >= 4
+                    && ours
+                        .get(..n)
+                        .zip(grid.get(..n))
+                        .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b))
+            })
+        })
+    }
+
     /// Whether a QSO record's own word about its station, an ADIF field from
     /// [`crate::qso::STATION_FIELDS`] in capitals, disagrees with this location. A field the
     /// location has nothing to compare with disagrees too: the QSO says more than the location can
@@ -151,20 +178,14 @@ impl StationLocation {
             ours.is_some() && ours == value.parse().ok()
         };
         let agrees = match adif {
-            "STATION_CALLSIGN" => same("CALL"),
+            "STATION_CALLSIGN" | "OPERATOR" => same("CALL"),
             "MY_DXCC" => value.parse() == Ok(self.dxcc),
             "MY_CQ_ZONE" => number("CQZ"),
             "MY_ITU_ZONE" => number("ITUZ"),
             "MY_IOTA" => same("IOTA"),
-            // A subsquare is finer than the location may be: the square must be one of its own.
-            "MY_GRIDSQUARE" => self.get("GRIDSQUARE").is_some_and(|grids| {
-                grids.split(',').any(|g| {
-                    g.trim()
-                        .get(..4)
-                        .zip(value.get(..4))
-                        .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b))
-                })
-            }),
+            "MY_GRIDSQUARE" => self.has_grid(value),
+            // Every grid of a VUCC QSO must be one of the location's.
+            "MY_VUCC_GRIDS" => value.split(',').all(|g| self.has_grid(g.trim())),
             "MY_STATE" => SUBDIVISIONS.iter().any(|f| same(f)),
             // ADIF writes a US county as "KS,Sedgwick": the state, if given, must agree too.
             "MY_CNTY" => {
@@ -220,16 +241,17 @@ impl StationLocation {
     }
 }
 
+/// The error for a value, shown cut to [`MAX_LEN`] characters, so an error is never large.
 fn invalid(field: &'static str, value: &str) -> StationError {
     StationError::Invalid {
         field,
-        value: value.to_string(),
+        value: value.chars().take(MAX_LEN).collect(),
     }
 }
 
 /// One to four Maidenhead locators, comma-separated: a field and square (`EM17`), with an
 /// optional subsquare (`EM17ab`).
-fn is_grid_list(s: &str) -> bool {
+pub(crate) fn is_grid_list(s: &str) -> bool {
     let grids: Vec<&str> = s.split(',').collect();
     grids.len() <= 4 && grids.iter().all(|g| is_grid(g.trim()))
 }
@@ -286,9 +308,25 @@ mod tests {
             ("MY_CNTY", "SEDGWICK"),
             ("MY_CQ_ZONE", "04"),
             ("MY_ITU_ZONE", "7"),
+            ("MY_VUCC_GRIDS", "EM17"),
+            ("OPERATOR", "QG0TEST"),
         ] {
             assert!(!loc.contradicts(adif, value), "{adif} {value}");
         }
+        // Codex review: subsquares that differ were compared only as squares.
+        let mut fine = KANSAS.to_vec();
+        fine[4] = ("GRIDSQUARE", "EM17AB");
+        let fine = StationLocation::new(&fine).expect("location");
+        assert!(!fine.contradicts("MY_GRIDSQUARE", "EM17AB"));
+        assert!(!fine.contradicts("MY_GRIDSQUARE", "EM17"));
+        assert!(fine.contradicts("MY_GRIDSQUARE", "EM17CD"));
+        let huge = "A".repeat(MAX_LEN + 1);
+        let mut given = KANSAS.to_vec();
+        given[4] = ("GRIDSQUARE", &huge);
+        assert!(matches!(
+            StationLocation::new(&given),
+            Err(StationError::Invalid { field: "GRIDSQUARE", value }) if value.len() == MAX_LEN
+        ));
         for (adif, value) in [
             ("STATION_CALLSIGN", "QG1TEST"),
             ("MY_DXCC", "1"),
@@ -300,6 +338,8 @@ mod tests {
             ("MY_ITU_ZONE", "8"),
             // The location has no IOTA, so a QSO naming one is not signed for it.
             ("MY_IOTA", "NA-110"),
+            ("MY_VUCC_GRIDS", "EM17,EM18"),
+            ("OPERATOR", "QG1TEST"),
             ("NOT_A_FIELD", "x"),
         ] {
             assert!(loc.contradicts(adif, value), "{adif} {value}");

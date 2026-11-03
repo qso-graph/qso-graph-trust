@@ -17,6 +17,9 @@ use crate::records::Record;
 
 /// The longest frequency accepted, in characters: far more than any real one's digits.
 pub const MAX_FREQ_LEN: usize = 16;
+/// The longest value of any field read, in bytes, checked before the value is copied: longer than
+/// every real callsign, mode, satellite, grid list or county.
+pub const MAX_VALUE_LEN: usize = 64;
 
 /// A calendar date, a real one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -127,8 +130,11 @@ pub struct Qso {
 
 /// The ADIF fields that say which station made a QSO, each checked against the station location
 /// before the QSO is signed.
-pub const STATION_FIELDS: [&str; 8] = [
+/// `OPERATOR` names the station too when `STATION_CALLSIGN` is absent, as ADIF defines it; it is
+/// then kept under its own name.
+pub const STATION_FIELDS: [&str; 9] = [
     "STATION_CALLSIGN",
+    "MY_VUCC_GRIDS",
     "MY_DXCC",
     "MY_GRIDSQUARE",
     "MY_STATE",
@@ -145,6 +151,8 @@ pub enum QsoError {
     Missing(&'static str),
     /// A field appears more than once, so which one counts is not clear.
     Repeated(&'static str),
+    /// A record with more fields than any record read from a file may have.
+    TooManyFields,
     /// A field's value is not one LoTW accepts.
     Invalid { field: &'static str, value: String },
     /// PROP_MODE is SAT with no SAT_NAME.
@@ -158,6 +166,7 @@ impl fmt::Display for QsoError {
         match self {
             Self::Missing(field) => write!(f, "the QSO has no {field}"),
             Self::Repeated(field) => write!(f, "the QSO has more than one {field}"),
+            Self::TooManyFields => write!(f, "the QSO record has too many fields"),
             Self::Invalid { field, value } => {
                 write!(f, "{field} {value:?} is not one LoTW accepts")
             }
@@ -170,8 +179,10 @@ impl fmt::Display for QsoError {
 impl std::error::Error for QsoError {}
 
 /// The ADIF fields read, so a repeat of any of them is refused.
-const READ: [&str; 19] = [
+const READ: [&str; 21] = [
     "STATION_CALLSIGN",
+    "OPERATOR",
+    "MY_VUCC_GRIDS",
     "MY_DXCC",
     "MY_GRIDSQUARE",
     "MY_STATE",
@@ -195,6 +206,10 @@ const READ: [&str; 19] = [
 impl Qso {
     /// The QSO in an ADIF record.
     pub fn from_adif(record: &Record) -> Result<Self, QsoError> {
+        // A Record can be built by hand, so the reader's limit is checked here too.
+        if record.fields.len() > crate::records::MAX_FIELDS {
+            return Err(QsoError::TooManyFields);
+        }
         for name in READ {
             if record
                 .fields
@@ -210,6 +225,10 @@ impl Qso {
         let text = |name: &'static str| -> Result<Option<String>, QsoError> {
             match record.get(name) {
                 None => Ok(None),
+                // Refused before it is copied, decoded or put in capitals.
+                Some(v) if v.len() > MAX_VALUE_LEN => {
+                    Err(invalid(name, &String::from_utf8_lossy(&v[..MAX_VALUE_LEN])))
+                }
                 Some(v) => match std::str::from_utf8(v).map(str::trim) {
                     Ok("") => Ok(None),
                     Ok(s) => Ok(Some(s.to_ascii_uppercase())),
@@ -220,7 +239,7 @@ impl Qso {
         let required = |name: &'static str| text(name)?.ok_or(QsoError::Missing(name));
 
         let call = required("CALL")?;
-        if !is_callsign(&call) {
+        if !is_contacted_callsign(&call) {
             return Err(invalid("CALL", &call));
         }
         let date = required("QSO_DATE")?;
@@ -268,13 +287,21 @@ impl Qso {
                     v.len() <= 4 && v.parse::<u32>().is_ok()
                 }
                 "MY_GRIDSQUARE" => crate::station::is_grid(&v),
-                // Text compared with the location's own, which is never longer than this.
-                _ => v.chars().count() <= 64,
+                "MY_VUCC_GRIDS" => crate::station::is_grid_list(&v),
+                // Text compared with the location's own.
+                _ => true,
             };
             if !ok {
                 return Err(invalid(name, &v));
             }
             station.push((name, v));
+        }
+        // OPERATOR is a person's call; only when it looks like one, and STATION_CALLSIGN is
+        // absent, does it name the station.
+        if !station.iter().any(|(n, _)| *n == "STATION_CALLSIGN")
+            && let Some(op) = text("OPERATOR")?.filter(|op| is_callsign(op))
+        {
+            station.push(("OPERATOR", op));
         }
 
         Ok(Self {
@@ -366,10 +393,11 @@ impl Qso {
     }
 }
 
+/// The error for a value, shown cut to [`MAX_VALUE_LEN`] characters, so an error is never large.
 fn invalid(field: &'static str, value: &str) -> QsoError {
     QsoError::Invalid {
         field,
-        value: value.to_string(),
+        value: value.chars().take(MAX_VALUE_LEN).collect(),
     }
 }
 
@@ -410,6 +438,17 @@ fn adif_number(s: &str) -> Option<f64> {
         && digits.bytes().all(|b| b.is_ascii_digit() || b == b'.')
         && digits.bytes().any(|b| b.is_ascii_digit());
     ok.then(|| s.parse().ok()).flatten()
+}
+
+/// A callsign LoTW accepts as the station worked: a plausible callsign ([`is_callsign`]) that
+/// does not begin with `0` or `Q`, or with `1` other than `1A`, `1M` or `1S`, as no amateur
+/// callsign does (ARRL's rules for submitted QSOs).
+pub fn is_contacted_callsign(call: &str) -> bool {
+    let b = call.as_bytes();
+    is_callsign(call)
+        && b[0] != b'0'
+        && b[0] != b'Q'
+        && (b[0] != b'1' || matches!(b[1], b'A' | b'M' | b'S'))
 }
 
 /// A plausible amateur callsign: capitals, digits and `/`, with at least one of each of the first
@@ -565,6 +604,48 @@ mod tests {
             )),
             Err(QsoError::Repeated("MY_DXCC"))
         );
+    }
+
+    #[test]
+    fn calls_no_amateur_has_are_refused() {
+        for call in ["0A1", "1B1", "Q1ABC"] {
+            assert!(!is_contacted_callsign(call), "{call}");
+        }
+        for call in ["1A0KM", "1S1A", "KC4QPQ", "M0EHA"] {
+            assert!(is_contacted_callsign(call), "{call}");
+        }
+    }
+
+    #[test]
+    fn an_oversized_value_is_refused_before_it_is_copied() {
+        let long = "1".repeat(MAX_VALUE_LEN + 1);
+        let adif = format!(
+            "{BASE}<BAND:3>20m<FREQ:{}>{long}<MODE:2>CW<EOR>",
+            long.len()
+        );
+        match qso(&adif) {
+            Err(QsoError::Invalid {
+                field: "FREQ",
+                value,
+            }) => assert_eq!(value.len(), MAX_VALUE_LEN),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn operator_names_the_station_only_without_station_callsign() {
+        let station = |extra: &str| {
+            let q = qso(&format!("{BASE}<BAND:3>20m<MODE:2>CW{extra}<EOR>")).expect("qso");
+            q.station()
+                .map(|(n, v)| format!("{n}={v}"))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(station("<OPERATOR:7>QG1TEST"), ["OPERATOR=QG1TEST"]);
+        assert_eq!(
+            station("<OPERATOR:7>QG1TEST<STATION_CALLSIGN:5>KN4YU"),
+            ["STATION_CALLSIGN=KN4YU"]
+        );
+        assert!(station("<OPERATOR:3>Bob").is_empty());
     }
 
     #[test]

@@ -8,9 +8,9 @@
 //!
 //! Before anything is signed, the key must be the certificate's, the station location the
 //! certificate's call and DXCC entity, the certificate in force, and every QSO dated within the
-//! certificate's QSO dates, and every QSO whose record names its station (`STATION_CALLSIGN`,
-//! `MY_DXCC`, `MY_GRIDSQUARE` and the rest) must name this one. One that is not stops the whole
-//! log, so a log is signed whole or not at all.
+//! certificate's QSO dates; and every QSO whose record names its station (`STATION_CALLSIGN`, or
+//! `OPERATOR` without it, `MY_DXCC`, `MY_GRIDSQUARE` and the rest) must name this one. One that
+//! is not stops the whole log, so a log is signed whole or not at all.
 
 use std::fmt;
 use std::time::SystemTime;
