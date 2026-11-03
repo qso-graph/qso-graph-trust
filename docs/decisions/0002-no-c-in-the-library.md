@@ -136,8 +136,10 @@ from vetted providers, each named in the policy checks:
   protected key is decrypted by QG Trust itself (PBKDF2, then 3DES- or AES-CBC), every buffer wiped.
   **Known and outside QG Trust's code:** `rsa` 0.9.10's `validate()` multiplies e by a clone of d that
   it drops unwiped (`src/key.rs:408-409`), and `num-bigint-dig` wipes its arithmetic temporaries only
-  in part. Patching `rsa` is refused by QG Trust's policy, so this waits for an upstream release; the
-  custody test (qso-graph-desktop#172, Gate C) measures what remains in memory.
+  in part. Closed for the whole class, not line by line (KI7MT, 2026-11-03: "who would use an app
+  that leaks their key"): every program that signs uses a wiping global allocator, so every freed block
+  is overwritten whichever library allocated it, and the custody test (qso-graph-desktop#172, Gate C)
+  proves no key data remains in memory or a crash dump. The fix is also offered to `rsa` upstream.
 - **SHA-1 is ARRL's choice, not QG Trust's.** Its weakness is collisions, which need the victim to sign
   attacker-made binary blocks. QG Trust signs only strings built from fields it has validated (calls,
   bands, modes, dates, location values), which leaves such blocks no place; that is a tested rule.
