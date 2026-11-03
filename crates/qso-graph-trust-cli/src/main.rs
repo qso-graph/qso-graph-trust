@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 
-//! `qso-graph-trust`, QSO Graph Trust's command line. Its tqsl-compatible options arrive in
+//! `qg-trust`, QSO Graph Trust's command line. Its tqsl-compatible options arrive in
 //! phase 4 (qso-graph-desktop#173); until then it reports its version and says
 //! plainly that it signs nothing yet.
 
@@ -24,21 +24,21 @@ fn main() -> ExitCode {
     ExitCode::from(code)
 }
 
-/// What `qso-graph-trust` prints for these arguments, and its exit code.
+/// What `qg-trust` prints for these arguments, and its exit code.
 fn run(args: &[String]) -> (String, u8) {
     match args.first().map(String::as_str) {
         Some("-v" | "--version") if args.len() == 1 => {
-            (format!("qso-graph-trust {}", qso_graph_trust::VERSION), 0)
+            (format!("qg-trust {}", qso_graph_trust::VERSION), 0)
         }
         Some("-h" | "--help") if args.len() == 1 => (
-            "qso-graph-trust: QSO Graph Trust's command line. It signs nothing yet: signing arrives \
-             with qso-graph-desktop#173.\n\nUsage: qso-graph-trust --version | --help"
+            "qg-trust: QSO Graph Trust's command line. It signs nothing yet: signing arrives \
+             with qso-graph-desktop#173.\n\nUsage: qg-trust --version | --help"
                 .to_string(),
             0,
         ),
         _ => (
-            "qso-graph-trust: signing is not implemented yet (qso-graph-desktop#173); \
-             try qso-graph-trust --help"
+            "qg-trust: signing is not implemented yet (qso-graph-desktop#173); \
+             try qg-trust --help"
                 .to_string(),
             EXIT_SYNTAX,
         ),
@@ -57,7 +57,7 @@ mod tests {
     fn version_names_the_library_version() {
         let (out, code) = run(&args(&["--version"]));
         assert_eq!(code, 0);
-        assert_eq!(out, format!("qso-graph-trust {}", qso_graph_trust::VERSION));
+        assert_eq!(out, format!("qg-trust {}", qso_graph_trust::VERSION));
         assert_eq!(run(&args(&["-v"])).0, out);
     }
 

@@ -8,11 +8,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
-# The command is the project's full name (KI7MT, 2026-11-03: full names, no
-# short ones that can collide); the package is the -cli crate, so every
-# registry carries only qso-graph-* names.
+# The command is qg-trust: QSO Graph's commands are qg-<word> (qg-trust, qg-rig,
+# qg-udp, qg-sim), never a short one that can collide, while every package a
+# registry carries is a full qso-graph-* name (KI7MT, 2026-11-03).
 [[bin]]
-name = "qso-graph-trust"
+name = "qg-trust"
 path = "src/main.rs"
 
 [dependencies]

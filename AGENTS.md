@@ -6,7 +6,7 @@ build and check. When a rule here and your task disagree, stop and ask.
 ## What this is
 
 **QSO Graph Trust (QGT) signs logs for ARRL's Logbook of The World (LoTW) with the operator's key held by
-the OS credential store.** One Rust library, shared by QSO Graph Desktop, the QGT app, the `qso-graph-trust`
+the OS credential store.** One Rust library, shared by QSO Graph Desktop, the QGT app, the `qg-trust`
 command line and other people's tools. It is an alternative to TQSL: described as an alternative, never
 as replacing or fixing TQSL, and TQSL's behaviour is stated as facts with their source, never as faults.
 
