@@ -80,6 +80,28 @@ fn unreviewed_reviewing(
         let name = pkg.and_then(|p| p["name"].as_str()).unwrap_or(id);
         let version = pkg.and_then(|p| p["version"].as_str()).unwrap_or("?");
         let is_reviewed = list.iter().any(|(n, v, _)| *n == name && *v == version);
+        // What a consumer of the published crate builds, not only what this
+        // workspace builds: a dependency naming both a path and a version builds
+        // the path here but the registry's crate of that name once published, and
+        // another registry is another source (found by Codex review). Only our own
+        // shipped crates may be named both ways, since their published form is ours.
+        for dep in pkg
+            .and_then(|p| p["dependencies"].as_array())
+            .unwrap_or(&empty)
+        {
+            let dep_name = dep["name"].as_str().unwrap_or("?");
+            let both = dep["path"].is_string() && dep["req"].as_str().is_some_and(|r| r != "*");
+            if both && !shipped.contains(&dep_name) {
+                problems.push(format!(
+                    "{name} depends on {dep_name} by both a path and a version: published, it would build the registry's"
+                ));
+            }
+            if !dep["registry"].is_null() {
+                problems.push(format!(
+                    "{name} depends on {dep_name} from another registry"
+                ));
+            }
+        }
         if !workspace.contains(id) {
             if pkg.and_then(|p| p["source"].as_str()) != Some(CRATES_IO) {
                 problems.push(format!("{name} {version} is not a crates.io crate"));
@@ -1567,6 +1589,25 @@ mod tests {
         assert_eq!(
             unreviewed_in(&g, &["gone"]),
             vec!["shipped crate gone is not a workspace member"]
+        );
+        // A path and a version together build something else once published
+        // (Codex review, round 29); our own shipped crates may be named so.
+        let mut h = graph(json!("dev"));
+        h["packages"][0]["name"] = json!("qgt");
+        h["packages"][0]["dependencies"] = json!([
+            {"name": "libc", "req": "=0.2.177", "path": "/x/crates/libc", "registry": null},
+            {"name": "qso-graph-trust", "req": "^0.1.0", "path": "/x/crates/qso-graph-trust", "registry": null},
+            {"name": "other", "req": "^1", "path": null, "registry": "https://example.invalid/index"}
+        ]);
+        let found = unreviewed_reviewing(&h, &["qgt", "qso-graph-trust"], TEST_REVIEWED);
+        assert!(found.contains(&"qgt depends on libc by both a path and a version: published, it would build the registry's".to_string()), "{found:?}");
+        assert!(
+            found.contains(&"qgt depends on other from another registry".to_string()),
+            "{found:?}"
+        );
+        assert!(
+            !found.iter().any(|f| f.contains("on qso-graph-trust")),
+            "{found:?}"
         );
         // The shipped crate's own build script is reviewed too (Codex review, round 25).
         g["packages"][0]["targets"] = json!([{"kind": ["bin"]}, {"kind": ["custom-build"]}]);
