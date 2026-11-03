@@ -598,6 +598,13 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
                 found.push(format!("{} cannot be read", path.display()));
                 continue;
             };
+            // No symbolic links in a workspace crate, as in the library's tree: one
+            // can point anywhere, and the canary's copy cannot follow it either
+            // (found by Codex review).
+            if kind.is_symlink() {
+                found.push(format!("{} is a symbolic link", path.display()));
+                continue;
+            }
             if kind.is_dir() {
                 // Left out only when Cargo itself treats it as something else:
                 // another package of the workspace, or a path its manifest
@@ -726,12 +733,13 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                     found.push(DANGLING);
                 }
                 // `path = ...` loads a module from any file, `.rs` or not, which
-                // this scan would not read (found by Codex review). Checked in every
-                // bracket group, not only after a literal `#`, because a macro can
-                // pass the `#` in separately (`$h [path = ...]`). The workspace's
-                // crates do not need it, so it is refused.
+                // this scan would not read (found by Codex review); the workspace's
+                // crates do not need it, so it is refused. Only in an attribute:
+                // with no macros allowed and no lone `#`, every attribute in the
+                // source is a literal `#[...]`, and a `path = 1` binding inside an
+                // array is not one (found by Codex review).
                 let bracket = g.delimiter() == proc_macro2::Delimiter::Bracket;
-                if bracket && assigns_path(g.stream()) {
+                if attribute && assigns_path(g.stream()) {
                     found.push("uses #[path]");
                 }
                 // A name a macro substitutes: `#[$name = ...]`, `[$name = ...]` or
@@ -1272,6 +1280,12 @@ fn copy_repository(from: &Path, to: &Path, output: Option<&Path>) -> Result<(), 
             } else if kind.is_file() {
                 std::fs::copy(&path, dst.join(&name))
                     .map_err(|e| format!("cannot copy {}: {e}", path.display()))?;
+            } else {
+                // A link or anything else is not copied silently (found by Codex review).
+                return Err(format!(
+                    "{} is not a plain file or directory: the canary will not copy it",
+                    path.display()
+                ));
             }
         }
     }
@@ -1653,6 +1667,8 @@ pub fn proof() {}
             vec!["uses #[path]"]
         );
         assert!(scan("let path = [1]; let v = [path];").is_empty());
+        // A binding inside an array is not an attribute (Codex review, round 21).
+        assert!(scan("pub fn paths() -> [u8; 1] { [{ let path = 1; path }] }").is_empty());
         // Comparisons are not assignments (Codex review, round 20).
         assert!(scan("pub fn f(path: u8) -> bool { [path == 0][0] }").is_empty());
         assert!(scan("let v = [match x { path => 1 }];").is_empty());
@@ -1669,7 +1685,8 @@ pub fn proof() {}
         let passed = scan(
             "macro_rules! load { ($h:tt [$i:ident]) => { $h [path = \"hidden.md\"] pub mod hidden; }; } load!(#[doc]);",
         );
-        assert!(passed.contains(&"uses #[path]"), "{passed:?}");
+        // Caught as a macro of our own, which the workspace may not define.
+        assert!(passed.contains(&"defines a macro"), "{passed:?}");
         assert!(
             scan("macro_rules! m { ($h:tt $a:ident) => { $h [$a = \"x\"] mod y; } }")
                 .contains(&"builds an attribute from a macro variable")

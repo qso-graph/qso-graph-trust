@@ -109,10 +109,8 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
         // A lone # a macro joins to brackets passed separately: #[path] assembled.
         lib_root(&meta, "planted-assembled") + " defines a macro",
         lib_root(&meta, "planted-assembled") + " has a # that does not begin an attribute",
-        lib_root(&meta, "planted-assembled") + " uses #[path]",
         // The # passed in as its own macro argument: the brackets still say path =.
         lib_root(&meta, "planted-passed-hash") + " defines a macro",
-        lib_root(&meta, "planted-passed-hash") + " uses #[path]",
         // A whole attribute passed as a meta fragment: no macro of our own is allowed.
         lib_root(&meta, "planted-meta-macro") + " defines a macro",
         // A procedural macro can generate unsafe code from a string.
@@ -252,6 +250,27 @@ fn the_canary_is_refused_here_and_compiles_under_a_lint_cap() {
     assert_eq!(
         xtask::canary(&root, &[("RUSTFLAGS", "--force-warn=unsafe_code")]),
         Ok(())
+    );
+}
+
+/// A symbolic link in a workspace crate is refused: it can point anywhere, and the
+/// canary's copy would not follow it (found by Codex review). Made here, in a fresh
+/// temp directory, because a committed link is not a link on every Windows checkout.
+#[cfg(unix)]
+#[test]
+fn a_symbolic_link_in_a_crate_is_caught() {
+    let dir = xtask::fresh_temp_dir("qgt-planted-link").expect("a fresh directory");
+    std::fs::create_dir(dir.join("src")).expect("mkdir");
+    std::fs::write(dir.join("src").join("entry.rs"), "pub fn f() {}\n").expect("write");
+    std::os::unix::fs::symlink("entry.rs", dir.join("src").join("main.rs")).expect("link");
+    let found = xtask::unsafe_tokens_in(&dir, &[]);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(
+        found,
+        vec![format!(
+            "{} is a symbolic link",
+            dir.join("src").join("main.rs").display()
+        )]
     );
 }
 
