@@ -66,8 +66,9 @@ fn every_certificate_key_and_location_comes_through() {
             (cert.callsign(), cert.dxcc(), c.dxcc),
             (c.callsign.as_str(), 291, 291)
         );
-        let password = set(&format!("keys/{}.password", c.callsign));
-        assert_eq!(key.is_encrypted(), !password.is_empty(), "{}", c.callsign);
+        // Whether the set gave this key a password: only that, never the password, is compared.
+        let protected = !set(&format!("keys/{}.password", c.callsign)).is_empty();
+        assert_eq!(key.is_encrypted(), protected, "{}", c.callsign);
     }
     let names: Vec<&str> = backup.locations.iter().map(|l| l.name.as_str()).collect();
     assert_eq!(
@@ -226,8 +227,8 @@ fn an_imported_key_prints_nothing_of_itself() {
     let backup = read(&set("standard.tbk")).expect("TQSL's backup reads");
     let shown = format!("{backup:?}");
     // No key's text, from any entry: the PEM markers and the record's field names never appear.
-    for secret in ["PRIVATE KEY", "PRIVATE_KEY", "BEGIN"] {
-        assert!(!shown.contains(secret), "{secret}");
+    for marker in ["PRIVATE KEY", "PRIVATE_KEY", "BEGIN"] {
+        assert!(!shown.contains(marker), "{marker}");
     }
 }
 
