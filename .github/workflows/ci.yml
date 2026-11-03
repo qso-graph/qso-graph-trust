@@ -96,6 +96,17 @@ jobs:
         run: |
           cargo install cargo-audit --version 0.22.2 --locked --quiet
           cargo audit --file Cargo.lock
+      # .cargo/audit.toml ignores one advisory, RUSTSEC-2023-0071, because rsa has no fixed release
+      # (docs/decisions/0002). Once it has one, this fails, so the exception cannot outlive its reason.
+      - name: The audit exception is still needed
+        run: |
+          f="${CARGO_HOME:-$HOME/.cargo}/advisory-db/crates/rsa/RUSTSEC-2023-0071.md"
+          [ -f "$f" ] || { echo "RUSTSEC-2023-0071 is not in the advisory database cargo audit fetched" >&2; exit 1; }
+          if ! grep -qx 'patched = \[\]' "$f"; then
+            echo "rsa now has a fixed release for RUSTSEC-2023-0071: upgrade it and remove the ignore in .cargo/audit.toml" >&2
+            exit 1
+          fi
+          echo "RUSTSEC-2023-0071: still no fixed release; the exception stands"
 
   ci-all-green:
     name: ci-all-green

@@ -1,5 +1,7 @@
 # 0002: No C or C++ in the library; TLS is the one place C is allowed
 
+> The signing provider is decided again in [0006](0006-aws-lc-signs.md): AWS-LC signs through one binding, and RustCrypto's `rsa` is a test tool only.
+
 Decided 2026-11-02 by KI7MT.
 
 ## What was decided
@@ -112,3 +114,38 @@ Decided by KI7MT, 2026-11-03, after Watson's review measured that phase 2's firs
 
 Still forbidden: C, C++ or assembly source a crate compiles or ships, a crate whose job is
 building native code, and a native link to anything but the operating system.
+
+## Amended 2026-11-03: cryptographic primitives
+
+Decided by KI7MT after measuring the options. QG Trust's own code and every parser stay safe Rust with
+no C: the parsers read untrusted input, where memory errors are found. Cryptographic primitives come
+from vetted providers, each named in the policy checks:
+
+- **`aws-lc-rs`,** the provider QSO Graph Desktop already uses (`=1.18.1`, FIPS), for TLS and for every
+  operation it offers. Its safe API signs RSA only with SHA-256, SHA-384 and SHA-512, and verifies
+  SHA-1 for legacy use only (`src/rsa/signature.rs`, `RsaSigningAlgorithmId`); it has no raw RSA
+  operation. The independent check of each signature is tqsllib's own, made by OpenSSL: the
+  differential tests compare QG Trust's with it byte for byte.
+- **RustCrypto's `rsa`, for LoTW's signature only:** RSA PKCS#1 v1.5 with SHA-1, `SIGN_LOTW_V2.0`, the
+  one LoTW accepts and the one aws-lc-rs does not sign. Pure Rust, so no C and no unsafe code in QG
+  Trust. Its timing advisory, RUSTSEC-2023-0071 (Marvin), has no fixed release; the advisory itself
+  says "local use on a non-compromised computer is fine". QG Trust signs only on the ham's own
+  machine, for that ham, and the library never signs for a remote caller. `cargo audit` ignores that
+  one advisory, pointing here; any other, and a fixed release of `rsa`, fails CI.
+- **What QG Trust adds around `rsa`** (Codex reviews of qso-graph-trust#3): a key signs only if it is
+  LoTW-shaped (1024-bit modulus, exponent 65537, two different 512-bit primes, each passing
+  Baillie-PSW and 32 Miller-Rabin rounds with random bases) and matches its stated public key; a
+  protected key is decrypted by QG Trust itself (PBKDF2, then 3DES- or AES-CBC), every buffer wiped.
+  **Known and outside QG Trust's code:** `rsa` 0.9.10's `validate()` multiplies e by a clone of d that
+  it drops unwiped (`src/key.rs:408-409`), and `num-bigint-dig` wipes its arithmetic temporaries only
+  in part. Closed for the whole class, not line by line (KI7MT, 2026-11-03: "who would use an app
+  that leaks their key"): every program that signs uses a wiping global allocator, so every freed block
+  is overwritten whichever library allocated it, and the custody test (qso-graph-desktop#172, Gate C)
+  proves no key data remains in memory or a crash dump. The fix is also offered to `rsa` upstream.
+- **SHA-1 is ARRL's choice, not QG Trust's.** Its weakness is collisions, which need the victim to sign
+  attacker-made binary blocks. QG Trust signs only strings built from fields it has validated (calls,
+  bands, modes, dates, location values), which leaves such blocks no place; that is a tested rule.
+  The hash is fixed in TQSL's code (`tqsl_signDataBlock`, `EVP_sha1()`, `src/openssl_cert.cpp:2215`)
+  and `config.xml`'s sigspec names no hash, so a stronger one would take a code change and an ARRL
+  decision. ARRL already uses SHA-256 for the certificate request (`EVP_sha256()`, line 679); whether
+  LoTW accepts a SHA-256 QSO signature is a question for lotw-devel.

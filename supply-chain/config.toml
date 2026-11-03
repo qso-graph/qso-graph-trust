@@ -23,6 +23,16 @@ criteria = "safe-to-run"
 version = "1.0.3"
 criteria = "safe-to-run"
 
+[[exemptions.fs_extra]]
+version = "1.3.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): a build tool for AWS-LC (file copying, via aws-lc-sys); runs only while AWS-LC is built, never shipped."
+
+[[exemptions.generic-array]]
+version = "0.14.7"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): fixed-size arrays under RustCrypto's digest and cipher crates."
+
 [[exemptions.hashbrown]]
 version = "0.17.1"
 criteria = "safe-to-run"
@@ -35,9 +45,24 @@ criteria = "safe-to-run"
 version = "2.8.3"
 criteria = "safe-to-run"
 
+[[exemptions.num-bigint-dig]]
+version = "0.8.6"
+criteria = "safe-to-run"
+notes = "Not audited yet (docs/decisions/0004-supply-chain.md): rsa's big-number library. The code rsa's signing reaches (Montgomery exponentiation, multiplication, division, inverse, blinding randomness, build.rs) was reviewed by Codex (gpt-6-astra, high) on 2026-11-03 and found safe-to-deploy; the rest of the crate is not reviewed. Known: an assertion message at src/monty.rs:50 would print its operands, a secret prime included, if it ever failed (no normal path does; Gate C's custody test covers it)."
+
+[[exemptions.r-efi]]
+version = "6.0.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): getrandom 0.4's UEFI back end, never built for QG Trust's platforms (Windows, macOS, Linux)."
+
 [[exemptions.serde_spanned]]
 version = "1.1.2"
 criteria = "safe-to-run"
+
+[[exemptions.spin]]
+version = "0.9.9"
+criteria = "safe-to-run"
+notes = "Not audited yet (decision 0004): reached only through lazy_static's no-std option, for num-bigint-dig."
 
 [[exemptions.toml]]
 version = "1.1.8+spec-1.1.0"
@@ -54,6 +79,16 @@ criteria = "safe-to-run"
 [[exemptions.toml_writer]]
 version = "1.1.3+spec-1.1.0"
 criteria = "safe-to-run"
+
+[[exemptions.typenum]]
+version = "1.20.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): type-level numbers for RustCrypto's generic-array; mostly generated tables, holds no data at run time."
+
+[[exemptions.wasi]]
+version = "0.11.1+wasi-snapshot-preview1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): getrandom's WebAssembly back end, never built for QG Trust's platforms (Windows, macOS, Linux)."
 
 [[exemptions.winnow]]
 version = "1.0.4"

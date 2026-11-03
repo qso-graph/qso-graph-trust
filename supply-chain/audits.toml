@@ -1,7 +1,200 @@
 
 # cargo-vet audits file
 
-[audits]
+[[audits.autocfg]]
+who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+criteria = "safe-to-deploy"
+delta = "1.5.0 -> 1.5.1"
+notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: production probing unchanged; a shell test fixture replaced by a Rust test executable."
+
+[[audits.num-integer]]
+who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+criteria = "safe-to-deploy"
+delta = "0.1.46 -> 0.1.47"
+notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: adds a u128 Karatsuba square root with its input normalized; otherwise documentation and tests."
+
+[[audits.num-iter]]
+who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+criteria = "safe-to-deploy"
+delta = "0.1.43 -> 0.1.46"
+notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: range-checked backward iteration; the build script and autocfg removed."
+
+[[audits.rsa]]
+who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+criteria = "safe-to-deploy"
+version = "0.9.10"
+notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: the whole crate. No unsafe code, no file, network, environment or process access, no build script. Blinding is on the try_sign_with_rng path (src/pkcs1v15/signing_key.rs:150, src/algorithms/rsa.rs:48). RsaPrivateKey and SigningKey derive an unredacted Debug (src/key.rs:37, src/pkcs1v15/signing_key.rs:22): QG Trust wraps them in TqslKey, whose Debug prints nothing. Zeroization is partial: among others, validate() multiplies e by a clone of d that is dropped unwiped (src/key.rs:408-409), on every key QG Trust unlocks, which QG Trust cannot change without patching rsa (refused by its policy); the custody test (qso-graph-desktop#172, Gate C) measures what remains. The arithmetic is not constant-time (RUSTSEC-2023-0071), accepted for local signing only (decision 0002)."
+
+[[audits.sha1]]
+who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+criteria = "safe-to-deploy"
+version = "0.10.6"
+notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: the whole crate: no I/O, logging or build script; the unsafe block-slice conversion (src/compress.rs:38), the x86 backend behind its runtime feature check (src/compress/x86.rs:33, :100) and the LoongArch assembly are sound. The optional asm feature (sha1-asm) is not used and not covered."
+
+[[audits.smallvec]]
+who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+criteria = "safe-to-deploy"
+delta = "1.15.2 -> 1.16.4"
+notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: the changed unsafe push, growth and retain paths reviewed, including panics and zero-sized elements; no unsoundness found."
+
+[[audits.subtle]]
+who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+criteria = "safe-to-deploy"
+delta = "2.5.0 -> 2.6.1"
+notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: black_box generalised to Copy types with read_volatile, and a BlackBox wrapper: optimisation barriers only."
+
+[[audits.version_check]]
+who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+criteria = "safe-to-deploy"
+delta = "0.9.4 -> 0.9.5"
+notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: metadata and documentation only; the implementation is unchanged."
+
+[[trusted.aes]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2020-06-05"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.aws-lc-sys]]
+criteria = "safe-to-deploy"
+user-id = 156764 # Justin W Smith (justsmth)
+start = "2022-11-09"
+end = "2027-11-03"
+notes = "AWS-LC, the cryptographic provider KI7MT chose for LoTW's signature (2026-11-03, docs/decisions/0006), published by AWS's aws-lc-rs maintainer; the library QSO Graph Desktop already ships"
+
+[[trusted.base64ct]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2021-01-21"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.block-buffer]]
+criteria = "safe-to-deploy"
+user-id = 5059 # Artyom Pavlov (newpavlov)
+start = "2019-04-15"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.block-padding]]
+criteria = "safe-to-deploy"
+user-id = 5059 # Artyom Pavlov (newpavlov)
+start = "2019-04-22"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.cbc]]
+criteria = "safe-to-deploy"
+user-id = 5059 # Artyom Pavlov (newpavlov)
+start = "2021-04-10"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.cc]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:rust-lang/cc-rs"
+start = "2025-09-01"
+end = "2027-11-03"
+notes = "The Rust project, a trusted publisher (decision 0004)"
+
+[[trusted.cfg-if]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2025-06-09"
+end = "2027-11-03"
+notes = "The Rust project, a trusted publisher (decision 0004)"
+
+[[trusted.cipher]]
+criteria = "safe-to-deploy"
+user-id = 5059 # Artyom Pavlov (newpavlov)
+start = "2022-02-10"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.cmake]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2022-10-29"
+end = "2027-11-03"
+notes = "The Rust project, a trusted publisher (decision 0004)"
+
+[[trusted.const-oid]]
+criteria = "safe-to-deploy"
+user-id = 11235 # Arthur Gautier (baloo)
+start = "2023-07-10"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.cpufeatures]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2021-04-26"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.crypto-common]]
+criteria = "safe-to-deploy"
+user-id = 5059 # Artyom Pavlov (newpavlov)
+start = "2021-02-10"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.der]]
+criteria = "safe-to-deploy"
+user-id = 11235 # Arthur Gautier (baloo)
+start = "2023-04-19"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.des]]
+criteria = "safe-to-deploy"
+user-id = 5059 # Artyom Pavlov (newpavlov)
+start = "2020-08-07"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.digest]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2020-06-10"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.find-msvc-tools]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:rust-lang/cc-rs"
+start = "2025-09-05"
+end = "2027-11-03"
+notes = "The Rust project, a trusted publisher (decision 0004)"
+
+[[trusted.getrandom]]
+criteria = "safe-to-deploy"
+user-id = 5059 # Artyom Pavlov (newpavlov)
+start = "2019-06-28"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.getrandom]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:rust-random/getrandom"
+start = "2025-12-27"
+end = "2027-11-03"
+notes = "rust-random, a trusted publisher (decision 0004)"
+
+[[trusted.hmac]]
+criteria = "safe-to-deploy"
+user-id = 5059 # Artyom Pavlov (newpavlov)
+start = "2019-07-11"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.inout]]
+criteria = "safe-to-deploy"
+user-id = 5059 # Artyom Pavlov (newpavlov)
+start = "2021-08-13"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
 
 [[trusted.itoa]]
 criteria = "safe-to-deploy"
@@ -9,17 +202,115 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-05-02"
 end = "2027-11-03"
 
+[[trusted.jobserver]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2024-07-23"
+end = "2027-11-03"
+notes = "The Rust project, a trusted publisher (decision 0004)"
+
+[[trusted.lazy_static]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2026-10-01"
+end = "2027-11-03"
+notes = "The Rust project, a trusted publisher (decision 0004)"
+
+[[trusted.libc]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:rust-lang/libc"
+start = "2026-10-02"
+end = "2027-11-03"
+notes = "The Rust project, a trusted publisher (decision 0004)"
+
+[[trusted.libm]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2024-10-26"
+end = "2027-11-03"
+notes = "The Rust project, a trusted publisher (decision 0004)"
+
+[[trusted.pbkdf2]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2020-06-10"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.pem-rfc7468]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2021-02-16"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.pkcs1]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2020-06-12"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.pkcs5]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2020-06-12"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.pkcs8]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2020-06-12"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
 [[trusted.proc-macro2]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-04-23"
 end = "2027-11-03"
 
+[[trusted.rand]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:rust-random/rand"
+start = "2026-01-26"
+end = "2027-11-03"
+notes = "rust-random, a trusted publisher (decision 0004)"
+
+[[trusted.rand_chacha]]
+criteria = "safe-to-deploy"
+user-id = 1234
+start = "2019-06-06"
+end = "2027-11-03"
+notes = "rust-random, a trusted publisher (decision 0004)"
+
+[[trusted.rand_core]]
+criteria = "safe-to-deploy"
+user-id = 1234
+start = "2019-06-06"
+end = "2027-11-03"
+notes = "rust-random, a trusted publisher (decision 0004)"
+
 [[trusted.ryu]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-05-02"
 end = "2027-11-03"
+
+[[trusted.salsa20]]
+criteria = "safe-to-deploy"
+user-id = 5059 # Artyom Pavlov (newpavlov)
+start = "2019-07-30"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.scrypt]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2020-08-18"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
 
 [[trusted.serde]]
 criteria = "safe-to-deploy"
@@ -45,14 +336,63 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-02-28"
 end = "2027-11-03"
 
+[[trusted.sha2]]
+criteria = "safe-to-deploy"
+user-id = 5059 # Artyom Pavlov (newpavlov)
+start = "2020-01-06"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.signature]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2019-05-25"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.spki]]
+criteria = "safe-to-deploy"
+user-id = 11235 # Arthur Gautier (baloo)
+start = "2023-05-04"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
 [[trusted.syn]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-03-01"
 end = "2027-11-03"
 
+[[trusted.syn]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-03-01"
+end = "2027-11-03"
+notes = "David Tolnay, a trusted publisher (decision 0004)"
+
 [[trusted.unicode-ident]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2021-10-02"
 end = "2027-11-03"
+
+[[trusted.zerocopy]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:google/zerocopy"
+start = "2026-09-08"
+end = "2027-11-03"
+notes = "Google's zerocopy, a trusted publisher (decision 0004)"
+
+[[trusted.zerocopy-derive]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:google/zerocopy"
+start = "2026-09-08"
+end = "2027-11-03"
+notes = "Google's zerocopy, a trusted publisher (decision 0004)"
+
+[[trusted.zeroize]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:RustCrypto/utils"
+start = "2026-06-12"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"

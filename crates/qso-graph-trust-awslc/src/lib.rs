@@ -1,0 +1,281 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
+
+//! LoTW's RSA signature from AWS-LC, the cryptographic library QSO Graph Desktop already ships.
+//!
+//! LoTW accepts only RSA PKCS#1 v1.5 over SHA-1 (`SIGN_LOTW_V2.0`). aws-lc-rs's safe API signs RSA
+//! only with SHA-2, so this crate calls AWS-LC's C functions itself: the one place in QSO Graph Trust
+//! with unsafe code (docs/decisions/0006). AWS-LC's RSA is constant-time and overwrites every block
+//! it frees (`OPENSSL_free`, `crypto/mem.c`), so the key's numbers and their temporaries are wiped.
+//!
+//! The interface is safe: [`RsaKey`] owns its AWS-LC key, frees it when dropped, and can only be
+//! checked and used to sign. Nothing here returns or prints the private key.
+
+use std::ffi::c_int;
+use std::fmt;
+use std::ptr::NonNull;
+
+use aws_lc_sys as sys;
+
+/// An RSA private key held by AWS-LC. It cannot be read back out.
+pub struct RsaKey {
+    rsa: NonNull<sys::RSA>,
+}
+
+impl fmt::Debug for RsaKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("RsaKey(..)")
+    }
+}
+
+/// Why AWS-LC could not take or use a key. It never holds key material.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Error {
+    /// Not a PKCS#8 RSA private key, or a public key that is not RSA SubjectPublicKeyInfo.
+    NotRsa,
+    /// AWS-LC could not make the signature.
+    Signing,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::NotRsa => "not an RSA key AWS-LC can read",
+            Self::Signing => "AWS-LC could not sign",
+        })
+    }
+}
+
+impl std::error::Error for Error {}
+
+/// An AWS-LC key read from DER, `parse` being EVP_parse_private_key or EVP_parse_public_key, as the
+/// RSA it holds. The EVP wrapper is freed here; the RSA is the caller's to free.
+fn parse_rsa(
+    der: &[u8],
+    parse: unsafe extern "C" fn(*mut sys::CBS) -> *mut sys::EVP_PKEY,
+) -> Option<NonNull<sys::RSA>> {
+    let mut cbs = sys::CBS {
+        data: std::ptr::null(),
+        len: 0,
+    };
+    #[allow(unsafe_code)]
+    // SAFETY: `der` is a live slice for this whole function; CBS_init only records its pointer and length.
+    unsafe {
+        sys::CBS_init(&mut cbs, der.as_ptr(), der.len())
+    };
+    #[allow(unsafe_code)]
+    // SAFETY: `cbs` was initialised above over `der`, which outlives the call; the result is owned or null.
+    let pkey = NonNull::new(unsafe { parse(&mut cbs) })?;
+    // A key with bytes after it is not one key (the same rule as the Rust parsers).
+    if cbs.len != 0 {
+        #[allow(unsafe_code)]
+        // SAFETY: `pkey` is the owned, non-null result above, freed exactly once here.
+        unsafe {
+            sys::EVP_PKEY_free(pkey.as_ptr())
+        };
+        return None;
+    }
+    #[allow(unsafe_code)]
+    // SAFETY: `pkey` is live; get1 returns a new reference to its RSA (or null if it is not RSA).
+    let rsa = unsafe { sys::EVP_PKEY_get1_RSA(pkey.as_ptr()) };
+    #[allow(unsafe_code)]
+    // SAFETY: `pkey` is owned and freed exactly once; the RSA reference taken above outlives it.
+    unsafe {
+        sys::EVP_PKEY_free(pkey.as_ptr())
+    };
+    NonNull::new(rsa)
+}
+
+/// Free an RSA this crate owns.
+fn free_rsa(rsa: NonNull<sys::RSA>) {
+    #[allow(unsafe_code)]
+    // SAFETY: every caller passes an RSA reference it owns and does not use again.
+    unsafe {
+        sys::RSA_free(rsa.as_ptr())
+    };
+}
+
+impl RsaKey {
+    /// Read a PKCS#8 RSA private key (DER). The caller keeps and wipes its own copy of `der`.
+    pub fn from_pkcs8_der(der: &[u8]) -> Result<RsaKey, Error> {
+        parse_rsa(der, sys::EVP_parse_private_key)
+            .map(|rsa| RsaKey { rsa })
+            .ok_or(Error::NotRsa)
+    }
+
+    /// Whether this is a key LoTW uses, as tqsllib makes them: a 1024-bit modulus, the exponent
+    /// 65537, and two different 512-bit factors that each pass AWS-LC's primality test (64
+    /// Miller-Rabin rounds with bases from AWS-LC's random generator, after trial division).
+    pub fn is_lotw_shaped(&self) -> bool {
+        let rsa = self.rsa.as_ptr();
+        #[allow(unsafe_code)]
+        // SAFETY: `rsa` is this key's live RSA; RSA_bits only reads it.
+        let bits = unsafe { sys::RSA_bits(rsa) };
+        #[allow(unsafe_code)]
+        // SAFETY: `rsa` is live; the returned BIGNUM is borrowed from it and only read below.
+        let e = unsafe { sys::RSA_get0_e(rsa) };
+        if bits != 1024 || e.is_null() {
+            return false;
+        }
+        #[allow(unsafe_code)]
+        // SAFETY: `e` is non-null and borrowed from the live key.
+        let e_ok = unsafe { sys::BN_is_word(e, 65_537) } == 1;
+        let (mut p, mut q) = (std::ptr::null(), std::ptr::null());
+        #[allow(unsafe_code)]
+        // SAFETY: `rsa` is live; the out-pointers receive borrowed BIGNUMs (or null), only read below.
+        unsafe {
+            sys::RSA_get0_factors(rsa, &mut p, &mut q)
+        };
+        if !e_ok || p.is_null() || q.is_null() {
+            return false;
+        }
+        #[allow(unsafe_code)]
+        // SAFETY: `p` and `q` are non-null and borrowed from the live key.
+        let distinct = unsafe { sys::BN_cmp(p, q) } != 0;
+        let sized = |n: *const sys::BIGNUM| {
+            #[allow(unsafe_code)]
+            // SAFETY: called only with `p` or `q`, non-null and borrowed from the live key.
+            let b = unsafe { sys::BN_num_bits(n) };
+            b == 512
+        };
+        distinct && sized(p) && sized(q) && is_prime(p) && is_prime(q)
+    }
+
+    /// Whether `spki_der`, a SubjectPublicKeyInfo, is this key's own public key.
+    pub fn matches_public_key(&self, spki_der: &[u8]) -> bool {
+        let Some(public) = parse_rsa(spki_der, sys::EVP_parse_public_key) else {
+            return false;
+        };
+        let same = |get: unsafe extern "C" fn(*const sys::RSA) -> *const sys::BIGNUM| {
+            #[allow(unsafe_code)]
+            // SAFETY: this key's RSA is live; the BIGNUM is borrowed from it and only compared.
+            let a = unsafe { get(self.rsa.as_ptr()) };
+            #[allow(unsafe_code)]
+            // SAFETY: `public` is live until it is freed below; its BIGNUM is only compared.
+            let b = unsafe { get(public.as_ptr()) };
+            if a.is_null() || b.is_null() {
+                return false;
+            }
+            #[allow(unsafe_code)]
+            // SAFETY: `a` and `b` are non-null and borrowed from live keys; BN_cmp only reads them.
+            let order = unsafe { sys::BN_cmp(a, b) };
+            order == 0
+        };
+        let matches = same(sys::RSA_get0_n) && same(sys::RSA_get0_e);
+        free_rsa(public);
+        matches
+    }
+
+    /// LoTW's signature over `data`: SHA-1, then RSA PKCS#1 v1.5 (`RSA_sign` with `NID_sha1`), the
+    /// bytes tqsllib's `tqsl_signDataBlock` returns.
+    pub fn sign_sha1(&self, data: &[u8]) -> Result<Vec<u8>, Error> {
+        let mut digest = [0u8; 20];
+        #[allow(unsafe_code)]
+        // SAFETY: `data` is a live slice of its length; `digest` holds the 20 bytes SHA-1 writes.
+        unsafe {
+            sys::SHA1(data.as_ptr(), data.len(), digest.as_mut_ptr())
+        };
+        #[allow(unsafe_code)]
+        // SAFETY: `rsa` is this key's live RSA; RSA_size only reads it.
+        let size = unsafe { sys::RSA_size(self.rsa.as_ptr()) } as usize;
+        let mut out = vec![0u8; size];
+        let mut out_len: std::ffi::c_uint = 0;
+        #[allow(unsafe_code)]
+        // SAFETY: `digest` is 20 bytes, as NID_sha1 requires; `out` holds RSA_size bytes, the most
+        // RSA_sign writes; `out_len` receives the length; `rsa` is live for the call.
+        let ok = unsafe {
+            sys::RSA_sign(
+                sys::NID_sha1 as c_int,
+                digest.as_ptr(),
+                digest.len(),
+                out.as_mut_ptr(),
+                &mut out_len,
+                self.rsa.as_ptr(),
+            )
+        };
+        if ok != 1 || out_len as usize != size {
+            return Err(Error::Signing);
+        }
+        Ok(out)
+    }
+}
+
+impl Drop for RsaKey {
+    fn drop(&mut self) {
+        // AWS-LC clears the key's numbers as it frees them (BN_free and OPENSSL_free cleanse).
+        free_rsa(self.rsa);
+    }
+}
+
+/// AWS-LC's primality test on a factor borrowed from a live key.
+fn is_prime(n: *const sys::BIGNUM) -> bool {
+    #[allow(unsafe_code)]
+    // SAFETY: BN_CTX_new takes no arguments; its result is owned, checked for null and freed below.
+    let ctx = unsafe { sys::BN_CTX_new() };
+    if ctx.is_null() {
+        return false;
+    }
+    let mut prime: c_int = 0;
+    #[allow(unsafe_code)]
+    // SAFETY: `n` is borrowed from a live key, `ctx` is owned and live, `prime` receives the answer,
+    // and no progress callback is given (null).
+    let ok = unsafe { sys::BN_primality_test(&mut prime, n, 64, ctx, 1, std::ptr::null_mut()) };
+    #[allow(unsafe_code)]
+    // SAFETY: `ctx` is owned, non-null, and freed exactly once here.
+    unsafe {
+        sys::BN_CTX_free(ctx)
+    };
+    ok == 1 && prime == 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rubbish_is_not_a_key() {
+        assert_eq!(
+            RsaKey::from_pkcs8_der(b"not a key").err(),
+            Some(Error::NotRsa)
+        );
+        assert_eq!(RsaKey::from_pkcs8_der(&[]).err(), Some(Error::NotRsa));
+    }
+
+    #[test]
+    fn a_key_prints_nothing_of_itself() {
+        let pem = include_str!("../../../tests/corpus/pki/user-1024.key.pem");
+        let der = pem_body(pem);
+        let key = RsaKey::from_pkcs8_der(&der).expect("key");
+        assert_eq!(format!("{key:?}"), "RsaKey(..)");
+        assert!(key.is_lotw_shaped());
+    }
+
+    #[test]
+    fn trailing_bytes_after_a_key_are_refused() {
+        let mut der = pem_body(include_str!("../../../tests/corpus/pki/user-1024.key.pem"));
+        der.push(0);
+        assert_eq!(RsaKey::from_pkcs8_der(&der).err(), Some(Error::NotRsa));
+    }
+
+    /// A PEM's base64 body, decoded by hand so these tests need nothing outside this crate.
+    fn pem_body(pem: &str) -> Vec<u8> {
+        let b64: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();
+        let val = |c: u8| match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            _ => 63,
+        };
+        let bytes: Vec<u8> = b64.bytes().filter(|&c| c != b'=').collect();
+        let mut out = Vec::new();
+        for chunk in bytes.chunks(4) {
+            let n = chunk.iter().enumerate().fold(0u32, |acc, (i, &c)| {
+                acc | (u32::from(val(c)) << (18 - 6 * i))
+            });
+            let take = chunk.len() - 1;
+            out.extend_from_slice(&n.to_be_bytes()[1..1 + take]);
+        }
+        out
+    }
+}

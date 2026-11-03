@@ -11,7 +11,34 @@ repository.workspace = true
 # The key, signing and every file parser live in this crate, so no C or C++ may
 # be anywhere in its dependency tree, on any platform: `cargo xtask policy`
 # fails the build if one is (docs/decisions/0002-no-c-in-the-library.md).
+# Every one is pinned exactly: they are the key and signing path.
 [dependencies]
+# LoTW's signature, RSA PKCS#1 v1.5 with SHA-1, from AWS-LC through QG Trust's
+# one binding (decision 0006).
+qso-graph-trust-awslc = { path = "../qso-graph-trust-awslc", version = "=0.1.0" }
+sha1 = { version = "=0.10.6", default-features = false, features = ["oid"] }
+# tqsllib's keys: PKCS#8 PEM, plain, or encrypted (PBES2 with 3DES) when the
+# ham set a password. sha1-insecure: PBKDF2 with HMAC-SHA1, which older OpenSSL
+# wrote for TQSL's keys; it is a key derivation here, not a signature.
+pkcs8 = { version = "=0.10.2", default-features = false, features = ["std", "pem", "encryption", "3des", "sha1-insecure"] }
+base64ct = { version = "=1.8.3", default-features = false, features = ["alloc"] }
+# Every buffer that can hold a key is wiped when it is dropped.
+zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
+# A protected key's decryption, done here so the derived key and the cipher's
+# key schedule are wiped (pkcs5's own path keeps the derived key unwiped):
+# PBKDF2 with HMAC-SHA1 or -SHA256, then 3DES- or AES-CBC, each with its zeroize
+# feature. pkcs5 still reads the parameters.
+pbkdf2 = { version = "=0.12.2", default-features = false, features = ["hmac"] }
+sha2 = { version = "=0.10.9", default-features = false }
+cbc = { version = "=0.1.2", default-features = false, features = ["block-padding", "zeroize"] }
+des = { version = "=0.8.1", default-features = false, features = ["zeroize"] }
+aes = { version = "=0.8.4", default-features = false, features = ["zeroize"] }
+
+# Test tools only, never shipped: rsa and num-bigint-dig build the crafted keys the tests refuse.
+[dev-dependencies]
+rsa = { version = "=0.9.10", default-features = false, features = ["std", "pem", "getrandom"] }
+rand_core = { version = "=0.6.4", default-features = false, features = ["getrandom"] }
+num-bigint-dig = { version = "=0.8.6", default-features = false, features = ["prime"] }
 
 [lints]
 workspace = true

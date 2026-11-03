@@ -1,5 +1,7 @@
 # 0001: Rust for the library and command line, Electron for the app
 
+> The app is superseded by [0005](0005-qso-graph-desktop-is-the-interface.md): there is no standalone app, and QSO Graph Desktop is the interface. The Rust decision stands.
+
 Decided 2026-11-02 by KI7MT.
 
 ## What was decided

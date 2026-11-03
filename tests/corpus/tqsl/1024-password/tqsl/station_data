@@ -1,0 +1,11 @@
+<StationDataFile>
+  <StationData name="QG0TEST Home">
+    <CALL>QG0TEST</CALL>
+    <CQZ>4</CQZ>
+    <DXCC>291</DXCC>
+    <GRIDSQUARE>EM17</GRIDSQUARE>
+    <ITUZ>7</ITUZ>
+    <US_COUNTY>Sedgwick</US_COUNTY>
+    <US_STATE>KS</US_STATE>
+  </StationData>
+</StationDataFile>
