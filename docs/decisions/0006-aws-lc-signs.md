@@ -37,3 +37,13 @@ crafted key (unequal, equal or composite factors) never signs; any crate but the
 `aws-lc-sys` fails the policy, as does the binding with weaker lints. The key is in memory only while it
 signs, as in every signer; the OS credential store protects it at rest. A wiping global allocator and
 the custody test (qso-graph-desktop#172, Gate C) still apply to every QG Trust program.
+
+## Amended 2026-11-03: certificate signatures through aws-lc-rs
+
+Importing a TQSL backup checks each callsign certificate's chain to LoTW's pinned root, which needs RSA
+signature verification. AWS-LC's safe Rust API, `aws-lc-rs` 1.18.1 (QSO Graph Desktop's, over the same
+`aws-lc-sys` 0.45.0), offers that, so the binding calls it (`verify_rsa`) with no unsafe code of its own,
+as AGENTS.md requires for every operation the safe API offers. `aws-lc-rs` is named as part of the
+provider in the policy checks: it may depend on `aws-lc-sys`, and any crate but the binding depending on
+either fails, proved by a planted case. Only LoTW's SHA-1 signing, which `aws-lc-rs` does not make, still
+calls `aws-lc-sys` directly.

@@ -86,6 +86,36 @@ fn parse_rsa(
     NonNull::new(rsa)
 }
 
+/// The digest an RSA signature is made over, as a certificate names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Digest {
+    /// SHA-1, which older certificates use.
+    Sha1,
+    /// SHA-256.
+    Sha256,
+    /// SHA-384.
+    Sha384,
+    /// SHA-512, which LoTW's root uses.
+    Sha512,
+}
+
+/// Whether `signature` is a valid RSA PKCS#1 v1.5 signature over `message`, made with `digest`, by
+/// `rsa_public_key`, an RSAPublicKey (RFC 8017) of 2048 bits or more: how a certificate's issuer is
+/// checked. It is aws-lc-rs's own verification, with no unsafe code here: AWS-LC through its safe
+/// API for every operation that API offers (AGENTS.md).
+pub fn verify_rsa(rsa_public_key: &[u8], digest: Digest, message: &[u8], signature: &[u8]) -> bool {
+    use aws_lc_rs::signature::{self, UnparsedPublicKey, VerificationAlgorithm};
+    let algorithm: &'static dyn VerificationAlgorithm = match digest {
+        Digest::Sha1 => &signature::RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY,
+        Digest::Sha256 => &signature::RSA_PKCS1_2048_8192_SHA256,
+        Digest::Sha384 => &signature::RSA_PKCS1_2048_8192_SHA384,
+        Digest::Sha512 => &signature::RSA_PKCS1_2048_8192_SHA512,
+    };
+    UnparsedPublicKey::new(algorithm, rsa_public_key)
+        .verify(message, signature)
+        .is_ok()
+}
+
 /// Free an RSA this crate owns.
 fn free_rsa(rsa: NonNull<sys::RSA>) {
     #[allow(unsafe_code)]

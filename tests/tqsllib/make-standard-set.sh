@@ -34,11 +34,12 @@ EMAIL=test@example.invalid
 TODAY=$(date -u +%Y-%m-%d)
 MONTH_ON=$(date -u -d '+30 days' +%Y-%m-%d)
 
-# call | key password | first QSO date | last QSO date | days in force
+# call | serial | key password | first QSO date | last QSO date | days in force. Serials are small
+# numbers, as ARRL's are: tqsllib reads one into a long, and tells a call's certificates apart by it.
 CERTS=(
-  "KC4QPQ|qgt-kc4qpq|2000-01-01|2099-12-31|1095"
-  "KN4YU||2000-01-01|2099-12-31|1095"
-  "W4W|qgt-w4w|$TODAY|$MONTH_ON|30"
+  "KC4QPQ|10001|qgt-kc4qpq|2000-01-01|2099-12-31|1095"
+  "KN4YU|10002||2000-01-01|2099-12-31|1095"
+  "W4W|10003|qgt-w4w|$TODAY|$MONTH_ON|30"
 )
 
 # location | call | county | grid | park
@@ -79,8 +80,8 @@ openssl x509 -req -in "$work/ca.csr" -CA /out/pki/root.pem -CAkey /out/pki/root.
   -CAcreateserial -days 36500 -sha256 -extfile "$work/ca.cnf" -extensions ca -out /out/pki/ca.pem 2>/dev/null
 
 for entry in "${CERTS[@]}"; do
-  IFS='|' read -r call pass first last days <<<"$entry"
-  echo "== $call: key, request, certificate (QSOs $first to $last, in force $days days)"
+  IFS='|' read -r call serial pass first last days <<<"$entry"
+  echo "== $call: key, request, certificate $serial (QSOs $first to $last, in force $days days)"
   printf '%s' "$pass" > "/out/keys/$call.password"
   keypass=()
   [ -n "$pass" ] && keypass=("$pass")
@@ -98,9 +99,8 @@ authorityKeyIdentifier = keyid
 1.3.6.1.4.1.12348.1.3 = DER:$(hex "$last")
 1.3.6.1.4.1.12348.1.4 = DER:$(hex "$DXCC")
 EOF
-  openssl x509 -req -in "$work/$call.csr" -CA /out/pki/ca.pem -CAkey /out/pki/ca.key -CAserial "$work/ca.srl" \
-    -CAcreateserial -days "$days" -sha256 -extfile "$work/$call.cnf" -extensions user \
-    -out "$work/$call.pem" 2>/dev/null
+  openssl x509 -req -in "$work/$call.csr" -CA /out/pki/ca.pem -CAkey /out/pki/ca.key -set_serial "$serial" \
+    -days "$days" -sha256 -extfile "$work/$call.cnf" -extensions user -out "$work/$call.pem" 2>/dev/null
   # Sent as ARRL sends one: a .tq6, gzipped XML of root, CA and user certificates, gzip -n so no name
   # or time is inside (src/location.cpp:4281-4334).
   {
@@ -189,8 +189,8 @@ mv "$TQSLDIR/tqslconfig.tbk" /out/standard.tbk
   echo "QSO Graph Trust's standard test set, made $(date -u +%Y-%m-%dT%H:%M:%SZ) by tests/tqsllib/make-standard-set.sh"
   echo "tqsllib and TQSL 2.8.7 (commit $(git -C /src/tqsl rev-parse HEAD))"
   for entry in "${CERTS[@]}"; do
-    IFS='|' read -r call pass first last days <<<"$entry"
-    echo "certificate $call: QSOs $first to $last, in force $days days, key password $([ -n "$pass" ] && echo set || echo none)"
+    IFS='|' read -r call serial pass first last days <<<"$entry"
+    echo "certificate $call: serial $serial, QSOs $first to $last, in force $days days, key password $([ -n "$pass" ] && echo set || echo none)"
   done
   for entry in "${LOCATIONS[@]}"; do echo "location ${entry//|/ }"; done
 } > /out/MANIFEST

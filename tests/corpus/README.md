@@ -85,7 +85,9 @@ key, certificate and password is a test one, from the same kind of test CA ("TES
 | KN4YU | the club call; the same dates | none | KN4YU-CLUB (Charleston, FM02) |
 | W4W | the special-event call: QSOs and validity for one month from the day it was made | set | W4W-EVENT (Charleston, FM02) |
 
-All are South Carolina, DXCC 291, ITU zone 8, CQ zone 5. `MANIFEST` says when it was made.
+All are South Carolina, DXCC 291, ITU zone 8, CQ zone 5. The certificates' serials are 10001, 10002 and
+10003, small numbers as ARRL's are, so TQSL records each (it reads a serial into a `long`, and writes `-1`
+for one that does not fit). `MANIFEST` says when it was made.
 
 | Path | What |
 | --- | --- |

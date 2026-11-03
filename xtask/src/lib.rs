@@ -42,9 +42,12 @@ pub const SHIPPED: &[&str] = &[
 ];
 
 /// The one cryptographic provider whose C the library may build: AWS-LC, which QSO Graph Desktop
-/// already ships, for LoTW's RSA-SHA-1 signature (KI7MT, 2026-11-03; docs/decisions/0006). Its own
-/// files and build are not scanned; everything it depends on still is.
-pub const CRYPTO_PROVIDERS: &[&str] = &["aws-lc-sys"];
+/// already ships (KI7MT, 2026-11-03; docs/decisions/0006), as its C (`aws-lc-sys`, for LoTW's
+/// RSA-SHA-1 signature, which the safe API does not make) and its safe API (`aws-lc-rs`, for the
+/// operations it offers, as AGENTS.md requires: certificate signature checks). One may depend on the
+/// other; any other crate only through the binding. Their own files and build are not scanned;
+/// everything they depend on still is.
+pub const CRYPTO_PROVIDERS: &[&str] = &["aws-lc-sys", "aws-lc-rs"];
 
 /// The one workspace crate allowed unsafe code, and the only one that may depend on a
 /// [`CRYPTO_PROVIDERS`] crate: QG Trust's binding to AWS-LC. Instead of the workspace's lints it must
@@ -474,7 +477,7 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
             }
             let dep_name = field(dep_id, "name");
             // Only the binding may depend on the provider, so no other crate reaches AWS-LC's C.
-            if crypto_provider(&dep_name) && name != UNSAFE_BINDING {
+            if crypto_provider(&dep_name) && name != UNSAFE_BINDING && !crypto_provider(&name) {
                 problems.push(format!(
                     "{name} depends on {dep_name}: only {UNSAFE_BINDING} may"
                 ));
@@ -2297,6 +2300,30 @@ mod tests {
         assert_eq!(
             check(&g, PROTECTED),
             vec!["runtime links the native library evil"]
+        );
+        // PLANTED: AWS-LC's safe API is the provider too, and also reached only through the binding:
+        // through it, aws-lc-rs may depend on aws-lc-sys; a crate around the binding may not use it.
+        let mut safe = provider_graph(UNSAFE_BINDING);
+        safe["packages"].as_array_mut().expect("packages").push(
+            json!({"id": "rs", "name": "aws-lc-rs", "version": "1.18.1", "source": CRATES_IO, "links": "aws_lc_rs_1_18_1_sys", "targets": [{"kind": ["lib"]}]}),
+        );
+        safe["resolve"]["nodes"]
+            .as_array_mut()
+            .expect("nodes")
+            .push(json!({"id": "rs", "deps": [{"pkg": "aws", "dep_kinds": [{"kind": null}]}]}));
+        safe["resolve"]["nodes"][1]["deps"]
+            .as_array_mut()
+            .expect("deps")
+            .push(json!({"pkg": "rs", "dep_kinds": [{"kind": null}]}));
+        assert!(check(&safe, PROTECTED).is_empty());
+        let mut around = safe.clone();
+        around["resolve"]["nodes"][0]["deps"]
+            .as_array_mut()
+            .expect("deps")
+            .push(json!({"pkg": "rs", "dep_kinds": [{"kind": null}]}));
+        assert_eq!(
+            check(&around, PROTECTED),
+            vec!["qso-graph-trust depends on aws-lc-rs: only qso-graph-trust-awslc may"]
         );
         // PLANTED: a crate of another name with the provider's links is not the provider.
         let mut h = provider_graph(UNSAFE_BINDING);

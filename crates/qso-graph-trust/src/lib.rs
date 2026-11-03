@@ -17,12 +17,15 @@
 #![forbid(unsafe_code)]
 
 pub mod certificate;
+pub mod gzip;
 pub mod lotw;
 pub mod qso;
 pub mod records;
 pub mod signed_log;
 pub mod signing;
 pub mod station;
+pub mod tbk;
+pub mod xml;
 
 /// This library's version, as Cargo has it.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

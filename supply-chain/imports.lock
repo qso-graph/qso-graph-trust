@@ -8,6 +8,13 @@ user-id = 267
 user-login = "tarcieri"
 user-name = "Tony Arcieri"
 
+[[publisher.aws-lc-rs]]
+version = "1.18.1"
+when = "2026-09-01"
+user-id = 156764
+user-login = "justsmth"
+user-name = "Justin W Smith"
+
 [[publisher.aws-lc-sys]]
 version = "0.45.0"
 when = "2026-09-01"
