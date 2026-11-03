@@ -1501,10 +1501,12 @@ pub fn flags_allowed(flags: &str) -> bool {
 }
 
 /// What the canary appends to the library: unsafe code the compiler must refuse.
-/// An anonymous constant, so it takes no name the library may already use, and
-/// every path absolute, so nothing the library declares can shadow one (Codex
-/// review, rounds 37 and 39).
-pub const CANARY_PROBE: &str = "\n// The canary's probe: the compiler must refuse it.\nconst _: ::core::primitive::u8 = unsafe { ::core::ptr::read(&7) };\n";
+/// An anonymous constant holding an empty `unsafe` block: it takes no name and
+/// looks none up, so nothing the library declares can collide with it or redirect
+/// it (Codex review, rounds 37, 39 and 40: a module named `core`, a function of
+/// the probe's name, `extern crate self as core`).
+pub const CANARY_PROBE: &str =
+    "\n// The canary's probe: the compiler must refuse it.\nconst _: () = unsafe {};\n";
 
 /// The canary: build the real library, in a copy of this repository (its
 /// manifests and profiles, its Cargo configuration, its toolchain file) with an
@@ -1906,6 +1908,8 @@ mod tests {
             // Its own name taken, and the type it reads shadowed (round 39).
             "pub fn qgt_canary() {}\n",
             "#[allow(non_camel_case_types)]\npub struct u8;\n",
+            // `::core` itself taken over by a crate alias (round 40).
+            "pub extern crate self as core;\n",
         ]
         .iter()
         .enumerate()
