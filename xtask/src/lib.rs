@@ -424,8 +424,11 @@ pub fn native_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
     for (i, tree) in trees.iter().enumerate() {
         match tree {
             TokenTree::Ident(id) => {
-                let name = id.to_string();
-                let name = name.strip_prefix("r#").unwrap_or(&name);
+                // `r#extern` is an identifier, never the keyword, so the keyword
+                // is matched as spelled; `r#asm` is still the macro `asm`
+                // (found by Codex review).
+                let keyword = id.to_string();
+                let name = keyword.strip_prefix("r#").unwrap_or(&keyword);
                 let next = trees.get(i + 1);
                 let after = trees.get(i + 2);
                 let brace = |t: Option<&TokenTree>| matches!(t, Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace);
@@ -433,7 +436,7 @@ pub fn native_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                 // (found by measuring: zerocopy has one).
                 let rust_abi =
                     matches!(next, Some(TokenTree::Literal(l)) if l.to_string() == "\"Rust\"");
-                if name == "extern"
+                if keyword == "extern"
                     && !rust_abi
                     && (brace(next) || matches!(next, Some(TokenTree::Literal(_))) && brace(after))
                 {
@@ -451,7 +454,7 @@ pub fn native_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                 if after_hash
                     && g.delimiter() == Delimiter::Bracket
                     && matches!(&first, Some(TokenTree::Ident(id))
-                        if matches!(id.to_string().as_str(), "link" | "link_name" | "link_section"))
+                        if matches!(id.to_string().trim_start_matches("r#"), "link" | "link_name" | "link_section"))
                 {
                     found.push("has a #[link] attribute");
                 }
@@ -1888,6 +1891,14 @@ mod tests {
         );
         // Rust calling Rust is not a native binding.
         assert!(scan("extern \"Rust\" { fn f(); }").is_empty());
+        // `r#extern` is an identifier, not the keyword (found by Codex review);
+        // `r#asm!` is still the asm macro, and `#[r#link]` still the attribute.
+        assert!(scan("pub struct r#extern { pub value: u8 }").is_empty());
+        assert_eq!(scan("r#asm!(\"nop\");"), vec!["holds assembly"]);
+        assert_eq!(
+            scan("#[r#link(name = \"z\")] extern \"C\" {}"),
+            vec!["has a #[link] attribute", "declares foreign functions"]
+        );
         // A foreign ABI on a function we define, and words in strings, are not bindings.
         assert!(
             scan("pub extern \"C\" fn f() {} const S: &str = \"extern \\\"C\\\" {\";").is_empty()
