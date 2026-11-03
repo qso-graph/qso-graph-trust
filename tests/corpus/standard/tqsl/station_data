@@ -1,0 +1,69 @@
+<StationDataFile>
+  <StationData name="KC4QPQ-HOME">
+    <CALL>KC4QPQ</CALL>
+    <CQZ>5</CQZ>
+    <DXCC>291</DXCC>
+    <GRIDSQUARE>FM02</GRIDSQUARE>
+    <ITUZ>8</ITUZ>
+    <US_COUNTY>Charleston</US_COUNTY>
+    <US_STATE>SC</US_STATE>
+  </StationData>
+  <StationData name="KC4QPQ-MN35">
+    <CALL>KC4QPQ</CALL>
+    <CQZ>5</CQZ>
+    <DXCC>291</DXCC>
+    <GRIDSQUARE>FM02</GRIDSQUARE>
+    <ITUZ>8</ITUZ>
+    <US_COUNTY>Charleston</US_COUNTY>
+    <US_PARK>MN35</US_PARK>
+    <US_STATE>SC</US_STATE>
+  </StationData>
+  <StationData name="KC4QPQ-NS09">
+    <CALL>KC4QPQ</CALL>
+    <CQZ>5</CQZ>
+    <DXCC>291</DXCC>
+    <GRIDSQUARE>FM02</GRIDSQUARE>
+    <ITUZ>8</ITUZ>
+    <US_COUNTY>Charleston</US_COUNTY>
+    <US_PARK>NS09</US_PARK>
+    <US_STATE>SC</US_STATE>
+  </StationData>
+  <StationData name="KC4QPQ-NP12">
+    <CALL>KC4QPQ</CALL>
+    <CQZ>5</CQZ>
+    <DXCC>291</DXCC>
+    <GRIDSQUARE>EM93</GRIDSQUARE>
+    <ITUZ>8</ITUZ>
+    <US_COUNTY>Richland</US_COUNTY>
+    <US_PARK>NP12</US_PARK>
+    <US_STATE>SC</US_STATE>
+  </StationData>
+  <StationData name="KC4QPQ-TR10-MP06">
+    <CALL>KC4QPQ</CALL>
+    <CQZ>5</CQZ>
+    <DXCC>291</DXCC>
+    <GRIDSQUARE>EM95</GRIDSQUARE>
+    <ITUZ>8</ITUZ>
+    <US_COUNTY>York</US_COUNTY>
+    <US_PARK>TR10,MP06</US_PARK>
+    <US_STATE>SC</US_STATE>
+  </StationData>
+  <StationData name="KN4YU-CLUB">
+    <CALL>KN4YU</CALL>
+    <CQZ>5</CQZ>
+    <DXCC>291</DXCC>
+    <GRIDSQUARE>FM02</GRIDSQUARE>
+    <ITUZ>8</ITUZ>
+    <US_COUNTY>Charleston</US_COUNTY>
+    <US_STATE>SC</US_STATE>
+  </StationData>
+  <StationData name="W4W-EVENT">
+    <CALL>W4W</CALL>
+    <CQZ>5</CQZ>
+    <DXCC>291</DXCC>
+    <GRIDSQUARE>FM02</GRIDSQUARE>
+    <ITUZ>8</ITUZ>
+    <US_COUNTY>Charleston</US_COUNTY>
+    <US_STATE>SC</US_STATE>
+  </StationData>
+</StationDataFile>

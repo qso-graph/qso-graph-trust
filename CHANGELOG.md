@@ -20,3 +20,7 @@ versions follow [Semantic Versioning](https://semver.org/).
   allocator (`zeroizing-alloc`), `cargo xtask policy` refuses any program without it, and the
   custody test reads a signing program's memory and finds no key data or password, with two
   controls proving it finds what is there.
+- The standard test set (qso-graph-desktop#172, `tests/corpus/standard`): KC4QPQ with its home and
+  four park locations, KN4YU as the club call and W4W as a one-month special-event call, from a test
+  CA, with `standard.tbk` written by TQSL's own app. QG Trust signs every location's log as tqsllib
+  does, byte for byte.

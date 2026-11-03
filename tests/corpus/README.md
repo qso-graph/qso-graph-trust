@@ -70,3 +70,33 @@ The cases:
 Both are 1024-bit: LoTW's keys are, and tqsllib 2.8.7 makes no other size (`src/openssl_cert.cpp:653`).
 
 The station location is `QG0TEST Home`: Kansas, Sedgwick County, EM17, CQ zone 4, ITU zone 7.
+
+## `standard/`: the standard test set
+
+KI7MT's standard test set (2026-11-03, qso-graph-desktop#172): what a ham's TQSL 2.8.7 holds, made by
+`scripts/make-standard-set.sh` in the harness container with no network. tqsllib makes each key and
+request and loads each certificate; then TQSL's app itself runs in a virtual display and, as it closes,
+writes its own automatic backup, `standard.tbk`. The calls are KI7MT's former ones, his choice; every
+key, certificate and password is a test one, from the same kind of test CA ("TEST ONLY", "Not ARRL").
+
+| Call | Certificate | Key password | Locations |
+| --- | --- | --- | --- |
+| KC4QPQ | QSOs 2000-01-01 to 2099-12-31, in force 3 years | set | KC4QPQ-HOME (Charleston, FM02); parks KC4QPQ-MN35 Fort Sumter and KC4QPQ-NS09 Charles Pinckney (Charleston, FM02), KC4QPQ-NP12 Congaree (Richland, EM93), KC4QPQ-TR10-MP06 Overmountain Victory NHT + Kings Mountain (York, EM95) |
+| KN4YU | the club call; the same dates | none | KN4YU-CLUB (Charleston, FM02) |
+| W4W | the special-event call: QSOs and validity for one month from the day it was made | set | W4W-EVENT (Charleston, FM02) |
+
+All are South Carolina, DXCC 291, ITU zone 8, CQ zone 5. `MANIFEST` says when it was made.
+
+| Path | What |
+| --- | --- |
+| `pki/` | The test root and CA, with their keys |
+| `requests/<call>.tq5` | The request tqsllib made |
+| `certs/<call>.tq6` | The certificate, as ARRL would send it |
+| `keys/<call>.password` | The key's password, exactly, empty for none |
+| `adif/<location>.adi` | A test log of three QSOs for each location, its own (tqsllib signs a QSO once) |
+| `signed/<location>.tq7` | That log, signed by tqsllib at that location |
+| `tqsl/` | tqsllib's own folder: all three keys and certificates, `station_data`, `uploaded.db` |
+| `standard.tbk` | TQSL's backup of all of it: 3 certificates with their keys, 7 locations, the 21 QSOs it has signed, its settings |
+
+W4W's certificate is in force for a month only, so tests sign at a time inside each certificate,
+never at the time they run.

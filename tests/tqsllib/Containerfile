@@ -22,6 +22,7 @@ RUN dnf -y -q install epel-release dnf-plugins-core \
     && dnf config-manager --set-enabled crb \
     && dnf -y -q install git gcc-c++ make cmake openssl-devel sqlite-devel expat-devel zlib-devel \
        libcurl-devel lmdb-devel wxGTK-devel diffutils \
+       xorg-x11-server-Xvfb xdotool \
     && dnf clean all
 
 # The commit itself, not a branch or a tag that could move: fetched by its ID, then checked.
@@ -30,10 +31,11 @@ RUN git init -q /src/tqsl \
     && git -C /src/tqsl checkout -q FETCH_HEAD \
     && test "$(git -C /src/tqsl rev-parse HEAD)" = "$TQSL_COMMIT"
 
-# tqsllib and its extra programs (load_cert, station_loc, converter, gen_crq); the app is configured,
-# because TrustedQSL's build always includes it, but not built.
+# tqsllib and its extra programs (load_cert, station_loc, converter, gen_crq), and TQSL's app, `tqsl`:
+# the standard test set's .tbk is the backup the app itself writes (apps/tqsl.cpp, MyFrame::AutoBackup,
+# run when its window closes). It runs only here, in a virtual display (Xvfb), with no network.
 RUN cmake -S /src/tqsl -B /build -DCMAKE_BUILD_TYPE=Release -DBUILD_ALL_EXTRAPROGS=ON -Wno-dev \
-    && cmake --build /build -j"$(nproc)" --target tqsllib load_cert station_loc converter gen_crq
+    && cmake --build /build -j"$(nproc)" --target tqsllib load_cert station_loc converter gen_crq tqsl
 
 # tqsllib reads config.xml from the folder its build names, $prefix/share/TrustedQSL (CONFDIR).
 RUN install -D -m 0644 /src/tqsl/src/config.xml /usr/local/share/TrustedQSL/config.xml
@@ -44,4 +46,4 @@ COPY qgt-tqsllib.cpp /src/qgt-tqsllib.cpp
 RUN g++ -std=c++17 -O2 -Wall -Wextra -Werror -I/src/tqsl/src -I/build/src \
       /src/qgt-tqsllib.cpp -L/build/src -ltqsllib -o /build/src/qgt-tqsllib
 
-ENV PATH=/build/src:$PATH LD_LIBRARY_PATH=/build/src
+ENV PATH=/build/src:/build/apps:$PATH LD_LIBRARY_PATH=/build/src

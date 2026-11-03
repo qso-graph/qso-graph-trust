@@ -1,0 +1,12 @@
+QSO Graph Trust's standard test set, made 2026-11-03T17:53:35Z by tests/tqsllib/make-standard-set.sh
+tqsllib and TQSL 2.8.7 (commit d9e01726e54887f8241e86e789c5b91f02043ebd)
+certificate KC4QPQ: QSOs 2000-01-01 to 2099-12-31, in force 1095 days, key password set
+certificate KN4YU: QSOs 2000-01-01 to 2099-12-31, in force 1095 days, key password none
+certificate W4W: QSOs 2026-11-03 to 2026-12-03, in force 30 days, key password set
+location KC4QPQ-HOME KC4QPQ Charleston FM02 
+location KC4QPQ-MN35 KC4QPQ Charleston FM02 MN35
+location KC4QPQ-NS09 KC4QPQ Charleston FM02 NS09
+location KC4QPQ-NP12 KC4QPQ Richland EM93 NP12
+location KC4QPQ-TR10-MP06 KC4QPQ York EM95 TR10,MP06
+location KN4YU-CLUB KN4YU Charleston FM02 
+location W4W-EVENT W4W Charleston FM02 
