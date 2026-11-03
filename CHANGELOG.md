@@ -11,3 +11,8 @@ versions follow [Semantic Versioning](https://semver.org/).
   and Linux, and the policy checks that fail the build on C in the library or unsafe code, each proved
   by a planted case (qso-graph-desktop#170).
 - Test certificates made the way LoTW's are, for the tests to come (`tests/corpus`).
+- The signed log (qso-graph-desktop#171): an ADIF log and a station location become the `.tq7` and
+  `.tq8` LoTW receives, checked against ARRL's TQSL configuration 11.35 (`data/tqsl-config`), and
+  matching tqsllib 2.8.7's `.tq7` byte for byte but for the identification line. A log is signed
+  only with the certificate's own key, for its call and DXCC entity, while it is in force, and for
+  QSOs within its QSO dates.

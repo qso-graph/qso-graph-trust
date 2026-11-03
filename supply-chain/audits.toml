@@ -7,6 +7,18 @@ criteria = "safe-to-deploy"
 delta = "1.5.0 -> 1.5.1"
 notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: production probing unchanged; a shell test fixture replaced by a Rust test executable."
 
+[[audits.flagset]]
+who = "Bob, agent for KI7MT"
+criteria = "safe-to-deploy"
+delta = "0.4.3 -> 0.4.7"
+notes = "Reviewed by Bob, 2026-11-03: a std feature for an Error impl, Hash and repr(C) on FlagSet, Extend, a const constructor; no new unsafe, no build script, no I/O; the rest is CI files and a toolchain file."
+
+[[audits.miniz_oxide]]
+who = "Bob, agent for KI7MT"
+criteria = "safe-to-deploy"
+delta = "0.8.9 -> 0.9.1"
+notes = "Reviewed by Bob, 2026-11-03: compression changes in safe code (new flush modes, window-bits limits, a halved distance table, Clone derives); the crate stays #![forbid(unsafe_code)], with no build script and no file, network or process access. QG Trust round-trips its output in tests and gzip -t accepts it."
+
 [[audits.num-integer]]
 who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
 criteria = "safe-to-deploy"
@@ -141,6 +153,13 @@ end = "2027-11-03"
 notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
 
 [[trusted.der]]
+criteria = "safe-to-deploy"
+user-id = 11235 # Arthur Gautier (baloo)
+start = "2023-04-19"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.der_derive]]
 criteria = "safe-to-deploy"
 user-id = 11235 # Arthur Gautier (baloo)
 start = "2023-04-19"
@@ -376,6 +395,13 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2021-10-02"
 end = "2027-11-03"
 
+[[trusted.x509-cert]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2021-01-21"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
 [[trusted.zerocopy]]
 criteria = "safe-to-deploy"
 trusted-publisher = "github:google/zerocopy"
@@ -391,6 +417,13 @@ end = "2027-11-03"
 notes = "Google's zerocopy, a trusted publisher (decision 0004)"
 
 [[trusted.zeroize]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:RustCrypto/utils"
+start = "2026-06-12"
+end = "2027-11-03"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.zeroize_derive]]
 criteria = "safe-to-deploy"
 trusted-publisher = "github:RustCrypto/utils"
 start = "2026-06-12"

@@ -305,6 +305,11 @@ impl TqslKey {
     pub fn sign(&self, data: &[u8]) -> Result<Vec<u8>, KeyError> {
         self.key.sign_sha1(data).map_err(|_| KeyError::Signing)
     }
+
+    /// Whether `spki_der`, a certificate's SubjectPublicKeyInfo, is this key's public key.
+    pub fn matches_public_key(&self, spki_der: &[u8]) -> bool {
+        self.key.matches_public_key(spki_der)
+    }
 }
 
 /// A signature as tqsllib writes it into `SIGN_LOTW_V2.0`: base64 in lines of 64 characters, each

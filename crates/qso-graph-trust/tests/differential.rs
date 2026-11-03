@@ -4,14 +4,21 @@
 //! QG Trust's signatures against tqsllib 2.8.7's own, byte for byte (qso-graph-desktop#171, Gate B).
 //! The corpus is tqsllib's output (tests/corpus/tqsl, made by scripts/make-tqsl-corpus.sh): each
 //! case's key file, and the test log it signed. For every QSO, QG Trust signs the SIGNDATA tqsllib
-//! signed, with the same key, and must write exactly tqsllib's SIGN_LOTW_V2.0.
+//! signed, with the same key, and must write exactly tqsllib's SIGN_LOTW_V2.0. Then the whole log:
+//! from the ADIF log and the station location tqsllib was given, QG Trust's `.tq7` must be
+//! tqsllib's, every record and byte, but for the identification line, which names the program.
 
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
+use std::time::SystemTime;
 
+use qso_graph_trust::certificate::Certificate;
+use qso_graph_trust::qso::Qso;
 use qso_graph_trust::records::{self, Record};
+use qso_graph_trust::signed_log::{LogError, sign_log, tq8};
 use qso_graph_trust::signing::{KeyEntry, KeyError, tqsl_base64};
+use qso_graph_trust::station::StationLocation;
 
 fn corpus(case: &str, file: &str) -> Vec<u8> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -107,4 +114,138 @@ fn an_unlocked_key_prints_nothing_of_itself() {
     let signer = key("1024").unlock(None).expect("unlocks");
     assert_eq!(format!("{signer:?}"), "TqslKey(..)");
     assert_eq!(format!("{signer:#?}"), "TqslKey(..)");
+}
+
+/// The station location tests/tqsllib/make-corpus.sh gave tqsllib.
+fn kansas() -> StationLocation {
+    StationLocation::new(&[
+        ("CALL", "QG0TEST"),
+        ("DXCC", "291"),
+        ("US_STATE", "KS"),
+        ("US_COUNTY", "Sedgwick"),
+        ("GRIDSQUARE", "EM17"),
+        ("CQZ", "4"),
+        ("ITUZ", "7"),
+    ])
+    .expect("the corpus location")
+}
+
+fn test_log() -> Vec<Qso> {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus/adif/qg0test-small.adi");
+    let adif = std::fs::read(path).expect("the test log");
+    records::parse(&adif)
+        .expect("ADIF")
+        .iter()
+        .map(|r| Qso::from_adif(r).expect("a QSO"))
+        .collect()
+}
+
+/// A signed log without its first line, the identification, which names the program that wrote it.
+fn without_ident(log: &[u8]) -> &[u8] {
+    assert!(log.starts_with(b"<TQSL_IDENT:"));
+    let newline = log.iter().position(|&b| b == b'\n').expect("a first line");
+    &log[newline + 1..]
+}
+
+fn writes_the_log_tqsllib_wrote(case: &str, password: Option<&[u8]>) {
+    let signer = key(case).unlock(password).expect("unlocks");
+    let cert =
+        Certificate::from_pem_or_der(&corpus(case, "tqsl/certs/user")).expect("the certificate");
+    let ours = sign_log(&cert, &signer, &kansas(), &test_log(), SystemTime::now()).expect("signs");
+    // The .tq8 is the same log, gzipped: unzipped, it is this log exactly.
+    let gz = tq8(&ours);
+    let unzipped =
+        miniz_oxide::inflate::decompress_to_vec_with_limit(&gz[10..gz.len() - 8], ours.len());
+    assert_eq!(unzipped.ok().as_deref(), Some(ours.as_slice()));
+    let theirs = corpus(case, "qg0test-small.tq7");
+    let (ours, theirs) = (without_ident(&ours), without_ident(&theirs));
+    assert_eq!(
+        String::from_utf8_lossy(ours),
+        String::from_utf8_lossy(theirs),
+        "{case}"
+    );
+    assert_eq!(ours, theirs, "{case}");
+}
+
+#[test]
+fn the_signed_log_is_tqsllibs() {
+    writes_the_log_tqsllib_wrote("1024", None);
+}
+
+#[test]
+fn the_signed_log_from_a_protected_key_is_tqsllibs() {
+    writes_the_log_tqsllib_wrote("1024-password", Some(b"qgt-key"));
+}
+
+#[test]
+fn a_log_is_not_signed_with_another_certificates_key() {
+    let other = key("1024-password")
+        .unlock(Some(b"qgt-key"))
+        .expect("unlocks");
+    let cert =
+        Certificate::from_pem_or_der(&corpus("1024", "tqsl/certs/user")).expect("the certificate");
+    assert_eq!(
+        sign_log(&cert, &other, &kansas(), &test_log(), SystemTime::now()),
+        Err(LogError::KeyNotCertificates)
+    );
+}
+
+#[test]
+fn a_log_is_signed_only_for_the_certificates_station_and_dates() {
+    let signer = key("1024").unlock(None).expect("unlocks");
+    let cert =
+        Certificate::from_pem_or_der(&corpus("1024", "tqsl/certs/user")).expect("the certificate");
+    let sign =
+        |station: &StationLocation, qsos: &[Qso], now| sign_log(&cert, &signer, station, qsos, now);
+    let qsos = test_log();
+    let elsewhere =
+        StationLocation::new(&[("CALL", "KC4QPQ"), ("DXCC", "291"), ("US_STATE", "SC")])
+            .expect("location");
+    assert!(matches!(
+        sign(&elsewhere, &qsos, SystemTime::now()),
+        Err(LogError::CallNotCertificates { .. })
+    ));
+    let canada = StationLocation::new(&[("CALL", "QG0TEST"), ("DXCC", "1")]).expect("location");
+    assert!(matches!(
+        sign(&canada, &qsos, SystemTime::now()),
+        Err(LogError::DxccNotCertificates { .. })
+    ));
+    assert_eq!(
+        sign(&kansas(), &qsos, SystemTime::UNIX_EPOCH),
+        Err(LogError::CertificateNotInForce)
+    );
+    assert_eq!(
+        sign(&kansas(), &[], SystemTime::now()),
+        Err(LogError::Empty)
+    );
+    let adif = |date: &str, extra: &str| {
+        let record = format!(
+            "<CALL:5>KN4YU<QSO_DATE:8>{date}<TIME_ON:4>1900<BAND:3>20m<MODE:2>CW{extra}<EOR>"
+        );
+        Qso::from_adif(&records::parse(record.as_bytes()).expect("ADIF")[0]).expect("a QSO")
+    };
+    let early = [qsos[0].clone(), qsos[1].clone(), adif("20191231", "")];
+    assert_eq!(
+        sign(&kansas(), &early, SystemTime::now()),
+        Err(LogError::QsoOutsideCertificate { index: 2 })
+    );
+    // Codex review: a QSO naming another station was signed for this one.
+    let other = [
+        qsos[0].clone(),
+        adif("20261101", "<STATION_CALLSIGN:7>QG1TEST"),
+    ];
+    assert_eq!(
+        sign(&kansas(), &other, SystemTime::now()),
+        Err(LogError::QsoFromAnotherStation {
+            index: 1,
+            field: "STATION_CALLSIGN",
+            value: "QG1TEST".into()
+        })
+    );
+    let ours = [adif(
+        "20261101",
+        "<STATION_CALLSIGN:7>QG0TEST<MY_DXCC:3>291<MY_GRIDSQUARE:4>EM17<MY_STATE:2>KS<MY_CNTY:11>KS,Sedgwick",
+    )];
+    assert!(sign(&kansas(), &ours, SystemTime::now()).is_ok());
 }

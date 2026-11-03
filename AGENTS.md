@@ -21,8 +21,9 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
   (`OS_BINDINGS`), Rust's own `asm!` in a reviewed outside crate, and one cryptographic provider,
   `aws-lc-sys`, reached only through the binding, are allowed (decisions 0002 and 0006).
   **Cryptographic primitives come from vetted providers, each named in the policy checks:**
-  `aws-lc-rs` (QSO Graph Desktop's) for TLS and every operation it offers, and RustCrypto's `rsa` for
-  LoTW's RSA-SHA-1 signature, which aws-lc-rs does not sign. The library never signs for a remote
+  `aws-lc-rs` (QSO Graph Desktop's) for TLS and every operation it offers, and AWS-LC, through QG
+  Trust's one binding, for LoTW's RSA-SHA-1 signature, which aws-lc-rs does not sign (decision 0006);
+  RustCrypto's `rsa` is a test tool only, never shipped. The library never signs for a remote
   caller (decision 0002, amended 2026-11-03). *Test: `cargo xtask policy` and `cargo deny`.*
 - **Every outside crate a shipped crate uses is reviewed,** by exact name and version, through
   cargo-vet: an imported audit, a trusted publisher, or our own (`supply-chain/`, decision 0004).
@@ -41,6 +42,11 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
   3, qso-graph-desktop#172), and the custody test finds no key data in memory or a crash dump.*
 - **The OS credential store holds the key at rest,** and it leaves the store only to sign, as a
   signature, or as a backup QGT encrypts itself; while it signs, it is in memory, as in every signer. No API returns it, and it is never in a file, log, trace, error, IPC message or crash dump.
+- **LoTW's tables are ARRL's, never typed in.** Bands, modes, the ADIF mode map, satellites, DXCC
+  entities, station-location fields and the signature specification come from ARRL's TQSL
+  configuration (`data/tqsl-config/config.xml`, under ARRL's licence beside it), generated into
+  `src/lotw/tables.rs` by `scripts/gen-lotw-tables.py`. A new configuration is a regenerated file.
+  *Test: `scripts/gen-lotw-tables.py --check`.*
 - **Signatures match tqsllib's byte for byte.** A change to signing comes with a differential test
   against tqsllib. *Test: the differential suite (phase 2).*
 - **What LoTW receives is the same as TQSL's; how QGT gets there is its own design.** The signed
@@ -65,6 +71,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 cargo xtask policy
+python3 scripts/gen-lotw-tables.py --check
 ```
 
 **What CI checks:** formatting, clippy and the tests on Windows, macOS and Linux; the policy checks

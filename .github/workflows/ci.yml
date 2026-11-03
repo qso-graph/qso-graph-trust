@@ -76,6 +76,9 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - name: cargo xtask policy
         run: cargo xtask policy
+      # LoTW's tables are generated from ARRL's configuration, never edited by hand.
+      - name: LoTW tables match config.xml
+        run: python3 scripts/gen-lotw-tables.py --check
       - name: canary
         run: cargo xtask canary
       # Every outside crate reviewed: audits recorded in supply-chain/, imported
