@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# VALID: a crate root that opens with a shebang. It must pass: a shebang is not code.
+[package]
+name = "valid-shebang"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true

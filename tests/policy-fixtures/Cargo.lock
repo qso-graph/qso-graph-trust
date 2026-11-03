@@ -63,6 +63,10 @@ name = "planted-outside"
 version = "0.0.0"
 
 [[package]]
+name = "planted-passed-hash"
+version = "0.0.0"
+
+[[package]]
 name = "planted-path-module"
 version = "0.0.0"
 
@@ -85,3 +89,7 @@ dependencies = [
  "planted-outside",
  "planted-src-outside",
 ]
+
+[[package]]
+name = "valid-shebang"
+version = "0.0.0"

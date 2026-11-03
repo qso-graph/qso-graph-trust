@@ -534,7 +534,7 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
                         continue;
                     }
                 };
-                match text.parse::<proc_macro2::TokenStream>() {
+                match strip_shebang(&text).parse::<proc_macro2::TokenStream>() {
                     Ok(tokens) => {
                         for what in unsafe_tokens(tokens) {
                             found.push(format!("{} {what}", path.display()));
@@ -562,6 +562,18 @@ const REFUSED_IDENTS: &[(&str, &str)] = &[
     ("global_asm", "uses global_asm"),
     ("naked_asm", "uses naked_asm"),
 ];
+
+/// The source without a shebang line, by Rust's rule: `#!` not followed by `[`
+/// is a shebang, never code (found by Codex review: one was refused as a lone `#`).
+fn strip_shebang(text: &str) -> &str {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    match text.strip_prefix("#!") {
+        Some(rest) if !rest.trim_start().starts_with('[') => {
+            rest.find('\n').map_or("", |i| &rest[i..])
+        }
+        _ => text,
+    }
+}
 
 /// What in a token stream could bring unsafe code: the keyword `unsafe` anywhere
 /// (blocks, functions, traits, impls, extern blocks, `#[unsafe(...)]`), and
@@ -613,17 +625,19 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                 if pending && !attribute {
                     found.push(DANGLING);
                 }
-                // `#[path = "..."]` loads a module from any file, `.rs` or not,
-                // which this scan would not read (found by Codex review); the
-                // workspace's crates do not need it, so it is refused. Only an
-                // attribute: an array `[path]` is not one. `path = ...` anywhere in
-                // an attribute, so inside `cfg_attr` too.
-                if attribute && assigns_path(g.stream()) {
+                // `path = ...` loads a module from any file, `.rs` or not, which
+                // this scan would not read (found by Codex review). Checked in every
+                // bracket group, not only after a literal `#`, because a macro can
+                // pass the `#` in separately (`$h [path = ...]`). The workspace's
+                // crates do not need it, so it is refused.
+                let bracket = g.delimiter() == proc_macro2::Delimiter::Bracket;
+                if bracket && assigns_path(g.stream()) {
                     found.push("uses #[path]");
                 }
-                // An attribute holding a macro variable, `#[$name = ...]` or
-                // `#[cfg_attr(..., $name = ...)]`, could be made `path` by the caller.
-                if attribute && has_dollar(g.stream()) {
+                // A name a macro substitutes: `#[$name = ...]`, `[$name = ...]` or
+                // `cfg_attr(..., $name = ...)` could be made `path` by the caller.
+                if bracket && (attribute && has_dollar(g.stream()) || names_by_variable(g.stream()))
+                {
                     found.push("builds an attribute from a macro variable");
                 }
                 found.extend(unsafe_tokens(g.stream()));
@@ -641,6 +655,23 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
         found.push(DANGLING);
     }
     found
+}
+
+/// Whether a bracket group opens `$name =`, or holds a `cfg_attr(...)` with a `$`
+/// in it: the shapes in which a macro variable names an attribute.
+fn names_by_variable(tokens: proc_macro2::TokenStream) -> bool {
+    use proc_macro2::TokenTree;
+    let trees: Vec<TokenTree> = tokens.into_iter().collect();
+    let opens_assignment = matches!(
+        trees.as_slice(),
+        [TokenTree::Punct(d), TokenTree::Ident(_), TokenTree::Punct(e), ..]
+            if d.as_char() == '$' && e.as_char() == '='
+    );
+    let cfg_attr = trees.windows(2).any(|w| {
+        matches!(&w[0], TokenTree::Ident(i) if i == "cfg_attr")
+            && matches!(&w[1], TokenTree::Group(g) if has_dollar(g.stream()))
+    });
+    opens_assignment || cfg_attr
 }
 
 /// Whether a token stream holds a `$` at any depth.
@@ -1490,6 +1521,26 @@ pub fn proof() {}
         assert_eq!(
             scan("macro_rules! m { ($a:ident) => { #[$a = \"payload.inc\"] mod hidden; } }"),
             vec!["builds an attribute from a macro variable"]
+        );
+        // The # passed into a macro separately (Codex review, round 16).
+        let passed = scan(
+            "macro_rules! load { ($h:tt [$i:ident]) => { $h [path = \"hidden.md\"] pub mod hidden; }; } load!(#[doc]);",
+        );
+        assert!(passed.contains(&"uses #[path]"), "{passed:?}");
+        assert!(
+            scan("macro_rules! m { ($h:tt $a:ident) => { $h [$a = \"x\"] mod y; } }")
+                .contains(&"builds an attribute from a macro variable")
+        );
+        // Ordinary macro brackets are not attributes.
+        assert!(scan("macro_rules! v { ($($x:expr),*) => { [$($x),*] } }").is_empty());
+        // A real shebang is not code.
+        assert_eq!(
+            strip_shebang("#!/usr/bin/env rustx\n#![forbid(unsafe_code)]\n"),
+            "\n#![forbid(unsafe_code)]\n"
+        );
+        assert_eq!(
+            strip_shebang("#![forbid(unsafe_code)]"),
+            "#![forbid(unsafe_code)]"
         );
         // A # assembled with brackets by a macro (Codex review, round 15).
         let assembled = scan(
