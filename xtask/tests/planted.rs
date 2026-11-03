@@ -117,8 +117,14 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
         lib_root(&meta, "planted-meta-macro") + " defines a macro",
         // A procedural macro can generate unsafe code from a string.
         "planted-proc-gen is a procedural macro crate".to_string(),
-        // `#! /* comment */ [` is an attribute, so the line is code and is read.
-        fixture(&meta, "planted-decoy", "src/shebang_trick.rs") + " uses unsafe",
+        // No shebangs, so no line can be dropped by misreading one: `#! /* c */ [`
+        // and `#!` + U+200E + `[` are both attributes to Rust (Codex review).
+        fixture(&meta, "planted-decoy", "src/shebang_trick.rs")
+            + " begins with #! but not #![: no shebangs in a workspace crate",
+        fixture(&meta, "planted-decoy", "src/lrm.rs")
+            + " begins with #! but not #![: no shebangs in a workspace crate",
+        lib_root(&meta, "planted-shebang")
+            + " begins with #! but not #![: no shebangs in a workspace crate",
         // A source file that is not UTF-8: a finding, not empty text that scans clean.
         fixture(&meta, "planted-decoy", "src/not_utf8.rs")
             + " cannot be read as UTF-8 text: stream did not contain valid UTF-8",

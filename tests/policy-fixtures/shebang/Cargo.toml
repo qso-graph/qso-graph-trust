@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# VALID: a crate root that opens with a shebang. It must pass: a shebang is not code.
+# PLANTED: a crate root that opens with a shebang. Workspace crates may have none, so it must be caught.
 [package]
-name = "valid-shebang"
+name = "planted-shebang"
 version = "0.0.0"
 edition = "2024"
 publish = false

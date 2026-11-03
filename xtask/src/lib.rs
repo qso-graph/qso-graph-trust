@@ -542,7 +542,19 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
                         continue;
                     }
                 };
-                match strip_shebang(&text).parse::<proc_macro2::TokenStream>() {
+                // No shebangs in a workspace crate: Rust decides one with rules about
+                // whitespace and comments that were misread twice (found by Codex
+                // review), and the crates need none. A file beginning `#!` must
+                // begin `#![`.
+                let body = text.strip_prefix('\u{feff}').unwrap_or(&text);
+                if body.starts_with("#!") && !body.starts_with("#![") {
+                    found.push(format!(
+                        "{} begins with #! but not #![: no shebangs in a workspace crate",
+                        path.display()
+                    ));
+                    continue;
+                }
+                match body.parse::<proc_macro2::TokenStream>() {
                     Ok(tokens) => {
                         for what in unsafe_tokens(tokens) {
                             found.push(format!("{} {what}", path.display()));
@@ -573,59 +585,6 @@ const REFUSED_IDENTS: &[(&str, &str)] = &[
     ("global_asm", "uses global_asm"),
     ("naked_asm", "uses naked_asm"),
 ];
-
-/// The source without a shebang line, by Rust's rule: `#!` not followed by `[`
-/// is a shebang, never code (found by Codex review: one was refused as a lone `#`).
-fn strip_shebang(text: &str) -> &str {
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    match text.strip_prefix("#!") {
-        Some(rest) if !next_is_bracket(rest) => rest.find('\n').map_or("", |i| &rest[i..]),
-        _ => text,
-    }
-}
-
-/// Whether the next thing in `s`, past whitespace and comments (line, block and
-/// nested), is `[`, as Rust's lexer decides a shebang: `#! /* c */ [` is an
-/// attribute (found by Codex review). An unclosed comment counts as `[`, so the
-/// line is kept and fails to tokenize rather than being dropped.
-fn next_is_bracket(mut s: &str) -> bool {
-    loop {
-        s = s.trim_start();
-        if let Some(rest) = s.strip_prefix("//") {
-            // A doc comment is not skipped by Rust here, so neither is it here.
-            if rest.starts_with('/') || rest.starts_with('!') {
-                return false;
-            }
-            s = rest.find('\n').map_or("", |i| &rest[i..]);
-        } else if s.starts_with("/*") {
-            let mut depth = 0usize;
-            let mut i = 0;
-            let b = s.as_bytes();
-            loop {
-                if i + 1 >= b.len() {
-                    return true;
-                }
-                match (b[i], b[i + 1]) {
-                    (b'/', b'*') => {
-                        depth += 1;
-                        i += 2;
-                    }
-                    (b'*', b'/') => {
-                        depth -= 1;
-                        i += 2;
-                        if depth == 0 {
-                            break;
-                        }
-                    }
-                    _ => i += 1,
-                }
-            }
-            s = &s[i..];
-        } else {
-            return s.starts_with('[');
-        }
-    }
-}
 
 /// What in a token stream could bring unsafe code: the keyword `unsafe` anywhere
 /// (blocks, functions, traits, impls, extern blocks, `#[unsafe(...)]`), and
@@ -1596,21 +1555,6 @@ pub fn proof() {}
                 "macro_rules! load { ($h:tt [$i:ident] $a:meta) => { $h [$a] pub mod hidden; }; }"
             )
             .contains(&"defines a macro")
-        );
-        // `#!` then a comment then `[` is an attribute, not a shebang.
-        assert_eq!(
-            strip_shebang("#! /* comment */ [allow(dead_code)] pub fn f() {}"),
-            "#! /* comment */ [allow(dead_code)] pub fn f() {}"
-        );
-        assert_eq!(strip_shebang("#! // c\n[allow(x)]"), "#! // c\n[allow(x)]");
-        // A real shebang is not code.
-        assert_eq!(
-            strip_shebang("#!/usr/bin/env rustx\n#![forbid(unsafe_code)]\n"),
-            "\n#![forbid(unsafe_code)]\n"
-        );
-        assert_eq!(
-            strip_shebang("#![forbid(unsafe_code)]"),
-            "#![forbid(unsafe_code)]"
         );
         // A # assembled with brackets by a macro (Codex review, round 15).
         let assembled = scan(
