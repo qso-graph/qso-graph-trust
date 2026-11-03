@@ -7,20 +7,24 @@
 //!
 //! This reads untrusted input. Every length is checked against the bytes actually present, a name
 //! must be a plain identifier, and a field or record past the stated limits is refused, never cut.
+//! A value can be a private key, so every value is wiped from memory when it is dropped.
 
 use std::fmt;
+
+use zeroize::Zeroizing;
 
 /// The longest value accepted: larger than any key, certificate or signature tqsllib writes.
 pub const MAX_VALUE_LEN: usize = 64 * 1024;
 /// The most fields in one record.
 pub const MAX_FIELDS: usize = 256;
 
-/// One field: its name as written, its type letter if it has one, and its value's bytes.
+/// One field: its name as written, its type letter if it has one, and its value's bytes, wiped
+/// when dropped.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Field {
     pub name: String,
     pub kind: Option<String>,
-    pub value: Vec<u8>,
+    pub value: Zeroizing<Vec<u8>>,
 }
 
 impl fmt::Debug for Field {
@@ -148,7 +152,7 @@ pub fn parse(input: &[u8]) -> Result<Vec<Record>, RecordError> {
         current.fields.push(Field {
             name: name.to_string(),
             kind: kind.map(str::to_string),
-            value: input[value_start..value_end].to_vec(),
+            value: Zeroizing::new(input[value_start..value_end].to_vec()),
         });
         at = value_end;
     }
@@ -173,7 +177,7 @@ mod tests {
         let sig = &records[0].fields[1];
         assert_eq!(sig.name, "SIGN_LOTW_V2.0");
         assert_eq!(sig.kind.as_deref(), Some("6"));
-        assert_eq!(sig.value, b"ab\ncd"[..4].to_vec());
+        assert_eq!(sig.value.as_slice(), &b"ab\ncd"[..4]);
         assert_eq!(records[1].get("A"), Some(&b""[..]));
     }
 
@@ -236,6 +240,13 @@ mod tests {
             parse(&input),
             Err(RecordError::TooManyFields { .. })
         ));
+    }
+
+    #[test]
+    fn every_value_is_wiped_when_dropped() {
+        fn wiped<T: zeroize::ZeroizeOnDrop>(_: &T) {}
+        let records = parse(b"<PRIVATE_KEY:6>secret<eor>").expect("records");
+        wiped(&records[0].fields[0].value);
     }
 
     #[test]

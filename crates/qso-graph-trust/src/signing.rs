@@ -8,15 +8,21 @@
 //! once unlocked it can only sign: nothing here returns it, prints it or puts it in an error.
 //! Signing is blinded with the operating system's randomness, the defence against the timing leak
 //! in RUSTSEC-2023-0071; a PKCS#1 v1.5 signature is the same either way (docs/decisions/0002).
+//! Every buffer here that holds key text is wiped when dropped (`Zeroizing`), and a protected key's
+//! encryption parameters are checked before any work is done with the password, so a crafted file
+//! cannot ask for unbounded memory or time (found by Codex review).
 
 use std::fmt;
 
 use base64ct::{Base64, Encoding};
+use pkcs8::pkcs5::EncryptionScheme;
+use pkcs8::pkcs5::pbes2::{self, Kdf, Pbkdf2Prf};
 use pkcs8::{DecodePrivateKey, EncryptedPrivateKeyInfo, der::Decode};
 use rsa::RsaPrivateKey;
 use rsa::pkcs1v15::{Signature, SigningKey};
 use rsa::signature::{RandomizedSigner, SignatureEncoding};
 use sha1::Sha1;
+use zeroize::Zeroizing;
 
 use crate::records::{self, Record, RecordError};
 
@@ -26,7 +32,7 @@ use crate::records::{self, Record, RecordError};
 pub struct KeyEntry {
     callsign: String,
     public_key_pem: String,
-    private_key_pem: String,
+    private_key_pem: Zeroizing<String>,
 }
 
 impl fmt::Debug for KeyEntry {
@@ -64,6 +70,9 @@ pub enum KeyError {
     WrongPassword,
     /// The key is not an RSA key.
     NotRsa,
+    /// The key is protected in a way QG Trust does not accept: a scheme other than PBES2 with
+    /// PBKDF2, a hash or cipher tqsllib never uses, or more PBKDF2 iterations than the limit.
+    UnsupportedProtection,
     /// The signature could not be made.
     Signing,
 }
@@ -77,6 +86,9 @@ impl fmt::Display for KeyError {
             Self::PasswordNeeded => f.write_str("this key is protected: its password is needed"),
             Self::WrongPassword => f.write_str("the password does not unlock this key"),
             Self::NotRsa => f.write_str("the key is not an RSA key"),
+            Self::UnsupportedProtection => {
+                f.write_str("the key is protected in a way QG Trust does not accept")
+            }
             Self::Signing => f.write_str("the record could not be signed"),
         }
     }
@@ -85,6 +97,35 @@ impl fmt::Display for KeyError {
 impl std::error::Error for KeyError {}
 
 const ENCRYPTED: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----";
+
+/// The most PBKDF2 iterations accepted. tqsllib 2.8.7 writes 2,048 (OpenSSL's default); a million
+/// takes well under a second, so a crafted file cannot make unlocking take unbounded time.
+pub const MAX_PBKDF2_ITERATIONS: u32 = 1_000_000;
+
+/// Whether a protected key's encryption is one QG Trust accepts, decided before any work is done
+/// with the password: PBES2 with PBKDF2 (never scrypt, whose memory a file could set without bound),
+/// HMAC-SHA1 or HMAC-SHA256, at most [`MAX_PBKDF2_ITERATIONS`], and 3DES or AES-CBC. tqsllib 2.8.7
+/// writes PBES2, PBKDF2, HMAC-SHA256, 2,048 iterations and 3DES-CBC.
+fn accepted(scheme: &EncryptionScheme<'_>) -> bool {
+    let EncryptionScheme::Pbes2(params) = scheme else {
+        return false;
+    };
+    let kdf_ok = match &params.kdf {
+        Kdf::Pbkdf2(p) => {
+            (1..=MAX_PBKDF2_ITERATIONS).contains(&p.iteration_count)
+                && matches!(p.prf, Pbkdf2Prf::HmacWithSha1 | Pbkdf2Prf::HmacWithSha256)
+        }
+        // scrypt, and any kind a later pkcs5 adds: refused.
+        _ => false,
+    };
+    let cipher_ok = matches!(
+        params.encryption,
+        pbes2::EncryptionScheme::DesEde3Cbc { .. }
+            | pbes2::EncryptionScheme::Aes128Cbc { .. }
+            | pbes2::EncryptionScheme::Aes256Cbc { .. }
+    );
+    kdf_ok && cipher_ok
+}
 
 impl KeyEntry {
     /// Every key in a tqsllib key file, in the order written: one per certificate request made.
@@ -97,16 +138,11 @@ impl KeyEntry {
     }
 
     fn from_record(record: &Record) -> Result<KeyEntry, KeyError> {
-        let text = |name: &'static str| {
-            record
-                .text(name)
-                .map(str::to_string)
-                .ok_or(KeyError::MissingField(name))
-        };
+        let text = |name: &'static str| record.text(name).ok_or(KeyError::MissingField(name));
         Ok(KeyEntry {
-            callsign: text("CALLSIGN")?,
-            public_key_pem: text("PUBLIC_KEY")?,
-            private_key_pem: text("PRIVATE_KEY")?,
+            callsign: text("CALLSIGN")?.to_string(),
+            public_key_pem: text("PUBLIC_KEY")?.to_string(),
+            private_key_pem: Zeroizing::new(text("PRIVATE_KEY")?.to_string()),
         })
     }
 
@@ -135,6 +171,9 @@ impl KeyEntry {
                 return Err(KeyError::NotAKey);
             }
             let info = EncryptedPrivateKeyInfo::from_der(&der).map_err(|_| KeyError::NotAKey)?;
+            if !accepted(&info.encryption_algorithm) {
+                return Err(KeyError::UnsupportedProtection);
+            }
             let document = info
                 .decrypt(password)
                 .map_err(|_| KeyError::WrongPassword)?;
@@ -190,7 +229,7 @@ mod tests {
         let entry = KeyEntry {
             callsign: "QG0TEST".into(),
             public_key_pem: "public".into(),
-            private_key_pem: "-----BEGIN PRIVATE KEY-----secret".into(),
+            private_key_pem: Zeroizing::new("-----BEGIN PRIVATE KEY-----secret".into()),
         };
         let shown = format!("{entry:?}");
         assert!(
@@ -206,5 +245,65 @@ mod tests {
             KeyEntry::read_key_file(file).map(|v| v.len()),
             Err(KeyError::MissingField("PRIVATE_KEY"))
         );
+    }
+
+    #[test]
+    fn the_private_key_text_is_wiped_when_dropped() {
+        fn wiped<T: zeroize::ZeroizeOnDrop>(_: &T) {}
+        let entry = KeyEntry {
+            callsign: "QG0TEST".into(),
+            public_key_pem: String::new(),
+            private_key_pem: Zeroizing::new(String::new()),
+        };
+        wiped(&entry.private_key_pem);
+    }
+
+    /// A protected key whose encryption is `scheme`, as PEM, with ciphertext that is never reached.
+    fn protected(scheme: EncryptionScheme<'_>) -> KeyEntry {
+        use pkcs8::der::{Encode, pem::LineEnding};
+        let info = EncryptedPrivateKeyInfo {
+            encryption_algorithm: scheme,
+            encrypted_data: &[0u8; 32],
+        };
+        let der = info.to_der().expect("DER");
+        let pem = pkcs8::der::pem::encode_string("ENCRYPTED PRIVATE KEY", LineEnding::LF, &der)
+            .expect("PEM");
+        KeyEntry {
+            callsign: "QG0TEST".into(),
+            public_key_pem: String::new(),
+            private_key_pem: Zeroizing::new(pem),
+        }
+    }
+
+    #[test]
+    fn a_crafted_encryption_is_refused_before_any_work() {
+        let (salt, iv) = ([7u8; 16], [9u8; 16]);
+        // Codex review: scrypt with N = 2^30 would try to allocate about 1 TiB.
+        let huge = pkcs8::pkcs5::scrypt::Params::new(30, 8, 1, 32).expect("params");
+        let scrypt = pbes2::Parameters::scrypt_aes256cbc(huge, &salt, &iv).expect("scrypt");
+        assert_eq!(
+            protected(EncryptionScheme::Pbes2(scrypt))
+                .unlock(Some(b"x"))
+                .err(),
+            Some(KeyError::UnsupportedProtection)
+        );
+        // PBKDF2 past QG Trust's limit, at the most pkcs5 will build (100,000,000, about a minute of
+        // work per try): refused at once, with any password.
+        let slow = pbes2::Parameters::pbkdf2_sha256_aes256cbc(
+            pbes2::Pbkdf2Params::MAX_ITERATION_COUNT,
+            &salt,
+            &iv,
+        )
+        .expect("pbkdf2");
+        assert_eq!(
+            protected(EncryptionScheme::Pbes2(slow))
+                .unlock(Some(b"x"))
+                .err(),
+            Some(KeyError::UnsupportedProtection)
+        );
+        // At the limit it is accepted: what is left to fail is only the password.
+        let ok = pbes2::Parameters::pbkdf2_sha256_aes256cbc(MAX_PBKDF2_ITERATIONS, &salt, &iv)
+            .expect("pbkdf2");
+        assert!(accepted(&EncryptionScheme::Pbes2(ok)));
     }
 }

@@ -23,6 +23,8 @@ sha1 = { version = "=0.10.6", default-features = false, features = ["oid"] }
 # ham set a password.
 pkcs8 = { version = "=0.10.2", default-features = false, features = ["std", "pem", "encryption", "3des"] }
 base64ct = { version = "=1.8.3", default-features = false, features = ["alloc"] }
+# Every buffer that can hold a key is wiped when it is dropped.
+zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
 
 [lints]
 workspace = true
