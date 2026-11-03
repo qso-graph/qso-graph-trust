@@ -286,8 +286,8 @@ impl Qso {
                 "MY_DXCC" | "MY_CQ_ZONE" | "MY_ITU_ZONE" => {
                     v.len() <= 4 && v.parse::<u32>().is_ok()
                 }
-                "MY_GRIDSQUARE" => crate::station::is_grid(&v),
-                "MY_VUCC_GRIDS" => crate::station::is_grid_list(&v),
+                "MY_GRIDSQUARE" => crate::station::is_adif_grid(&v),
+                "MY_VUCC_GRIDS" => crate::station::is_adif_vucc_grids(&v),
                 // Text compared with the location's own.
                 _ => true,
             };

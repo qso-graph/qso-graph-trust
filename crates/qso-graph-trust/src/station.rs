@@ -183,7 +183,7 @@ impl StationLocation {
         self.get("GRIDSQUARE").is_some_and(|grids| {
             grids.split(',').map(str::trim).any(|ours| {
                 let n = ours.len().min(grid.len());
-                n >= 4
+                n >= 2
                     && ours
                         .get(..n)
                         .zip(grid.get(..n))
@@ -212,8 +212,20 @@ impl StationLocation {
             "MY_ITU_ZONE" => number("ITUZ"),
             "MY_IOTA" => same("IOTA"),
             "MY_GRIDSQUARE" => self.has_grid(value),
-            // Every grid of a VUCC QSO must be one of the location's.
-            "MY_VUCC_GRIDS" => value.split(',').all(|g| self.has_grid(g.trim())),
+            // A VUCC QSO's squares must be the location's squares, all of them and no others.
+            "MY_VUCC_GRIDS" => {
+                let squares = |list: &str| {
+                    let mut s: Vec<String> = list
+                        .split(',')
+                        .filter_map(|g| g.trim().get(..4).map(str::to_ascii_uppercase))
+                        .collect();
+                    s.sort_unstable();
+                    s.dedup();
+                    s
+                };
+                self.get("GRIDSQUARE")
+                    .is_some_and(|ours| squares(ours) == squares(value))
+            }
             "MY_STATE" => SUBDIVISIONS.iter().any(|f| same(f)),
             // ADIF writes a US county as "KS,Sedgwick": the state, if given, must agree too.
             "MY_CNTY" => {
@@ -314,6 +326,31 @@ pub(crate) fn is_grid_list(s: &str) -> bool {
     }
 }
 
+/// A locator as ADIF writes one in capitals: a field (`EM`), square (`EM17`), subsquare
+/// (`EM17AB`) or extended square (`EM17AB12`).
+pub(crate) fn is_adif_grid(g: &str) -> bool {
+    let b = g.as_bytes();
+    let pair =
+        |i: usize, ok: fn(&u8) -> bool| b.get(i).is_some_and(ok) && b.get(i + 1).is_some_and(ok);
+    let field = |c: &u8| (b'A'..=b'R').contains(c);
+    let sub = |c: &u8| (b'A'..=b'X').contains(c);
+    let digit = |c: &u8| c.is_ascii_digit();
+    matches!(b.len(), 2 | 4 | 6 | 8)
+        && pair(0, field)
+        && (b.len() < 4 || pair(2, digit))
+        && (b.len() < 6 || pair(4, sub))
+        && (b.len() < 8 || pair(6, digit))
+}
+
+/// ADIF's MY_VUCC_GRIDS: two or four locators of a square or finer whose squares are a grid list
+/// [`is_grid_list`] accepts.
+pub(crate) fn is_adif_vucc_grids(s: &str) -> bool {
+    let grids: Vec<&str> = s.split(',').map(str::trim).collect();
+    matches!(grids.len(), 2 | 4)
+        && grids.iter().all(|g| g.len() >= 4 && is_adif_grid(g))
+        && is_grid_list(&grids.iter().map(|g| &g[..4]).collect::<Vec<_>>().join(","))
+}
+
 /// A square, `EM17`, as (longitude, latitude) in squares from 180W and 90S.
 fn square(g: &str) -> Option<(u32, u32)> {
     let b = g.as_bytes();
@@ -381,6 +418,26 @@ mod tests {
         ] {
             assert!(!loc.contradicts(adif, value), "{adif} {value}");
         }
+        // Codex review: a two-grid QSO passed for a four-grid location.
+        let mut block = KANSAS.to_vec();
+        block[4] = ("GRIDSQUARE", "EM17,EM18,EM27,EM28");
+        let block = StationLocation::new(&block).expect("location");
+        assert!(block.contradicts("MY_VUCC_GRIDS", "EM17,EM18"));
+        assert!(!block.contradicts("MY_VUCC_GRIDS", "EM28,EM27AX,EM18,EM17"));
+        // ADIF's finer precision, compared as precisely as both are given.
+        assert!(!loc.contradicts("MY_GRIDSQUARE", "EM17AB12"));
+        assert!(!loc.contradicts("MY_GRIDSQUARE", "EM"));
+        assert!(
+            is_adif_grid("EM17AB12")
+                && is_adif_grid("EM")
+                && !is_adif_grid("EM1")
+                && !is_adif_grid("EM17AB1X")
+        );
+        assert!(
+            is_adif_vucc_grids("EM17AX,EM18AA")
+                && !is_adif_vucc_grids("EM17")
+                && !is_adif_vucc_grids("EM17,FN31")
+        );
         // Codex review: subsquares that differ were compared only as squares.
         let mut fine = KANSAS.to_vec();
         fine[4] = ("GRIDSQUARE", "EM17AB");
