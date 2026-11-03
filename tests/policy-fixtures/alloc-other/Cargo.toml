@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: a library another language loads, with an allocator that wipes nothing. The check must
+# catch it.
+[package]
+name = "planted-alloc-other"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true

@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: a program without the wiping allocator. The wiping-allocator check must catch it.
+[package]
+name = "planted-alloc-missing"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "planted-alloc-missing"
+path = "src/main.rs"
+
+[lints]
+workspace = true

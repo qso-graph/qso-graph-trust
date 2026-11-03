@@ -58,6 +58,7 @@ the test CA issues the certificate as a `.tq6`, and tqsllib loads it, as a ham's
 | `<case>/QG0TEST.tq6` | The certificate, as ARRL would send it |
 | `<case>/QG0TEST.p12`, `QG0TEST-weak.p12` | tqsllib's exports: AES-256 with PBKDF2, and its weak-crypto option (RC2-40, 3DES), password `qgt-test` |
 | `<case>/qg0test-small.tq7` | The test log signed: `tCERT`, `tSTATION` and six `tCONTACT` records |
+| `<case>/key-password` | The key's password, exactly, empty for none: the tests read it from here |
 
 The cases:
 

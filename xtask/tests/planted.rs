@@ -309,6 +309,86 @@ fn a_symbolic_link_in_a_crate_is_caught() {
     );
 }
 
+/// A fixture program's root as Cargo reports it.
+fn program_root(meta: &Value, package: &str, program: &str) -> String {
+    meta["packages"]
+        .as_array()
+        .and_then(|ps| ps.iter().find(|p| p["name"] == package))
+        .and_then(|p| p["targets"].as_array())
+        .and_then(|ts| ts.iter().find(|t| t["name"] == program))
+        .and_then(|t| t["src_path"].as_str())
+        .unwrap_or_else(|| panic!("{package} has no program {program}"))
+        .to_string()
+}
+
+#[test]
+fn every_planted_program_without_the_wiping_allocator_is_caught() {
+    let meta = fixtures();
+    let missing = |package: &str, program: &str| {
+        format!(
+            "{} does not install the wiping allocator",
+            program_root(&meta, package, program)
+        )
+    };
+    let no_dependency = |package: &str| {
+        format!(
+            "{package} does not depend on zeroizing-alloc =0.1.1 from crates.io by its own name"
+        )
+    };
+    let mut expected = vec![
+        missing("planted-alloc-missing", "planted-alloc-missing"),
+        no_dependency("planted-alloc-missing"),
+        // Behind a cfg, so one build has none.
+        missing("planted-alloc-cfg", "planted-alloc-cfg"),
+        no_dependency("planted-alloc-cfg"),
+        // A library another language loads, with an allocator that wipes nothing.
+        missing("planted-alloc-other", "planted_alloc_other"),
+        no_dependency("planted-alloc-other"),
+        // Codex review: the control's name in another package, and a program named like it.
+        missing("planted-alloc-control", "qgt-custody-unwiped"),
+        missing("planted-alloc-control", "qgt-custody-unwiped-too"),
+        no_dependency("planted-alloc-control"),
+        // Codex review: an example, which cargo install --example installs.
+        missing("planted-alloc-example", "sign"),
+        no_dependency("planted-alloc-example"),
+        // Codex review: another crate renamed into the allocator's name, behind a correct line.
+        no_dependency("planted-alloc-renamed"),
+    ];
+    expected.sort();
+    // The program that installs it as required passes.
+    assert_eq!(xtask::wiping_allocator(&meta), expected);
+}
+
+#[test]
+fn the_allocator_must_be_exactly_the_wiping_one() {
+    let wiped = "#[global_allocator]\nstatic A: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> = ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);";
+    assert!(xtask::installs_wiping_allocator(wiped));
+    for planted in [
+        // Not the allocator: no #[global_allocator].
+        "static A: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> = ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);",
+        // Switched off for some builds.
+        "#[cfg_attr(test, global_allocator)]\nstatic A: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> = ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);",
+        // Over an allocator other than the system's.
+        "#[global_allocator]\nstatic A: ::zeroizing_alloc::ZeroAlloc<::other::Alloc> = ::zeroizing_alloc::ZeroAlloc(::other::Alloc);",
+        // Codex review: relative paths, which a local module of the same name answers, here one
+        // that makes the line install the plain system allocator.
+        "mod zeroizing_alloc { pub type ZeroAlloc<T> = T; }\n#[global_allocator]\nstatic A: zeroizing_alloc::ZeroAlloc<std::alloc::System> = zeroizing_alloc::ZeroAlloc(std::alloc::System);",
+        // This crate put behind the name with a raw identifier, aliasing the allocator to plain
+        // System (Codex review round 2).
+        "extern crate self as r#zeroizing_alloc;\npub type ZeroAlloc<T> = T;\n#[global_allocator]\nstatic A: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> = ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);",
+        // Another crate put behind the name.
+        "extern crate other as zeroizing_alloc;\n#[global_allocator]\nstatic A: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> = ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);",
+        // Only in a comment or a string.
+        "// #[global_allocator] static A: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> = ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);",
+        "const S: &str = \"#[global_allocator] static A: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> = ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);\";",
+        // Inside a module the check does not read, or a file that does not parse.
+        "mod m {\n#[global_allocator]\nstatic A: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> = ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);\n}",
+        "#[global_allocator] static A: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> = ::zeroizing_alloc::ZeroAlloc(::std::alloc::System)",
+    ] {
+        assert!(!xtask::installs_wiping_allocator(planted), "{planted}");
+    }
+}
+
 #[test]
 fn this_repository_passes() {
     let meta = xtask::metadata(&here("../Cargo.toml")).expect("workspace metadata");
@@ -329,4 +409,5 @@ fn this_repository_passes() {
     );
     assert_eq!(xtask::no_lint_overrides(&here("..")), Vec::<String>::new());
     assert_eq!(xtask::pinned_compiler(&here("..")), Vec::<String>::new());
+    assert_eq!(xtask::wiping_allocator(&meta), Vec::<String>::new());
 }

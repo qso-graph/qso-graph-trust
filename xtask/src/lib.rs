@@ -12,6 +12,11 @@
 //!   member takes the workspace's lints, and every crate root says
 //!   `#![forbid(unsafe_code)]` where the compiler reads it.
 //!
+//! - **No key data in freed memory** (AGENTS.md, KI7MT 2026-11-03): every program
+//!   a workspace crate builds (a binary, or a library another language loads)
+//!   installs [`WIPING_ALLOCATOR`], so every block is wiped when it is freed,
+//!   whichever library allocated it.
+//!
 //! Each check is proved by planted cases it must catch (tests/planted.rs), and
 //! anything a check cannot read counts as a failure, never a pass.
 
@@ -58,6 +63,28 @@ missing_docs = "warn"
 undocumented_unsafe_blocks = "deny"
 multiple_unsafe_ops_per_block = "deny"
 "#;
+
+/// The global allocator every QG Trust program installs, exactly as written:
+/// 1Password's `zeroizing-alloc` over the system allocator, which wipes each block
+/// as it is freed (AGENTS.md; reviewed in supply-chain/audits.toml). The paths are
+/// absolute, so they name the outside crates and never a local module of the same
+/// name (found by Codex review: a local `mod zeroizing_alloc` made the line install
+/// the plain system allocator).
+pub const WIPING_ALLOCATOR: &str = "::zeroizing_alloc::ZeroAlloc<::std::alloc::System>";
+
+/// The crate [`WIPING_ALLOCATOR`] names, as every program's package must depend on it:
+/// from crates.io, at exactly this version, by its own name.
+pub const WIPING_ALLOCATOR_CRATE: (&str, &str) = ("zeroizing-alloc", "=0.1.1");
+
+/// The one program allowed to go without it: the custody test's control, which
+/// proves the test finds what an unwiped free leaves behind. Named by its package,
+/// which must be unpublished, its binary and its root, so no other program can
+/// borrow the exception (found by Codex review).
+pub const UNWIPED_CONTROL: (&str, &str, &str) = (
+    "qso-graph-trust-custody",
+    "qgt-custody-unwiped",
+    "crates/qso-graph-trust-custody/src/bin/qgt-custody-unwiped.rs",
+);
 
 /// Whether a crate is the named cryptographic provider.
 fn crypto_provider(name: &str) -> bool {
@@ -1750,6 +1777,176 @@ fn copy_repository(from: &Path, to: &Path, output: Option<&Path>) -> Result<(), 
 
 /// Whether a path is the single identifier `name`, raw spelling included:
 /// `r#unsafe_code` is `unsafe_code` (found by Codex review).
+/// Every program the workspace builds must install [`WIPING_ALLOCATOR`]: every
+/// target whose crate types include `bin`, `cdylib` or `staticlib`, examples
+/// included, as `cargo install --example` installs one (found by Codex review).
+/// Tests, benches and build scripts are not checked: they run on the machine that
+/// builds, and none is ever distributed. Its root must hold, at the top level and
+/// with no attribute but documentation, `#[global_allocator] static NAME:
+/// ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> =
+/// ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);`, so a `cfg` cannot leave it
+/// out of one build; and its package must depend on [`WIPING_ALLOCATOR_CRATE`], with
+/// no other dependency taking its name. [`UNWIPED_CONTROL`] alone is excepted. A
+/// root that cannot be read or parsed fails. Sorted; empty passes.
+pub fn wiping_allocator(meta: &Value) -> Vec<String> {
+    let empty = Vec::new();
+    let workspace = members(meta);
+    let root_dir = meta["workspace_root"].as_str().map(PathBuf::from);
+    let strs = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .unwrap_or(&empty)
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect()
+    };
+    let mut problems = Vec::new();
+    for package in meta["packages"].as_array().unwrap_or(&empty) {
+        if !package["id"]
+            .as_str()
+            .is_some_and(|id| workspace.contains(id))
+        {
+            continue;
+        }
+        let name = package["name"].as_str().unwrap_or("a package");
+        let deps = package["dependencies"].as_array().unwrap_or(&empty);
+        let (crate_name, version) = WIPING_ALLOCATOR_CRATE;
+        let approved = |d: &Value| {
+            d["name"] == crate_name
+                && d["rename"].is_null()
+                && d["kind"].is_null()
+                && d["req"] == version
+                && d["source"]
+                    .as_str()
+                    .is_some_and(|s| s == "registry+https://github.com/rust-lang/crates.io-index")
+        };
+        // The name the crate is reached by in code: its rename, or its own name.
+        let called = |d: &Value| {
+            d["rename"]
+                .as_str()
+                .or(d["name"].as_str())
+                .unwrap_or("")
+                .replace('-', "_")
+        };
+        let has_allocator = deps.iter().any(approved)
+            && !deps
+                .iter()
+                .any(|d| !approved(d) && called(d) == crate_name.replace('-', "_"));
+        let unpublished = package["publish"].as_array().is_some_and(Vec::is_empty);
+        for target in package["targets"].as_array().unwrap_or(&empty) {
+            let kinds = strs(&target["kind"]);
+            let types = strs(&target["crate_types"]);
+            let built_only = kinds
+                .iter()
+                .all(|k| matches!(k.as_str(), "test" | "bench" | "custom-build"));
+            let program = types
+                .iter()
+                .any(|t| matches!(t.as_str(), "bin" | "cdylib" | "staticlib"));
+            if built_only || !program {
+                continue;
+            }
+            let Some(root) = target["src_path"].as_str() else {
+                problems.push(format!("{name} has a program with no root"));
+                continue;
+            };
+            let (control_package, control_bin, control_root) = UNWIPED_CONTROL;
+            let control = name == control_package
+                && unpublished
+                && target["name"] == control_bin
+                && kinds == ["bin"]
+                && root_dir.as_ref().is_some_and(|r| {
+                    let expected = control_root
+                        .split('/')
+                        .fold(r.clone(), |p, part| p.join(part));
+                    Path::new(root) == expected
+                });
+            if control {
+                continue;
+            }
+            match std::fs::read_to_string(root) {
+                Ok(source) if installs_wiping_allocator(&source) => {}
+                Ok(_) => problems.push(format!("{root} does not install the wiping allocator")),
+                Err(e) => problems.push(format!("{root}: {e}")),
+            }
+            if !has_allocator {
+                problems.push(format!(
+                    "{name} does not depend on {crate_name} {version} from crates.io by its own name"
+                ));
+            }
+        }
+    }
+    problems.sort();
+    problems.dedup();
+    problems
+}
+
+/// Whether a program root installs [`WIPING_ALLOCATOR`] as [`wiping_allocator`] requires.
+pub fn installs_wiping_allocator(source: &str) -> bool {
+    let Ok(file) = syn::parse_file(source) else {
+        return false;
+    };
+    let idents = |path: &syn::Path| -> Vec<String> {
+        path.segments.iter().map(|s| s.ident.to_string()).collect()
+    };
+    // Absolute paths only: `::name` is an outside crate, never a local module.
+    let system = |path: &syn::Path| {
+        idents(path) == ["std", "alloc", "System"]
+            && path.segments.iter().all(|s| s.arguments.is_none())
+            && path.leading_colon.is_some()
+    };
+    let zero_alloc = |path: &syn::Path| {
+        idents(path) == ["zeroizing_alloc", "ZeroAlloc"] && path.leading_colon.is_some()
+    };
+    // An `extern crate` binding the name would put another crate, or this one, behind it, raw
+    // identifier or not (found by Codex review: `extern crate self as r#zeroizing_alloc;`).
+    if file.items.iter().any(|item| {
+        use syn::ext::IdentExt;
+        matches!(item, syn::Item::ExternCrate(e)
+            if e.rename.as_ref().map_or(&e.ident, |(_, r)| r).unraw() == "zeroizing_alloc")
+    }) {
+        return false;
+    }
+    file.items.iter().any(|item| {
+        let syn::Item::Static(s) = item else {
+            return false;
+        };
+        // `#[global_allocator]` and nothing else but documentation: no `cfg`, `cfg_attr`
+        // or anything else that could take it out of a build.
+        let others: Vec<&syn::Attribute> = s
+            .attrs
+            .iter()
+            .filter(|a| !(names(a.path(), "doc") && matches!(a.meta, syn::Meta::NameValue(_))))
+            .collect();
+        let attribute = matches!(&others[..], [a]
+            if matches!(a.style, syn::AttrStyle::Outer)
+                && names(a.path(), "global_allocator")
+                && matches!(a.meta, syn::Meta::Path(_)));
+        let ty = match &*s.ty {
+            syn::Type::Path(t) if t.qself.is_none() && zero_alloc(&t.path) => {
+                match &t.path.segments.last().map(|l| &l.arguments) {
+                    Some(syn::PathArguments::AngleBracketed(args)) => matches!(
+                        args.args.iter().collect::<Vec<_>>()[..],
+                        [syn::GenericArgument::Type(syn::Type::Path(inner))]
+                            if inner.qself.is_none() && system(&inner.path)
+                    ),
+                    _ => false,
+                }
+            }
+            _ => false,
+        };
+        let value = match &*s.expr {
+            syn::Expr::Call(call) if call.attrs.is_empty() => {
+                matches!(&*call.func, syn::Expr::Path(f)
+                    if f.attrs.is_empty() && f.qself.is_none() && zero_alloc(&f.path))
+                    && matches!(call.args.iter().collect::<Vec<_>>()[..],
+                        [syn::Expr::Path(a)] if a.attrs.is_empty() && a.qself.is_none() && system(&a.path))
+            }
+            _ => false,
+        };
+        attribute && ty && value && matches!(s.mutability, syn::StaticMutability::None)
+    })
+}
+
 fn names(path: &syn::Path, name: &str) -> bool {
     use syn::ext::IdentExt;
     path.get_ident().is_some_and(|i| i.unraw() == name)

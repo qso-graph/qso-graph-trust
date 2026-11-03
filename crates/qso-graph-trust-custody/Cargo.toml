@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "qso-graph-trust-custody"
+description = "QSO Graph Trust's custody test: no key data left in a signing program's memory"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+# A test tool, never shipped.
+publish = false
+
+# The program the custody test reads: it installs the wiping allocator, as every QG Trust program
+# must.
+[[bin]]
+name = "qgt-custody"
+path = "src/bin/qgt-custody.rs"
+
+# The control, the one program `cargo xtask policy` lets go without the wiping allocator: it proves
+# the test finds what an unwiped free leaves.
+[[bin]]
+name = "qgt-custody-unwiped"
+path = "src/bin/qgt-custody-unwiped.rs"
+
+[dependencies]
+qso-graph-trust = { path = "../qso-graph-trust", version = "=0.1.0" }
+zeroizing-alloc = { version = "=0.1.1", default-features = false }
+zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
+
+# Test tools only: they read the corpus key's numbers, the needles the test looks for.
+[dev-dependencies]
+rsa = { version = "=0.9.10", default-features = false, features = ["std", "pem"] }
+pkcs8 = { version = "=0.10.2", default-features = false, features = ["std", "pem", "encryption", "3des", "sha1-insecure"] }
+
+[lints]
+workspace = true

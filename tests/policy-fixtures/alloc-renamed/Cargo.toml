@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: another crate renamed into the allocator's name, so a correct line names it. The
+# wiping-allocator check must catch it.
+[package]
+name = "planted-alloc-renamed"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "planted-alloc-renamed"
+path = "src/main.rs"
+
+[dependencies]
+zeroizing_alloc = { package = "planted-fake-alloc", path = "fake" }
+
+[lints]
+workspace = true

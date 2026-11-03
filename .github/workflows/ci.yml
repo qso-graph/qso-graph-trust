@@ -76,6 +76,10 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - name: cargo xtask policy
         run: cargo xtask policy
+      # The custody test optimised: optimisation is what removes a wipe, and the
+      # check jobs run it in debug (Linux only: it reads a child's memory through /proc).
+      - name: custody test, release
+        run: cargo test -p qso-graph-trust-custody --release --locked
       # LoTW's tables are generated from ARRL's configuration, never edited by hand.
       - name: LoTW tables match config.xml
         run: python3 scripts/gen-lotw-tables.py --check

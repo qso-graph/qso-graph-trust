@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: the wiping allocator behind a cfg, so a release build has none. The check must catch it.
+[package]
+name = "planted-alloc-cfg"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "planted-alloc-cfg"
+path = "src/main.rs"
+
+[lints]
+workspace = true

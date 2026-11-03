@@ -17,6 +17,9 @@ toml = "=1.1.8"
 syn = { version = "=3.0.9", default-features = false, features = ["full", "parsing"] }
 # Tokenizes every source file, whatever its cfg, to find `unsafe` that no build compiles.
 proc-macro2 = { version = "=1.0.107", default-features = false }
+# xtask is a program too, so it installs the wiping allocator like every other one: no exception
+# for it (found by Codex review: a second xtask binary would have had none).
+zeroizing-alloc = { version = "=0.1.1", default-features = false }
 
 [lints]
 workspace = true

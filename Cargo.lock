@@ -490,6 +490,18 @@ name = "qso-graph-trust-cli"
 version = "0.1.0"
 dependencies = [
  "qso-graph-trust",
+ "zeroizing-alloc",
+]
+
+[[package]]
+name = "qso-graph-trust-custody"
+version = "0.1.0"
+dependencies = [
+ "pkcs8",
+ "qso-graph-trust",
+ "rsa",
+ "zeroize",
+ "zeroizing-alloc",
 ]
 
 [[package]]
@@ -831,6 +843,7 @@ dependencies = [
  "serde_json",
  "syn 3.0.9",
  "toml",
+ "zeroizing-alloc",
 ]
 
 [[package]]
@@ -872,3 +885,9 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "zeroizing-alloc"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b5564c80013ee0edbfc4e4d7d66d1a5a44b8adaffbf0103069f51ce0efc5031"
