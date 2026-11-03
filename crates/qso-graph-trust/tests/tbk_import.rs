@@ -66,9 +66,10 @@ fn every_certificate_key_and_location_comes_through() {
             (cert.callsign(), cert.dxcc(), c.dxcc),
             (c.callsign.as_str(), 291, 291)
         );
-        // Whether the set gave this key a password: only that, never the password, is compared.
+        // Whether the set gave this key a password: only that, never the password, is compared,
+        // and nothing taken from the password's file is printed.
         let protected = !set(&format!("keys/{}.password", c.callsign)).is_empty();
-        assert_eq!(key.is_encrypted(), protected, "{}", c.callsign);
+        assert!(key.is_encrypted() == protected);
     }
     let names: Vec<&str> = backup.locations.iter().map(|l| l.name.as_str()).collect();
     assert_eq!(
