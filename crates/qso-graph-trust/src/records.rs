@@ -15,6 +15,9 @@ use zeroize::Zeroizing;
 
 /// The longest value accepted: larger than any key, certificate or signature tqsllib writes.
 pub const MAX_VALUE_LEN: usize = 64 * 1024;
+/// The longest tag accepted, `<` and `>` aside: the longest tqsllib writes is far shorter, and no
+/// name or type is allocated before this is checked (found by Codex review).
+pub const MAX_TAG_LEN: usize = 64;
 /// The most fields in one record.
 pub const MAX_FIELDS: usize = 256;
 /// The most records in one input: a signed log of 100,000 QSOs, plus its header records.
@@ -110,6 +113,7 @@ pub fn parse(input: &[u8]) -> Result<Vec<Record>, RecordError> {
         let start = at + lt;
         let gt = input[start..]
             .iter()
+            .take(MAX_TAG_LEN + 2)
             .position(|&b| b == b'>')
             .map(|p| start + p)
             .ok_or(RecordError::BadField { offset: start })?;
@@ -148,7 +152,8 @@ pub fn parse(input: &[u8]) -> Result<Vec<Record>, RecordError> {
             }
             _ => return Err(RecordError::BadField { offset: start }),
         };
-        if kind.is_some_and(|k| !plain(k)) {
+        // A type is one letter or digit, as tqsllib and ADIF write it.
+        if kind.is_some_and(|k| k.len() != 1 || !plain(k)) {
             return Err(RecordError::BadField { offset: start });
         }
         if len > MAX_VALUE_LEN {
@@ -262,6 +267,19 @@ mod tests {
             parse(&many),
             Err(RecordError::TooManyFields { .. })
         ));
+    }
+
+    #[test]
+    fn a_long_name_or_type_is_refused_before_it_is_kept() {
+        // Codex review: a 256 MiB name passed every other limit.
+        let long = [b"<".as_slice(), &[b'A'; MAX_TAG_LEN + 1], b":0><eor>"].concat();
+        assert_eq!(parse(&long), Err(RecordError::BadField { offset: 0 }));
+        let longest = [b"<".as_slice(), &[b'A'; MAX_TAG_LEN - 2], b":0><eor>"].concat();
+        assert!(parse(&longest).is_ok());
+        assert_eq!(
+            parse(b"<A:1:66>x<eor>"),
+            Err(RecordError::BadField { offset: 0 })
+        );
     }
 
     #[test]

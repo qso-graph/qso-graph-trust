@@ -15,6 +15,7 @@ script is run again only to change them.
 | `root.pem` | A test root, "QGT Test Root" (O=QSO Graph Trust TEST ONLY, OU=Not ARRL) |
 | `ca.pem` | A test issuing CA, signed by the root |
 | `user-1024.pem` | The operator certificate for `QG0TEST` (Q prefixes are never issued), DXCC 291, QSO dates 2020-01-01 to 2099-12-31, with a 1024-bit key, as LoTW's are |
+| `user-1024-pbkdf2-sha1.key.pem` | The same key, encrypted as older OpenSSL wrote TQSL's keys (PBES2, PBKDF2 with HMAC-SHA1, 2,048 iterations, 3DES), password `qgt-key`; made in the same run |
 | `user-*.key.pem` | Their private keys, unencrypted PKCS#8 |
 | `user-*.tq6` | The certificate response ARRL would send: gzipped XML holding the root, CA and operator certificates |
 | `user-*-aes.p12` | PKCS#12 made by OpenSSL with TQSL's default encryption (AES-256, PBES2), holding the key and the chain to the root |

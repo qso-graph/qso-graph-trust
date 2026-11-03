@@ -20,6 +20,7 @@ use pkcs8::pkcs5::pbes2::{self, Kdf, Pbkdf2Prf};
 use pkcs8::{DecodePrivateKey, EncryptedPrivateKeyInfo, der::Decode};
 use rsa::RsaPrivateKey;
 use rsa::pkcs1v15::{Signature, SigningKey};
+use rsa::pkcs8::DecodePublicKey;
 use rsa::signature::{RandomizedSigner, SignatureEncoding};
 use sha1::Sha1;
 use zeroize::Zeroizing;
@@ -72,9 +73,11 @@ pub enum KeyError {
     NotRsa,
     /// The key file is larger than any key file tqsllib writes ([`MAX_KEY_FILE_LEN`]).
     FileTooLarge,
-    /// The key is not one LoTW uses: RSA with a 1024-bit modulus, two 512-bit primes and the
-    /// public exponent 65537, as tqsllib makes them.
+    /// The key is not one LoTW uses: RSA with a 1024-bit modulus, two different 512-bit primes and
+    /// the public exponent 65537, as tqsllib makes them.
     NotLotwKey,
+    /// The key file's PUBLIC_KEY is not the public half of its PRIVATE_KEY.
+    PublicKeyMismatch,
     /// The key is protected in a way QG Trust does not accept: a scheme other than PBES2 with
     /// PBKDF2, a hash or cipher tqsllib never uses, or more PBKDF2 iterations than the limit.
     UnsupportedProtection,
@@ -93,6 +96,9 @@ impl fmt::Display for KeyError {
             Self::NotRsa => f.write_str("the key is not an RSA key"),
             Self::FileTooLarge => f.write_str("the key file is too large to be one"),
             Self::NotLotwKey => f.write_str("the key is not the kind LoTW uses"),
+            Self::PublicKeyMismatch => {
+                f.write_str("the key file's public key does not belong to its private key")
+            }
             Self::UnsupportedProtection => {
                 f.write_str("the key is protected in a way QG Trust does not accept")
             }
@@ -115,16 +121,21 @@ pub const MAX_KEY_FILE_LEN: usize = 1024 * 1024;
 /// longer than the age of the universe (found by Codex review).
 fn lotw_shaped(key: &RsaPrivateKey) -> Result<(), KeyError> {
     use rsa::traits::{PrivateKeyParts, PublicKeyParts};
-    let primes = key.primes();
-    let shaped = key.n().bits() == 1024
-        && *key.e() == rsa::BigUint::from(65_537u32)
-        && primes.len() == 2
-        && primes.iter().all(|p| p.bits() == 512);
-    if shaped {
+    if shape_ok(key.n().bits(), key.e(), key.primes()) {
         Ok(())
     } else {
         Err(KeyError::NotLotwKey)
     }
+}
+
+/// The shape itself: a 1024-bit modulus, the exponent 65537, and two different 512-bit primes.
+/// Equal primes make a modulus anyone can factor with a square root (found by Codex review).
+fn shape_ok(modulus_bits: usize, e: &rsa::BigUint, primes: &[rsa::BigUint]) -> bool {
+    modulus_bits == 1024
+        && *e == rsa::BigUint::from(65_537u32)
+        && primes.len() == 2
+        && primes[0] != primes[1]
+        && primes.iter().all(|p| p.bits() == 512)
 }
 
 /// The most PBKDF2 iterations accepted. tqsllib 2.8.7 writes 2,048 (OpenSSL's default); a million
@@ -221,6 +232,13 @@ impl KeyEntry {
             _ => return Err(KeyError::NotAKey),
         };
         lotw_shaped(&key)?;
+        // The public key the file states is the private key's own, so a certificate matched by it
+        // is this key's (found by Codex review).
+        let stated = rsa::RsaPublicKey::from_public_key_pem(&self.public_key_pem)
+            .map_err(|_| KeyError::PublicKeyMismatch)?;
+        if stated != key.to_public_key() {
+            return Err(KeyError::PublicKeyMismatch);
+        }
         Ok(TqslKey {
             key: SigningKey::<Sha1>::new(key),
         })
@@ -347,10 +365,22 @@ mod tests {
         assert!(accepted(&EncryptionScheme::Pbes2(ok)));
     }
 
+    /// The test key's public half, as a key file states it.
+    fn test_public_key() -> String {
+        use rsa::pkcs8::EncodePublicKey;
+        RsaPrivateKey::from_pkcs8_pem(include_str!("../../../tests/corpus/pki/user-1024.key.pem"))
+            .expect("key")
+            .to_public_key()
+            .to_public_key_pem(pkcs8::LineEnding::LF)
+            .expect("PEM")
+    }
+
+    /// A key entry for `pem`, stating the test key's public key: right for the test key, plain or
+    /// re-encrypted, and the check comes after the ones these tests aim at for any other.
     fn entry(pem: &str) -> KeyEntry {
         KeyEntry {
             callsign: "QG0TEST".into(),
-            public_key_pem: String::new(),
+            public_key_pem: test_public_key(),
             private_key_pem: Zeroizing::new(pem.into()),
         }
     }
@@ -434,6 +464,55 @@ mod tests {
         assert_eq!(
             KeyEntry::read_key_file(&vec![b' '; MAX_KEY_FILE_LEN + 1]).err(),
             Some(KeyError::FileTooLarge)
+        );
+    }
+
+    #[test]
+    fn a_key_with_equal_primes_is_refused() {
+        use rsa::traits::{PrivateKeyParts, PublicKeyParts};
+        // Codex review: p = q gives a 1024-bit modulus of two 512-bit primes that rsa accepts.
+        assert!(
+            entry(include_str!("../../../tests/corpus/pki/user-1024.key.pem"))
+                .unlock(None)
+                .is_ok()
+        );
+        let key = RsaPrivateKey::from_pkcs8_pem(include_str!(
+            "../../../tests/corpus/pki/user-1024.key.pem"
+        ))
+        .expect("key");
+        let p = key.primes()[0].clone();
+        assert!(
+            shape_ok(key.n().bits(), key.e(), key.primes()),
+            "the test key itself is LoTW-shaped"
+        );
+        let square = &p * &p;
+        assert!(!shape_ok(square.bits(), key.e(), &[p.clone(), p]));
+    }
+
+    #[test]
+    fn a_public_key_that_is_not_the_private_keys_is_refused() {
+        // Codex review: certificate matching reads PUBLIC_KEY, so it must be the signing key's own.
+        let file = |case: &str| -> Vec<u8> {
+            std::fs::read(format!(
+                "{}/../../tests/corpus/tqsl/{case}/tqsl/keys/QG0TEST",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .expect("key file")
+        };
+        let mine = KeyEntry::read_key_file(&file("1024"))
+            .expect("key file")
+            .remove(0);
+        let other = KeyEntry::read_key_file(&file("1024-password"))
+            .expect("key file")
+            .remove(0);
+        let crossed = KeyEntry {
+            public_key_pem: other.public_key_pem.clone(),
+            ..mine.clone()
+        };
+        assert!(mine.unlock(None).is_ok());
+        assert_eq!(
+            crossed.unlock(None).err(),
+            Some(KeyError::PublicKeyMismatch)
         );
     }
 }

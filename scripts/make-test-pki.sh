@@ -35,6 +35,7 @@ DXCC=291              # United States, in LoTW's numbering
 NOT_BEFORE=2020-01-01
 NOT_AFTER=2099-12-31
 P12_PASSWORD=qgt-test # also in tests/corpus/README.md: a test password for test keys
+KEY_PASSWORD=qgt-key  # the same, for the PBKDF2-HMAC-SHA1 key
 
 # The extension value is the text's own bytes (DER:<hex>), as TQSL reads it.
 hex() { printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
@@ -109,6 +110,10 @@ for bits in 1024; do
     -name "$CALL" -passout "pass:$P12_PASSWORD" -out "$out/$name-aes.p12"
   openssl pkcs12 -export -legacy -inkey "$out/$name.key.pem" -in "$out/$name.pem" -certfile "$work/chain.pem" \
     -name "$CALL" -passout "pass:$P12_PASSWORD" -out "$out/$name-legacy.p12"
+  # The same key encrypted as older OpenSSL wrote TQSL's keys: PBES2, PBKDF2 with HMAC-SHA1 (its
+  # default, so left out), 2,048 iterations, 3DES. Made from this run's key, so the two match.
+  openssl pkcs8 -topk8 -in "$out/$name.key.pem" -v2 des3 -v2prf hmacWithSHA1 -iter 2048 \
+    -passout "pass:$KEY_PASSWORD" -out "$out/$name-pbkdf2-sha1.key.pem"
 done
 
 # Prove what was made: each chain verifies, and each certificate carries what TQSL reads.
