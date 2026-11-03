@@ -67,8 +67,8 @@ planted fixtures therefore live at the repository root, in `tests/policy-fixture
 
 **Every shipped crate's dependencies are reviewed.** A dependency's macro (`paste!`, for one) can
 build `unsafe` code inside our crate from pieces, so every crate outside the workspace that the
-library or `qgt` needs, not only the library's tree, comes from crates.io and is reviewed by exact
-name and version. The no-C rules stay the library's: `qgt` may link the TLS stack's C. The library's
+library or the command line needs, not only the library's tree, comes from crates.io and is reviewed by exact
+name and version. The no-C rules stay the library's: the command line may link the TLS stack's C. The library's
 root may not switch itself off with a crate-level `#![cfg]`, which would also switch off the canary.
 
 **For the workspace's own crates the compiler is the enforcer.** Each is edition 2024 and forbids

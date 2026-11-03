@@ -4,7 +4,7 @@ Decided 2026-11-02 by KI7MT.
 
 ## What was decided
 
-The library and the `qgt` command line are Rust. The app is Electron, sharing QSO Graph Desktop's
+The library and the `qso-graph-trust` command line are Rust. The app is Electron, sharing QSO Graph Desktop's
 screens and tests. One library serves QSO Graph Desktop, the app, the command line and other people's
 tools.
 

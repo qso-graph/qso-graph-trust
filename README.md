@@ -18,7 +18,7 @@ same way.
 | Part | What it does | Where |
 | --- | --- | --- |
 | The library | Certificates, station locations, signing, upload and duplicate tracking. Shared by everything below | [`crates/qso-graph-trust`](crates/qso-graph-trust) |
-| `qgt`, the command line | tqsl-compatible options, exit codes and status line, for loggers and scripts | [`crates/qgt`](crates/qgt) |
+| `qso-graph-trust`, the command line | tqsl-compatible options, exit codes and status line, for loggers and scripts | [`crates/qso-graph-trust-cli`](crates/qso-graph-trust-cli) |
 | QSO Graph Trust, the app | For hams who don't use a command line; arrives in phase 5 | not yet |
 | QSO Graph Desktop | Uses the library through its own Rust core | [qso-graph-desktop](https://github.com/qso-graph/qso-graph-desktop) |
 
@@ -39,7 +39,7 @@ With Rust installed ([rustup](https://rustup.rs) installs the version `rust-tool
 ```sh
 cargo test --workspace
 cargo xtask policy      # no C in the library, no unsafe code
-cargo run -p qgt -- --version
+cargo run -p qso-graph-trust-cli -- --version
 ```
 
 ## Licence

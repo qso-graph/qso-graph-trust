@@ -6,7 +6,7 @@ build and check. When a rule here and your task disagree, stop and ask.
 ## What this is
 
 **QSO Graph Trust (QGT) signs logs for ARRL's Logbook of The World (LoTW) with the operator's key held by
-the OS credential store.** One Rust library, shared by QSO Graph Desktop, the QGT app, the `qgt`
+the OS credential store.** One Rust library, shared by QSO Graph Desktop, the QGT app, the `qso-graph-trust`
 command line and other people's tools. It is an alternative to TQSL: described as an alternative, never
 as replacing or fixing TQSL, and TQSL's behaviour is stated as facts with their source, never as faults.
 
@@ -23,7 +23,7 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
 - **Every outside crate a shipped crate uses is reviewed,** by exact name and version, through
   cargo-vet: an imported audit, a trusted publisher, or our own (`supply-chain/`, decision 0004).
   It comes from crates.io only. *Test: `cargo vet` and `cargo deny`.* The no-C rule is the
-  library's alone; `qgt` carries the TLS stack, which is C.
+  library's alone; the command line carries the TLS stack, which is C.
 - **No unsafe code.** Every crate is edition 2024, every crate root says `#![forbid(unsafe_code)]`,
   and every crate takes the workspace's lints, which forbid it too. Together these make rustc refuse
   every `extern` block and all assembly in our own code. Every source file is also read as tokens,

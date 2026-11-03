@@ -153,7 +153,8 @@ fn every_planted_way_to_override_the_lints_is_caught() {
     // Outside this repository, so its planted files are never part of the
     // repository's own scan, wherever Cargo's output directory is; and freshly
     // created, so removing it afterwards removes nothing else (found by Codex review).
-    let root = xtask::fresh_temp_dir("qgt-planted-overrides").expect("a fresh directory");
+    let root =
+        xtask::fresh_temp_dir("qso-graph-trust-planted-overrides").expect("a fresh directory");
     let write = |rel: &str, text: &str| {
         let path = root.join(rel);
         std::fs::create_dir_all(path.parent().expect("a parent")).expect("mkdir");
@@ -293,7 +294,7 @@ fn the_canary_is_refused_here_and_compiles_under_a_lint_cap() {
 #[cfg(unix)]
 #[test]
 fn a_symbolic_link_in_a_crate_is_caught() {
-    let dir = xtask::fresh_temp_dir("qgt-planted-link").expect("a fresh directory");
+    let dir = xtask::fresh_temp_dir("qso-graph-trust-planted-link").expect("a fresh directory");
     std::fs::create_dir(dir.join("src")).expect("mkdir");
     std::fs::write(dir.join("src").join("entry.rs"), "pub fn f() {}\n").expect("write");
     std::os::unix::fs::symlink("entry.rs", dir.join("src").join("main.rs")).expect("link");

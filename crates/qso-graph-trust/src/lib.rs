@@ -4,7 +4,7 @@
 //! QSO Graph Trust (QGT): sign and upload logs for ARRL's Logbook of The World,
 //! with the operator's key held by the OS credential store.
 //!
-//! This crate is the library that QSO Graph Desktop, the QGT app, the `qgt`
+//! This crate is the library that QSO Graph Desktop, the QGT app, the `qso-graph-trust`
 //! command line and other people's tools share. It holds the key, the signing
 //! and every file parser, so it contains no `unsafe` code and nothing in its
 //! dependency tree is C or C++ (docs/decisions/0002-no-c-in-the-library.md).
