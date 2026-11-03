@@ -930,11 +930,22 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
             // rustup reads `rust-toolchain` before `rust-toolchain.toml`, and the
             // nearest one to where Cargo runs, so the root's `.toml` is the only
             // toolchain file there may be (found by Codex review).
-            if name == "rust-toolchain" || (name == "rust-toolchain.toml" && d != root) {
+            // Names compared without regard to case, on every host: on Windows and
+            // macOS `.CARGO/config.toml` is a Cargo configuration file (found by
+            // Codex review). Only the root's exact `rust-toolchain.toml` and
+            // `.cargo/config.toml` are allowed.
+            let lower = name.to_ascii_lowercase();
+            let exact_root_toolchain = d == root && name == "rust-toolchain.toml";
+            if lower == "rust-toolchain"
+                || (lower == "rust-toolchain.toml" && !exact_root_toolchain)
+            {
                 problems.push(format!("{} is a toolchain file", path.display()));
             }
-            let in_cargo_dir = d.file_name().is_some_and(|n| n == ".cargo");
-            if in_cargo_dir && matches!(name.as_str(), "config" | "config.toml") && path != config {
+            let in_cargo_dir = d
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(".cargo"));
+            if in_cargo_dir && matches!(lower.as_str(), "config" | "config.toml") && path != config
+            {
                 problems.push(format!("{} is a Cargo configuration file", path.display()));
             }
             let in_workflows = d.ends_with(Path::new(".github").join("workflows"));

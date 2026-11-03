@@ -179,8 +179,17 @@ fn every_planted_way_to_override_the_lints_is_caught() {
         "crates/lib/rust-toolchain.toml",
         "[toolchain]\nchannel = \"nightly\"\n",
     );
-    // A second configuration file inside a crate.
+    // A second configuration file inside a crate, and one whose name differs only
+    // in case, which Windows and macOS read as the same (Codex review, round 22).
     write("crates/lib/.cargo/config.toml", "[build]\nrustflags = []\n");
+    write(
+        "crates/other/.CARGO/config.toml",
+        "[target.x86_64-pc-windows-msvc]\nrustflags = [\"-l\", \"user32\"]\n",
+    );
+    write(
+        "crates/other/RUST-TOOLCHAIN.toml",
+        "[toolchain]\nchannel = \"nightly\"\n",
+    );
     // Workflows: a response file, another configuration, a wrapper, a native library.
     write(
         ".github/workflows/a.yml",
@@ -205,8 +214,14 @@ fn every_planted_way_to_override_the_lints_is_caught() {
         .join("config.toml")
         .display()
         .to_string();
+    let other = root.join("crates").join("other");
     let mut want =
         vec![
+        format!(
+            "{} is a Cargo configuration file",
+            other.join(".CARGO").join("config.toml").display()
+        ),
+        format!("{} is a toolchain file", other.join("RUST-TOOLCHAIN.toml").display()),
         ".cargo/config.toml has [build]: only [alias] is allowed".to_string(),
         format!(
             ".cargo/config.toml's [alias] must be exactly xtask = \"{}\"",
