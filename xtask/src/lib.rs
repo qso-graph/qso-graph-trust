@@ -1035,6 +1035,8 @@ pub fn outside_configs(root: &Path) -> Vec<String> {
     // Codex review). Cargo reads no other home, so neither does this.
     files.extend(
         std::env::var_os("CARGO_HOME")
+            // Empty is unset, as Cargo treats it (found by Codex review).
+            .filter(|h| !h.is_empty())
             .map(PathBuf::from)
             .or_else(|| std::env::home_dir().map(|h| h.join(".cargo"))),
     );
@@ -1044,9 +1046,14 @@ pub fn outside_configs(root: &Path) -> Vec<String> {
         // listed can still have a file Cargo opens (found by Codex review). Only
         // "not found" is no finding; on a case-insensitive file system the probe
         // finds any case of the name, as Cargo's does.
+        // Cargo reads `config` when it exists and `config.toml` only otherwise, so
+        // the first that exists is the one checked (found by Codex review).
         for name in ["config", "config.toml"] {
             let path = cargo_dir.join(name);
-            match std::fs::read_to_string(&path) {
+            let read = std::fs::read_to_string(&path);
+            let exists = !matches!(&read, Err(e) if e.kind() == std::io::ErrorKind::NotFound
+                || e.kind() == std::io::ErrorKind::NotADirectory);
+            match read {
                 Ok(text) => match text.parse::<toml::Table>() {
                     Ok(t) => {
                         for key in weakening_keys(&t) {
@@ -1058,6 +1065,9 @@ pub fn outside_configs(root: &Path) -> Vec<String> {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => {}
                 Err(e) => problems.push(format!("{} cannot be read: {e}", path.display())),
+            }
+            if exists {
+                break;
             }
         }
     }
