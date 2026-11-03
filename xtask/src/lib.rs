@@ -1501,8 +1501,10 @@ pub fn flags_allowed(flags: &str) -> bool {
 }
 
 /// What the canary appends to the library: unsafe code the compiler must refuse.
-/// `::core` by its absolute path, so a module of the library's own cannot shadow it.
-pub const CANARY_PROBE: &str = "\n/// The canary's probe: the compiler must refuse it.\npub fn qgt_canary() -> u8 {\n    unsafe { ::core::ptr::read(&7) }\n}\n";
+/// An anonymous constant, so it takes no name the library may already use, and
+/// every path absolute, so nothing the library declares can shadow one (Codex
+/// review, rounds 37 and 39).
+pub const CANARY_PROBE: &str = "\n// The canary's probe: the compiler must refuse it.\nconst _: ::core::primitive::u8 = unsafe { ::core::ptr::read(&7) };\n";
 
 /// The canary: build the real library, in a copy of this repository (its
 /// manifests and profiles, its Cargo configuration, its toolchain file) with an
@@ -1901,6 +1903,9 @@ mod tests {
             "pub mod core {}\n",
             "#![no_implicit_prelude]\n",
             "pub mod ptr {}\npub mod core { pub mod ptr {} }\n",
+            // Its own name taken, and the type it reads shadowed (round 39).
+            "pub fn qgt_canary() {}\n",
+            "#[allow(non_camel_case_types)]\npub struct u8;\n",
         ]
         .iter()
         .enumerate()
