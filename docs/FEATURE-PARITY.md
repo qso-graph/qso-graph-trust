@@ -25,8 +25,8 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | List | Features | Done | Part done | To do |
 |---|---|---|---|---|
-| Needed for 0.7.0 | 42 | 15 | 4 | 23 |
-| Nice to have | 16 | | | 16 |
+| Needed for 0.7.0 | 44 | 15 | 4 | 25 |
+| Nice to have | 15 | | | 15 |
 | Won't add | 14 | | | |
 
 ## 1. Needed for 0.7.0
@@ -56,6 +56,8 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
+| Back up everything to one file: certificates, keys, locations, signed-QSO record, settings | File: Backup | The whole file encrypted under a password QG Trust makes up | 0.7.0 | #172 |
+| Restore that backup on any computer (macOS, Windows, Linux), keys into that computer's credential store | File: Restore | | 0.7.0 | #172 |
 | Restore a TQSL backup (`.tbk`): certificates, keys, locations | File: Restore | Reads and checks it; saving what it holds waits on 1.2 | Part done | #172 |
 | Restore TQSL's record of QSOs already signed | File: Restore | Read; saving waits on 1.2 | Part done | #172 |
 | Use TQSL's settings that change what's signed: custom mode mappings, ignore seconds, ignore callsigns in the log, non-amateur calls, location details in the log | Preferences | Read from the backup; not yet used when signing | Part done | #172 |
@@ -125,8 +127,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Primary QSL manager call | Preferences | Rarely used | Later |
 | Restore a deleted certificate | Restore Deleted | Delete comes first | Later |
 | Restore a deleted station location | Restore Deleted | Delete comes first | Later |
-| QG Trust's own backup | Backup | `.p12` export (1.4) covers keys first | Later |
-| Automatic backup on exit | Preferences | Needs QG Trust's own backup | Later |
+| Automatic backup on exit | Preferences | Comes after backup itself (1.3) | Later |
 | Rebuild the record of signed QSOs from LoTW | Help: Synchronize | Needs upload first | Later |
 | Ask LoTW whether a certificate is still good (by serial) | | Calls ARRL; needs a decision first | Later |
 | Take a new ARRL configuration (`config.xml`) without a new release | automatic | A release with new tables works meanwhile | Later |
