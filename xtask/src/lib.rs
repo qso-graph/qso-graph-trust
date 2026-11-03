@@ -1657,6 +1657,13 @@ fn copy_repository(from: &Path, to: &Path, output: Option<&Path>) -> Result<(), 
     Ok(())
 }
 
+/// Whether a path is the single identifier `name`, raw spelling included:
+/// `r#unsafe_code` is `unsafe_code` (found by Codex review).
+fn names(path: &syn::Path, name: &str) -> bool {
+    use syn::ext::IdentExt;
+    path.get_ident().is_some_and(|i| i.unraw() == name)
+}
+
 /// Whether a crate root has an inner `#![cfg(...)]`, read with syn.
 fn has_crate_cfg(source: &str) -> bool {
     syn::parse_file(source).is_ok_and(|f| {
@@ -1679,7 +1686,7 @@ pub fn forbids_unsafe(source: &str) -> bool {
         return false;
     };
     file.attrs.iter().any(|a| {
-        if !matches!(a.style, syn::AttrStyle::Inner(_)) || !a.path().is_ident("forbid") {
+        if !matches!(a.style, syn::AttrStyle::Inner(_)) || !names(a.path(), "forbid") {
             return false;
         }
         // `forbid(...)` only: rustc rejects `forbid[...]` and `forbid{...}` (found by
@@ -1695,7 +1702,7 @@ pub fn forbids_unsafe(source: &str) -> bool {
             if meta.input.peek(syn::Token![=]) {
                 // `name = value`, such as `reason = "..."`: not a lint.
                 meta.value()?.parse::<syn::Expr>()?;
-            } else if meta.path.is_ident("unsafe_code")
+            } else if names(&meta.path, "unsafe_code")
                 && (meta.input.is_empty() || meta.input.peek(syn::Token![,]))
             {
                 found = true;
@@ -2279,6 +2286,9 @@ pub fn proof() {}
             "#!/usr/bin/env run-cargo-script\n#![forbid(unsafe_code)]"
         ));
         assert!(forbids_unsafe("#![forbid(missing_docs, unsafe_code)]"));
+        // Raw spellings, which rustc enforces the same (Codex review, round 35).
+        assert!(forbids_unsafe("#![forbid(r#unsafe_code)]"));
+        assert!(forbids_unsafe("#![r#forbid(unsafe_code)]"));
         assert!(forbids_unsafe("#![ forbid ( unsafe_code ) ]"));
         assert!(!forbids_unsafe("#![forbid(unsafe_code_x)]"));
     }
