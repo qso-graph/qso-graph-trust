@@ -107,10 +107,18 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
         lib_root(&meta, "planted-inc-root") + " is a crate root that is not a .rs file",
         fixture(&meta, "planted-inc-root", "src/library.inc") + " is not a .rs, .toml or .md file",
         // A lone # a macro joins to brackets passed separately: #[path] assembled.
+        lib_root(&meta, "planted-assembled") + " defines a macro",
         lib_root(&meta, "planted-assembled") + " has a # that does not begin an attribute",
         lib_root(&meta, "planted-assembled") + " uses #[path]",
         // The # passed in as its own macro argument: the brackets still say path =.
+        lib_root(&meta, "planted-passed-hash") + " defines a macro",
         lib_root(&meta, "planted-passed-hash") + " uses #[path]",
+        // A whole attribute passed as a meta fragment: no macro of our own is allowed.
+        lib_root(&meta, "planted-meta-macro") + " defines a macro",
+        // A procedural macro can generate unsafe code from a string.
+        "planted-proc-gen is a procedural macro crate".to_string(),
+        // `#! /* comment */ [` is an attribute, so the line is code and is read.
+        fixture(&meta, "planted-decoy", "src/shebang_trick.rs") + " uses unsafe",
         // A source file that is not UTF-8: a finding, not empty text that scans clean.
         fixture(&meta, "planted-decoy", "src/not_utf8.rs")
             + " cannot be read as UTF-8 text: stream did not contain valid UTF-8",

@@ -53,7 +53,9 @@ crate's lints, which overrides `forbid`, so code behind `#[cfg(not(debug_asserti
 meet the compiler's refusal. Every source file of every workspace crate is therefore read as Rust
 tokens, whatever its `cfg`: the identifiers `unsafe`, `include`, `asm`, `global_asm` and `naked_asm`
 (raw identifiers and import aliases included), `path =` anywhere in an attribute, and an attribute
-named by a macro variable fail the check. So that nothing compiles from a file the scan does not
+named by a macro variable fail the check. **The workspace's crates define no macros**: no
+`macro_rules!` and no procedural-macro crate, because a macro can assemble code from pieces no scan
+sees whole (review found five such constructions before this rule replaced chasing them). So that nothing compiles from a file the scan does not
 read, every crate root is a `.rs` file and a crate's directory holds only `.rs`, `.toml` and `.md`
 files. A directory is left out only when it is another workspace crate, or Cargo's output directory
 or a workspace exclusion lying outside every crate; inside one, `mod` could still load it. The

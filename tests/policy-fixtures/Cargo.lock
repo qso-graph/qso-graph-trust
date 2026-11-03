@@ -39,6 +39,10 @@ name = "planted-inc-root"
 version = "0.0.0"
 
 [[package]]
+name = "planted-meta-macro"
+version = "0.0.0"
+
+[[package]]
 name = "planted-native"
 version = "0.0.0"
 
@@ -68,6 +72,10 @@ version = "0.0.0"
 
 [[package]]
 name = "planted-path-module"
+version = "0.0.0"
+
+[[package]]
+name = "planted-proc-gen"
 version = "0.0.0"
 
 [[package]]

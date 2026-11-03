@@ -454,6 +454,14 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
             let Some(src) = target["src_path"].as_str() else {
                 continue;
             };
+            // A procedural macro generates code from strings no scan reads, so no
+            // workspace crate may be one (found by Codex review).
+            if target["kind"]
+                .as_array()
+                .is_some_and(|k| k.iter().any(|k| k == "proc-macro"))
+            {
+                problems.push(format!("{pkg_name} is a procedural macro crate"));
+            }
             // A crate root of another extension would escape the token scan.
             if !src.ends_with(".rs") {
                 problems.push(format!("{src} is a crate root that is not a .rs file"));
@@ -557,6 +565,9 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
 /// `include`) and any macro delimiter are all caught (found by Codex review).
 const REFUSED_IDENTS: &[(&str, &str)] = &[
     ("unsafe", "uses unsafe"),
+    // A macro can assemble code no scan sees whole (Codex review found five ways
+    // in turn), so the workspace's crates define none.
+    ("macro_rules", "defines a macro"),
     ("include", "uses include"),
     ("asm", "uses asm"),
     ("global_asm", "uses global_asm"),
@@ -568,10 +579,51 @@ const REFUSED_IDENTS: &[(&str, &str)] = &[
 fn strip_shebang(text: &str) -> &str {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     match text.strip_prefix("#!") {
-        Some(rest) if !rest.trim_start().starts_with('[') => {
-            rest.find('\n').map_or("", |i| &rest[i..])
-        }
+        Some(rest) if !next_is_bracket(rest) => rest.find('\n').map_or("", |i| &rest[i..]),
         _ => text,
+    }
+}
+
+/// Whether the next thing in `s`, past whitespace and comments (line, block and
+/// nested), is `[`, as Rust's lexer decides a shebang: `#! /* c */ [` is an
+/// attribute (found by Codex review). An unclosed comment counts as `[`, so the
+/// line is kept and fails to tokenize rather than being dropped.
+fn next_is_bracket(mut s: &str) -> bool {
+    loop {
+        s = s.trim_start();
+        if let Some(rest) = s.strip_prefix("//") {
+            // A doc comment is not skipped by Rust here, so neither is it here.
+            if rest.starts_with('/') || rest.starts_with('!') {
+                return false;
+            }
+            s = rest.find('\n').map_or("", |i| &rest[i..]);
+        } else if s.starts_with("/*") {
+            let mut depth = 0usize;
+            let mut i = 0;
+            let b = s.as_bytes();
+            loop {
+                if i + 1 >= b.len() {
+                    return true;
+                }
+                match (b[i], b[i + 1]) {
+                    (b'/', b'*') => {
+                        depth += 1;
+                        i += 2;
+                    }
+                    (b'*', b'/') => {
+                        depth -= 1;
+                        i += 2;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => i += 1,
+                }
+            }
+            s = &s[i..];
+        } else {
+            return s.starts_with('[');
+        }
     }
 }
 
@@ -1062,9 +1114,14 @@ fn canary_in(root: &Path, work: &Path, extra_env: &[(&str, &str)]) -> Result<(),
         .and_then(|p| p["targets"].as_array())
         .and_then(|ts| {
             ts.iter().find(|t| {
-                t["kind"]
-                    .as_array()
-                    .is_some_and(|k| k.iter().any(|k| k == "lib"))
+                t["kind"].as_array().is_some_and(|k| {
+                    // Every kind Cargo reports for a library (found by Codex review).
+                    k.iter().any(|k| {
+                        ["lib", "rlib", "dylib", "cdylib", "staticlib"]
+                            .iter()
+                            .any(|l| k == l)
+                    })
+                })
             })
         })
         .and_then(|t| t["src_path"].as_str())
@@ -1498,10 +1555,7 @@ pub fn proof() {}
             ),
             vec!["uses unsafe"]
         );
-        assert_eq!(
-            scan("macro_rules! m { () => { unsafe {} } }"),
-            vec!["uses unsafe"]
-        );
+        assert!(scan("macro_rules! m { () => { unsafe {} } }").contains(&"uses unsafe"));
         assert_eq!(
             scan("#[unsafe(no_mangle)] pub fn f() {}"),
             vec!["uses unsafe"]
@@ -1518,9 +1572,9 @@ pub fn proof() {}
             scan("#[r#path = \"payload.inc\"] mod hidden;"),
             vec!["uses #[path]"]
         );
-        assert_eq!(
-            scan("macro_rules! m { ($a:ident) => { #[$a = \"payload.inc\"] mod hidden; } }"),
-            vec!["builds an attribute from a macro variable"]
+        assert!(
+            scan("macro_rules! m { ($a:ident) => { #[$a = \"payload.inc\"] mod hidden; } }")
+                .contains(&"builds an attribute from a macro variable")
         );
         // The # passed into a macro separately (Codex review, round 16).
         let passed = scan(
@@ -1532,7 +1586,23 @@ pub fn proof() {}
                 .contains(&"builds an attribute from a macro variable")
         );
         // Ordinary macro brackets are not attributes.
-        assert!(scan("macro_rules! v { ($($x:expr),*) => { [$($x),*] } }").is_empty());
+        assert_eq!(
+            scan("macro_rules! v { ($($x:expr),*) => { [$($x),*] } }"),
+            vec!["defines a macro"]
+        );
+        // A macro of our own is refused outright (Codex review, round 17).
+        assert!(
+            scan(
+                "macro_rules! load { ($h:tt [$i:ident] $a:meta) => { $h [$a] pub mod hidden; }; }"
+            )
+            .contains(&"defines a macro")
+        );
+        // `#!` then a comment then `[` is an attribute, not a shebang.
+        assert_eq!(
+            strip_shebang("#! /* comment */ [allow(dead_code)] pub fn f() {}"),
+            "#! /* comment */ [allow(dead_code)] pub fn f() {}"
+        );
+        assert_eq!(strip_shebang("#! // c\n[allow(x)]"), "#! // c\n[allow(x)]");
         // A real shebang is not code.
         assert_eq!(
             strip_shebang("#!/usr/bin/env rustx\n#![forbid(unsafe_code)]\n"),
@@ -1563,7 +1633,10 @@ pub fn proof() {}
             scan(
                 "macro_rules! m { ($a:ident) => { #[cfg_attr(not(debug_assertions), $a = \"hidden.md\")] mod hidden; } }"
             ),
-            vec!["builds an attribute from a macro variable"]
+            vec![
+                "defines a macro",
+                "builds an attribute from a macro variable"
+            ]
         );
         // Inside cfg_attr (Codex review, round 13).
         assert_eq!(

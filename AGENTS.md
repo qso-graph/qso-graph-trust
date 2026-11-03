@@ -22,7 +22,9 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
   crate with a decision record in `docs/decisions/`, never a pattern.
 - **No unsafe code.** Every crate is edition 2024, every crate root says `#![forbid(unsafe_code)]`,
   and every crate takes the workspace's lints, which forbid it too. Together these make rustc refuse
-  every `extern` block and all assembly in our own code. *Test: `cargo xtask policy`.*
+  every `extern` block and all assembly in our own code. Every source file is also read as tokens,
+  whatever its `cfg`, and no workspace crate defines a macro (`macro_rules!` or procedural).
+  *Test: `cargo xtask policy`.*
 - **The key never leaves the OS credential store** except as a signature, or as a backup QGT encrypts
   itself. No API returns it, and it is never in a file, log, trace, error, IPC message or crash dump.
 - **Signatures match tqsllib's byte for byte.** A change to signing comes with a differential test
