@@ -957,18 +957,32 @@ fn enables_feature(tokens: proc_macro2::TokenStream) -> bool {
     })
 }
 
-/// Built-in attributes whose string arguments Rust treats as text, never as code.
+/// Built-in attributes whose string arguments Rust treats as text, never as code:
+/// each one in the Rust Reference's index of built-in attributes that takes a
+/// string, which is a reason, a name, a number or a file a debugger reads.
+/// Built-in attribute names cannot be taken by a macro, so none is a macro's
+/// input. Not here: `link_name`, which the native check refuses, and
+/// `export_name` and `link_section`, which are unsafe attributes the lints refuse.
 const PROSE_ATTRIBUTES: &[&str] = &[
     "allow",
     "cfg",
+    "crate_name",
+    "crate_type",
+    "debugger_visualizer",
     "deny",
     "deprecated",
     "diagnostic",
     "doc",
     "expect",
     "forbid",
+    "ignore",
     "must_use",
+    "recursion_limit",
+    "should_panic",
+    "target_feature",
+    "type_length_limit",
     "warn",
+    "windows_subsystem",
 ];
 
 /// The strings in one attribute's tokens that a macro might read as code: none
@@ -2250,6 +2264,24 @@ pub fn proof() {}
         assert!(
             scan("#[allow(dead_code, reason = \"asm! is mentioned here\")] fn h() {}").is_empty()
         );
+        // Every built-in attribute whose string is a name, a number or a reason
+        // (Codex review, round 38, debugger_visualizer; the rest from the Rust
+        // Reference's index of built-in attributes, so the class is closed).
+        for attr in [
+            "#![debugger_visualizer(gdb_script_file = \"unsafe.md\")]",
+            "#![r#debugger_visualizer(gdb_script_file = \"unsafe.md\")]",
+            "#![cfg_attr(all(), debugger_visualizer(gdb_script_file = \"unsafe.md\"))]",
+            "#![crate_name = \"unsafe_free\"]",
+            "#![crate_type = \"lib\"]",
+            "#![recursion_limit = \"256\"]",
+            "#![type_length_limit = \"1048576\"]",
+            "#![windows_subsystem = \"console\"]",
+            "#[ignore = \"needs unsafe hardware\"] fn t() {}",
+            "#[should_panic(expected = \"unsafe input\")] fn u() {}",
+            "#[target_feature(enable = \"avx2\")] fn v() {}",
+        ] {
+            assert!(scan(attr).is_empty(), "{attr}: {:?}", scan(attr));
+        }
         // Prose in a doc comment is not code.
         assert!(
             scan("/// Holds no unsafe code; see include! and asm! in the docs.\npub struct P;")
