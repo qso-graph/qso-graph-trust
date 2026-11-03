@@ -63,6 +63,8 @@ pub enum KeyError {
     File(RecordError),
     /// A record in the key file lacks this field.
     MissingField(&'static str),
+    /// A record in the key file gives this field more than once.
+    RepeatedField(&'static str),
     /// The private key is not PKCS#8 PEM as tqsllib writes it.
     NotAKey,
     /// The key is protected and no password was given.
@@ -90,6 +92,7 @@ impl fmt::Display for KeyError {
         match self {
             Self::File(e) => write!(f, "the key file could not be read: {e}"),
             Self::MissingField(name) => write!(f, "the key file has no {name}"),
+            Self::RepeatedField(name) => write!(f, "the key file gives {name} more than once"),
             Self::NotAKey => f.write_str("the key file does not hold a private key"),
             Self::PasswordNeeded => f.write_str("this key is protected: its password is needed"),
             Self::WrongPassword => f.write_str("the password does not unlock this key"),
@@ -282,6 +285,19 @@ impl KeyEntry {
     }
 
     fn from_record(record: &Record) -> Result<KeyEntry, KeyError> {
+        // A key field given twice is refused: QG Trust would read the first and tqsllib the last,
+        // so the two could unlock different keys from one file (found by Codex review).
+        for name in ["CALLSIGN", "PUBLIC_KEY", "PRIVATE_KEY"] {
+            if record
+                .fields
+                .iter()
+                .filter(|f| f.name.eq_ignore_ascii_case(name))
+                .count()
+                > 1
+            {
+                return Err(KeyError::RepeatedField(name));
+            }
+        }
         let text = |name: &'static str| record.text(name).ok_or(KeyError::MissingField(name));
         Ok(KeyEntry {
             callsign: text("CALLSIGN")?.to_string(),
@@ -739,5 +755,15 @@ mod tests {
             private_key_pem: Zeroizing::new(pem),
         };
         assert_eq!(entry.unlock(None).err(), Some(KeyError::NotLotwKey));
+    }
+
+    #[test]
+    fn a_key_field_given_twice_is_refused() {
+        let file =
+            b"<CALLSIGN:7>QG0TEST\n<PUBLIC_KEY:1>a\n<PRIVATE_KEY:1>b\n<private_key:1>c\n<eor>\n";
+        assert_eq!(
+            KeyEntry::read_key_file(file).err(),
+            Some(KeyError::RepeatedField("PRIVATE_KEY"))
+        );
     }
 }
