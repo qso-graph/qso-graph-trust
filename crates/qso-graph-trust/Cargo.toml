@@ -11,7 +11,18 @@ repository.workspace = true
 # The key, signing and every file parser live in this crate, so no C or C++ may
 # be anywhere in its dependency tree, on any platform: `cargo xtask policy`
 # fails the build if one is (docs/decisions/0002-no-c-in-the-library.md).
+# Every one is pinned exactly: they are the key and signing path.
 [dependencies]
+# LoTW's signature, RSA PKCS#1 v1.5 with SHA-1, which aws-lc-rs does not sign
+# (decision 0002, amended 2026-11-03). getrandom: the OS's randomness, which
+# blinds every signing.
+rsa = { version = "=0.9.10", default-features = false, features = ["std", "pem", "getrandom"] }
+rand_core = { version = "=0.6.4", default-features = false, features = ["getrandom"] }
+sha1 = { version = "=0.10.6", default-features = false, features = ["oid"] }
+# tqsllib's keys: PKCS#8 PEM, plain, or encrypted (PBES2 with 3DES) when the
+# ham set a password.
+pkcs8 = { version = "=0.10.2", default-features = false, features = ["std", "pem", "encryption", "3des"] }
+base64ct = { version = "=1.8.3", default-features = false, features = ["alloc"] }
 
 [lints]
 workspace = true

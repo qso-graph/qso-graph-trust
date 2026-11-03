@@ -4,15 +4,18 @@
 //! QSO Graph Trust (QGT): sign and upload logs for ARRL's Logbook of The World,
 //! with the operator's key held by the OS credential store.
 //!
-//! This crate is the library that QSO Graph Desktop, the QGT app, the `qg-trust`
+//! This crate is the library that QSO Graph Desktop, the `qg-trust`
 //! command line and other people's tools share. It holds the key, the signing
 //! and every file parser, so it contains no `unsafe` code and nothing in its
 //! dependency tree is C or C++ (docs/decisions/0002-no-c-in-the-library.md).
 //!
-//! Phase 1 (qso-graph-desktop#170) sets up the repository; signing arrives in
-//! phase 2 (qso-graph-desktop#171).
+//! Phase 2 (qso-graph-desktop#171) adds signing: [`signing`] signs a record as LoTW
+//! accepts it, byte for byte as tqsllib does, from a key in tqsllib's key file.
 
 #![forbid(unsafe_code)]
+
+pub mod records;
+pub mod signing;
 
 /// This library's version, as Cargo has it.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

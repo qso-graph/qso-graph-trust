@@ -6,9 +6,9 @@ build and check. When a rule here and your task disagree, stop and ask.
 ## What this is
 
 **QSO Graph Trust (QGT) signs logs for ARRL's Logbook of The World (LoTW) with the operator's key held by
-the OS credential store.** One Rust library, shared by QSO Graph Desktop, the QGT app, the `qg-trust`
-command line and other people's tools. It is an alternative to TQSL: described as an alternative, never
-as replacing or fixing TQSL, and TQSL's behaviour is stated as facts with their source, never as faults.
+the OS credential store.** One Rust library, shared by QSO Graph Desktop (QG Trust's interface, as an
+extension), the `qg-trust` command line and other people's tools. It is an alternative to TQSL: described
+as an alternative, never as replacing or fixing TQSL, and TQSL's behaviour is stated as facts with their source, never as faults.
 
 The core requirement: **the ham's key stays theirs, and only the QSOs they mean to sign get signed,
 exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if their key is compromised.
@@ -19,7 +19,10 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
   QGT ships and with every feature, compiles or ships C, C++ or assembly source, uses a crate that
   builds native code, or links anything but the operating system. Crates that only bind the OS
   (`OS_BINDINGS`) and Rust's own `asm!` in a reviewed outside crate are allowed (decision 0002).
-  *Test: `cargo xtask policy` and `cargo deny`.*
+  **Cryptographic primitives come from vetted providers, each named in the policy checks:**
+  `aws-lc-rs` (QSO Graph Desktop's) for TLS and every operation it offers, and RustCrypto's `rsa` for
+  LoTW's RSA-SHA-1 signature, which aws-lc-rs does not sign. The library never signs for a remote
+  caller (decision 0002, amended 2026-11-03). *Test: `cargo xtask policy` and `cargo deny`.*
 - **Every outside crate a shipped crate uses is reviewed,** by exact name and version, through
   cargo-vet: an imported audit, a trusted publisher, or our own (`supply-chain/`, decision 0004).
   It comes from crates.io only. *Test: `cargo vet` and `cargo deny`.* The no-C rule is the
@@ -33,6 +36,10 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
   itself. No API returns it, and it is never in a file, log, trace, error, IPC message or crash dump.
 - **Signatures match tqsllib's byte for byte.** A change to signing comes with a differential test
   against tqsllib. *Test: the differential suite (phase 2).*
+- **What LoTW receives is the same as TQSL's; how QGT gets there is its own design.** The signed
+  string, signature and `.tq8` records match tqsllib's exactly. QGT's errors, storage and interface
+  follow its own requirements, not tqsllib's internal behaviour (KI7MT, 2026-11-03). Code written to
+  drive tqsllib lives only in `tests/tqsllib/`.
 - **TLS verification is never turned off,** the user agent names QGT truthfully, and a password never
   appears on a command line, in a URL, a trace or a log.
 - **Test data only.** Never commit or attach a real certificate, private key, `.p12`, `.tbk`, password or
