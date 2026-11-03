@@ -70,6 +70,11 @@ pub enum KeyError {
     WrongPassword,
     /// The key is not an RSA key.
     NotRsa,
+    /// The key file is larger than any key file tqsllib writes ([`MAX_KEY_FILE_LEN`]).
+    FileTooLarge,
+    /// The key is not one LoTW uses: RSA with a 1024-bit modulus, two 512-bit primes and the
+    /// public exponent 65537, as tqsllib makes them.
+    NotLotwKey,
     /// The key is protected in a way QG Trust does not accept: a scheme other than PBES2 with
     /// PBKDF2, a hash or cipher tqsllib never uses, or more PBKDF2 iterations than the limit.
     UnsupportedProtection,
@@ -86,6 +91,8 @@ impl fmt::Display for KeyError {
             Self::PasswordNeeded => f.write_str("this key is protected: its password is needed"),
             Self::WrongPassword => f.write_str("the password does not unlock this key"),
             Self::NotRsa => f.write_str("the key is not an RSA key"),
+            Self::FileTooLarge => f.write_str("the key file is too large to be one"),
+            Self::NotLotwKey => f.write_str("the key is not the kind LoTW uses"),
             Self::UnsupportedProtection => {
                 f.write_str("the key is protected in a way QG Trust does not accept")
             }
@@ -97,6 +104,28 @@ impl fmt::Display for KeyError {
 impl std::error::Error for KeyError {}
 
 const ENCRYPTED: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----";
+
+/// The largest key file read: one key file holds a key per certificate request, each a few KiB.
+pub const MAX_KEY_FILE_LEN: usize = 1024 * 1024;
+
+/// Whether a key is one LoTW uses, checked before it can sign: tqsllib 2.8.7 makes RSA keys of 1024
+/// bits (`src/openssl_cert.cpp:653`) with the exponent 65537 (`tqsl_new_rsa_key`,
+/// `BN_set_word(pubexp, 0x10001)`), whose two primes OpenSSL makes 512 bits each. Anything else
+/// cannot carry a LoTW certificate, and very unequal primes would make rsa's CRT step loop for
+/// longer than the age of the universe (found by Codex review).
+fn lotw_shaped(key: &RsaPrivateKey) -> Result<(), KeyError> {
+    use rsa::traits::{PrivateKeyParts, PublicKeyParts};
+    let primes = key.primes();
+    let shaped = key.n().bits() == 1024
+        && *key.e() == rsa::BigUint::from(65_537u32)
+        && primes.len() == 2
+        && primes.iter().all(|p| p.bits() == 512);
+    if shaped {
+        Ok(())
+    } else {
+        Err(KeyError::NotLotwKey)
+    }
+}
 
 /// The most PBKDF2 iterations accepted. tqsllib 2.8.7 writes 2,048 (OpenSSL's default); a million
 /// takes well under a second, so a crafted file cannot make unlocking take unbounded time.
@@ -130,6 +159,9 @@ fn accepted(scheme: &EncryptionScheme<'_>) -> bool {
 impl KeyEntry {
     /// Every key in a tqsllib key file, in the order written: one per certificate request made.
     pub fn read_key_file(bytes: &[u8]) -> Result<Vec<KeyEntry>, KeyError> {
+        if bytes.len() > MAX_KEY_FILE_LEN {
+            return Err(KeyError::FileTooLarge);
+        }
         records::parse(bytes)
             .map_err(KeyError::File)?
             .iter()
@@ -163,24 +195,32 @@ impl KeyEntry {
 
     /// Unlock the key for signing. A protected key needs its password; a plain one ignores it.
     pub fn unlock(&self, password: Option<&[u8]>) -> Result<TqslKey, KeyError> {
-        let key = if self.is_encrypted() {
-            let password = password.ok_or(KeyError::PasswordNeeded)?;
-            let (label, der) = pkcs8::der::pem::decode_vec(self.private_key_pem.as_bytes())
-                .map_err(|_| KeyError::NotAKey)?;
-            if label != "ENCRYPTED PRIVATE KEY" {
-                return Err(KeyError::NotAKey);
+        if self.is_encrypted() && password.is_none() {
+            return Err(KeyError::PasswordNeeded);
+        }
+        // Decoded, and decrypted, into buffers wiped on every path: a key that fails to decode or
+        // decrypt leaves no plaintext behind either (found by Codex review).
+        let mut decoded = Zeroizing::new(vec![0u8; self.private_key_pem.len()]);
+        let (label, der) = pkcs8::der::pem::decode(self.private_key_pem.as_bytes(), &mut decoded)
+            .map_err(|_| KeyError::NotAKey)?;
+        let key = match label {
+            "ENCRYPTED PRIVATE KEY" => {
+                let password = password.ok_or(KeyError::PasswordNeeded)?;
+                let info = EncryptedPrivateKeyInfo::from_der(der).map_err(|_| KeyError::NotAKey)?;
+                if !accepted(&info.encryption_algorithm) {
+                    return Err(KeyError::UnsupportedProtection);
+                }
+                let mut plain = Zeroizing::new(info.encrypted_data.to_vec());
+                let key_der = info
+                    .encryption_algorithm
+                    .decrypt_in_place(password, &mut plain)
+                    .map_err(|_| KeyError::WrongPassword)?;
+                RsaPrivateKey::from_pkcs8_der(key_der).map_err(|_| KeyError::NotRsa)?
             }
-            let info = EncryptedPrivateKeyInfo::from_der(&der).map_err(|_| KeyError::NotAKey)?;
-            if !accepted(&info.encryption_algorithm) {
-                return Err(KeyError::UnsupportedProtection);
-            }
-            let document = info
-                .decrypt(password)
-                .map_err(|_| KeyError::WrongPassword)?;
-            RsaPrivateKey::from_pkcs8_der(document.as_bytes()).map_err(|_| KeyError::NotRsa)?
-        } else {
-            RsaPrivateKey::from_pkcs8_pem(&self.private_key_pem).map_err(|_| KeyError::NotAKey)?
+            "PRIVATE KEY" => RsaPrivateKey::from_pkcs8_der(der).map_err(|_| KeyError::NotAKey)?,
+            _ => return Err(KeyError::NotAKey),
         };
+        lotw_shaped(&key)?;
         Ok(TqslKey {
             key: SigningKey::<Sha1>::new(key),
         })
@@ -305,5 +345,95 @@ mod tests {
         let ok = pbes2::Parameters::pbkdf2_sha256_aes256cbc(MAX_PBKDF2_ITERATIONS, &salt, &iv)
             .expect("pbkdf2");
         assert!(accepted(&EncryptionScheme::Pbes2(ok)));
+    }
+
+    fn entry(pem: &str) -> KeyEntry {
+        KeyEntry {
+            callsign: "QG0TEST".into(),
+            public_key_pem: String::new(),
+            private_key_pem: Zeroizing::new(pem.into()),
+        }
+    }
+
+    #[test]
+    fn a_key_protected_with_pbkdf2_hmac_sha1_unlocks_and_signs_the_same() {
+        // Codex review: accepted, but pkcs8 lacked sha1-insecure, so the right password failed.
+        // The test key re-encrypted the way older OpenSSL wrote TQSL's keys (PBKDF2, HMAC-SHA1).
+        let plain = entry(include_str!("../../../tests/corpus/pki/user-1024.key.pem"));
+        let sha1 = entry(include_str!(
+            "../../../tests/corpus/pki/user-1024-pbkdf2-sha1.key.pem"
+        ));
+        assert!(sha1.is_encrypted());
+        let data = b"4EM177SEDGWICKKS20MKC4QPQ14.074000FT82026-11-0118:30:00Z";
+        let ours = sha1
+            .unlock(Some(b"qgt-key"))
+            .expect("unlocks")
+            .sign(data)
+            .expect("signs");
+        assert_eq!(
+            ours,
+            plain
+                .unlock(None)
+                .expect("unlocks")
+                .sign(data)
+                .expect("signs")
+        );
+    }
+
+    #[test]
+    fn a_damaged_protected_key_is_refused() {
+        // Codex review: with the right password, a damaged last block once left plaintext unwiped;
+        // the decryption is now in place, in a wiped buffer, and the error is the same.
+        let file = include_bytes!("../../../tests/corpus/tqsl/1024-password/tqsl/keys/QG0TEST");
+        let pem = KeyEntry::read_key_file(file)
+            .expect("key file")
+            .remove(0)
+            .private_key_pem;
+        let (_, der) = pkcs8::der::pem::decode_vec(pem.as_bytes()).expect("PEM");
+        let mut der = der;
+        let last = der.len() - 9;
+        der[last] ^= 0x80;
+        let damaged = pkcs8::der::pem::encode_string(
+            "ENCRYPTED PRIVATE KEY",
+            pkcs8::der::pem::LineEnding::LF,
+            &der,
+        )
+        .expect("PEM");
+        assert_eq!(
+            entry(&damaged).unlock(Some(b"qgt-key")).err(),
+            Some(KeyError::WrongPassword)
+        );
+    }
+
+    #[test]
+    fn a_key_that_is_not_lotw_shaped_is_refused_before_it_can_sign() {
+        use rsa::pkcs8::EncodePrivateKey;
+        // Codex review: p = 3 and a 1022-bit q make a 1024-bit key that rsa accepts, whose CRT step
+        // would then loop for over 2^1000 iterations. q from `openssl prime -generate -bits 1022`.
+        let q = [
+            "39241060f9dd871a47f383b6d93528e91ef2f26a23a18ac4c84be4a7de864fd4",
+            "38956267fbd8af381f09420f73705ac1e2132bb74997b110e63688ec7fe57a23",
+            "4ad07b484127addfa820c10871a478b17cc45b778ff3dd2570e7a69fa3fbb215",
+            "e45b9f2cce85625caafe930ff7e6992e060b76e032f908075ba56c5c86e35fb7",
+        ]
+        .concat();
+        let q = rsa::BigUint::parse_bytes(q.as_bytes(), 16).expect("q");
+        let key =
+            RsaPrivateKey::from_p_q(rsa::BigUint::from(3u32), q, rsa::BigUint::from(65_537u32))
+                .expect("rsa accepts it");
+        let pem = key.to_pkcs8_pem(pkcs8::LineEnding::LF).expect("PEM");
+        assert_eq!(entry(&pem).unlock(None).err(), Some(KeyError::NotLotwKey));
+        // A key of another size, however well made, is not LoTW's either.
+        let other = RsaPrivateKey::new(&mut rand_core::OsRng, 1536).expect("key");
+        let pem = other.to_pkcs8_pem(pkcs8::LineEnding::LF).expect("PEM");
+        assert_eq!(entry(&pem).unlock(None).err(), Some(KeyError::NotLotwKey));
+    }
+
+    #[test]
+    fn a_key_file_too_large_to_be_one_is_refused_unread() {
+        assert_eq!(
+            KeyEntry::read_key_file(&vec![b' '; MAX_KEY_FILE_LEN + 1]).err(),
+            Some(KeyError::FileTooLarge)
+        );
     }
 }

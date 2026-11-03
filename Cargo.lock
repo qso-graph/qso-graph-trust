@@ -307,6 +307,7 @@ dependencies = [
  "des",
  "pbkdf2",
  "scrypt",
+ "sha1",
  "sha2",
  "spki",
 ]

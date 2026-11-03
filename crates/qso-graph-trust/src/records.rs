@@ -17,6 +17,11 @@ use zeroize::Zeroizing;
 pub const MAX_VALUE_LEN: usize = 64 * 1024;
 /// The most fields in one record.
 pub const MAX_FIELDS: usize = 256;
+/// The most records in one input: a signed log of 100,000 QSOs, plus its header records.
+pub const MAX_RECORDS: usize = 100_010;
+/// The most fields in all records together, so input made of many tiny records cannot make memory
+/// grow without bound (found by Codex review): 20 for each of [`MAX_RECORDS`].
+pub const MAX_TOTAL_FIELDS: usize = 20 * MAX_RECORDS;
 
 /// One field: its name as written, its type letter if it has one, and its value's bytes, wiped
 /// when dropped.
@@ -68,8 +73,11 @@ pub enum RecordError {
     Truncated { offset: usize },
     /// A value longer than [`MAX_VALUE_LEN`].
     TooLong { offset: usize },
-    /// A record with more than [`MAX_FIELDS`] fields.
+    /// A record with more than [`MAX_FIELDS`] fields, or input with more than
+    /// [`MAX_TOTAL_FIELDS`] in all.
     TooManyFields { offset: usize },
+    /// More than [`MAX_RECORDS`] records.
+    TooManyRecords { offset: usize },
     /// Fields after the last `<eor>`: a record that never ended.
     Unterminated,
 }
@@ -80,6 +88,7 @@ impl fmt::Display for RecordError {
             Self::BadField { offset } => write!(f, "a malformed field at byte {offset}"),
             Self::Truncated { offset } => write!(f, "a field at byte {offset} runs past the end"),
             Self::TooLong { offset } => write!(f, "a field at byte {offset} is too long"),
+            Self::TooManyRecords { offset } => write!(f, "too many records, at byte {offset}"),
             Self::TooManyFields { offset } => {
                 write!(f, "a record ending at byte {offset} has too many fields")
             }
@@ -95,6 +104,7 @@ impl std::error::Error for RecordError {}
 pub fn parse(input: &[u8]) -> Result<Vec<Record>, RecordError> {
     let mut records = Vec::new();
     let mut current = Record::default();
+    let mut total_fields = 0;
     let mut at = 0;
     while let Some(lt) = input[at..].iter().position(|&b| b == b'<') {
         let start = at + lt;
@@ -106,6 +116,9 @@ pub fn parse(input: &[u8]) -> Result<Vec<Record>, RecordError> {
         let tag = std::str::from_utf8(&input[start + 1..gt])
             .map_err(|_| RecordError::BadField { offset: start })?;
         if tag.eq_ignore_ascii_case("eor") {
+            if records.len() == MAX_RECORDS {
+                return Err(RecordError::TooManyRecords { offset: start });
+            }
             records.push(std::mem::take(&mut current));
             at = gt + 1;
             continue;
@@ -146,9 +159,10 @@ pub fn parse(input: &[u8]) -> Result<Vec<Record>, RecordError> {
             .checked_add(len)
             .filter(|&end| end <= input.len())
             .ok_or(RecordError::Truncated { offset: start })?;
-        if current.fields.len() == MAX_FIELDS {
+        if current.fields.len() == MAX_FIELDS || total_fields == MAX_TOTAL_FIELDS {
             return Err(RecordError::TooManyFields { offset: start });
         }
+        total_fields += 1;
         current.fields.push(Field {
             name: name.to_string(),
             kind: kind.map(str::to_string),
@@ -227,6 +241,27 @@ mod tests {
             parse(b"<K:99999999999999999999999>"),
             Err(RecordError::TooLong { offset: 0 })
         );
+    }
+
+    #[test]
+    fn many_tiny_records_cannot_grow_memory_without_bound() {
+        // Codex review: every ten bytes made a record, without any limit on the whole.
+        let records = b"<A:0><eor>".repeat(MAX_RECORDS + 1);
+        assert!(matches!(
+            parse(&records),
+            Err(RecordError::TooManyRecords { .. })
+        ));
+        let fields = b"<A:0>"
+            .repeat(MAX_FIELDS - 1)
+            .iter()
+            .chain(b"<eor>")
+            .copied()
+            .collect::<Vec<u8>>();
+        let many = fields.repeat(MAX_TOTAL_FIELDS / (MAX_FIELDS - 1) + 1);
+        assert!(matches!(
+            parse(&many),
+            Err(RecordError::TooManyFields { .. })
+        ));
     }
 
     #[test]
