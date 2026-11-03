@@ -21,6 +21,10 @@ sha1 = { version = "=0.10.6", default-features = false, features = ["oid"] }
 # ham set a password. sha1-insecure: PBKDF2 with HMAC-SHA1, which older OpenSSL
 # wrote for TQSL's keys; it is a key derivation here, not a signature.
 pkcs8 = { version = "=0.10.2", default-features = false, features = ["std", "pem", "encryption", "3des", "sha1-insecure"] }
+# The LoTW certificate a signed log carries: its callsign, DXCC entity, QSO dates and public key.
+x509-cert = { version = "=0.2.5", default-features = false, features = ["pem", "std"] }
+# The .tq8: a signed log, gzipped. Deflate only; the gzip wrapper is ours (signed_log.rs).
+miniz_oxide = { version = "=0.9.1", default-features = false, features = ["with-alloc"] }
 base64ct = { version = "=1.8.3", default-features = false, features = ["alloc"] }
 # Every buffer that can hold a key is wiped when it is dropped.
 zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }

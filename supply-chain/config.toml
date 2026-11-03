@@ -64,6 +64,16 @@ version = "0.9.9"
 criteria = "safe-to-run"
 notes = "Not audited yet (decision 0004): reached only through lazy_static's no-std option, for num-bigint-dig."
 
+[[exemptions.tls_codec]]
+version = "0.4.2"
+criteria = "safe-to-deploy"
+notes = "Never compiled (Bob, 2026-11-03): in Cargo.lock only as x509-cert's optional dependency for its sct feature, which QG Trust does not enable; absent from cargo tree --all-features and from every build."
+
+[[exemptions.tls_codec_derive]]
+version = "0.4.2"
+criteria = "safe-to-deploy"
+notes = "Never compiled (Bob, 2026-11-03): tls_codec's derive macros; see tls_codec."
+
 [[exemptions.toml]]
 version = "1.1.8+spec-1.1.0"
 criteria = "safe-to-run"

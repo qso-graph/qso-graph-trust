@@ -10,12 +10,19 @@
 //! dependency tree is C or C++ (docs/decisions/0002-no-c-in-the-library.md).
 //!
 //! Phase 2 (qso-graph-desktop#171) adds signing: [`signing`] signs a record as LoTW
-//! accepts it, byte for byte as tqsllib does, from a key in tqsllib's key file.
+//! accepts it, byte for byte as tqsllib does, from a key in tqsllib's key file. [`qso`] and
+//! [`station`] turn an ADIF log and a station location into what LoTW receives, checked against
+//! ARRL's configuration ([`lotw`]), and [`signed_log`] writes the signed log, the `.tq7`.
 
 #![forbid(unsafe_code)]
 
+pub mod certificate;
+pub mod lotw;
+pub mod qso;
 pub mod records;
+pub mod signed_log;
 pub mod signing;
+pub mod station;
 
 /// This library's version, as Cargo has it.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
