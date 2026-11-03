@@ -10,6 +10,9 @@ use std::fmt;
 
 use crate::lotw::{self, FieldKind};
 
+/// The most fields a location is given: more than any DXCC entity's pages hold, all together.
+pub const MAX_FIELDS: usize = 32;
+
 /// A station location, its fields in the order LoTW's configuration lists them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StationLocation {
@@ -24,6 +27,8 @@ pub enum StationError {
     Missing(&'static str),
     /// A field given twice.
     Repeated(String),
+    /// More than [`MAX_FIELDS`] fields.
+    TooManyFields,
     /// A field that is not a location field for this DXCC entity.
     NotAField(String),
     /// A field whose value is not one LoTW accepts.
@@ -35,6 +40,7 @@ impl fmt::Display for StationError {
         match self {
             Self::Missing(field) => write!(f, "the station location has no {field}"),
             Self::Repeated(field) => write!(f, "the station location gives {field} twice"),
+            Self::TooManyFields => write!(f, "the station location has too many fields"),
             Self::NotAField(field) => {
                 write!(
                     f,
@@ -54,10 +60,8 @@ impl StationLocation {
     /// A station location from its fields, named as LoTW names them (`CALL`, `DXCC`,
     /// `GRIDSQUARE`, `US_STATE`, …). Empty values are left out.
     pub fn new(given: &[(&str, &str)]) -> Result<Self, StationError> {
-        for (i, (name, _)) in given.iter().enumerate() {
-            if given[..i].iter().any(|(n, _)| n == name) {
-                return Err(StationError::Repeated(name.to_string()));
-            }
+        if given.len() > MAX_FIELDS {
+            return Err(StationError::TooManyFields);
         }
         let value = |name: &str| {
             given
@@ -79,6 +83,11 @@ impl StationLocation {
             .collect();
         if let Some((name, _)) = given.iter().find(|(n, _)| !allowed.contains(n)) {
             return Err(StationError::NotAField(name.to_string()));
+        }
+        for (i, (name, _)) in given.iter().enumerate() {
+            if given[..i].iter().any(|(n, _)| n == name) {
+                return Err(StationError::Repeated(name.to_string()));
+            }
         }
 
         let mut fields: Vec<(&'static str, String)> = Vec::new();
@@ -128,6 +137,56 @@ impl StationLocation {
         Ok(Self { fields, dxcc })
     }
 
+    /// Whether a QSO record's own word about its station, an ADIF field from
+    /// [`crate::qso::STATION_FIELDS`] in capitals, disagrees with this location. A field the
+    /// location has nothing to compare with disagrees too: the QSO says more than the location can
+    /// confirm, so it is not signed for it.
+    pub fn contradicts(&self, adif: &str, value: &str) -> bool {
+        let same = |field: &str| {
+            self.get(field)
+                .is_some_and(|v| v.eq_ignore_ascii_case(value))
+        };
+        let number = |field: &str| {
+            let ours = self.get(field).and_then(|v| v.parse::<u32>().ok());
+            ours.is_some() && ours == value.parse().ok()
+        };
+        let agrees = match adif {
+            "STATION_CALLSIGN" => same("CALL"),
+            "MY_DXCC" => value.parse() == Ok(self.dxcc),
+            "MY_CQ_ZONE" => number("CQZ"),
+            "MY_ITU_ZONE" => number("ITUZ"),
+            "MY_IOTA" => same("IOTA"),
+            // A subsquare is finer than the location may be: the square must be one of its own.
+            "MY_GRIDSQUARE" => self.get("GRIDSQUARE").is_some_and(|grids| {
+                grids.split(',').any(|g| {
+                    g.trim()
+                        .get(..4)
+                        .zip(value.get(..4))
+                        .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b))
+                })
+            }),
+            "MY_STATE" => SUBDIVISIONS.iter().any(|f| same(f)),
+            // ADIF writes a US county as "KS,Sedgwick": the state, if given, must agree too.
+            "MY_CNTY" => {
+                let (state, county) = match value.split_once(',') {
+                    Some((st, c)) => (Some(st.trim()), c.trim()),
+                    None => (None, value.trim()),
+                };
+                let county_ok = ["US_COUNTY", "JA_CITY_GUN_KU"]
+                    .iter()
+                    .any(|f| self.get(f).is_some_and(|v| v.eq_ignore_ascii_case(county)));
+                let state_ok = state.is_none_or(|st| {
+                    SUBDIVISIONS
+                        .iter()
+                        .any(|f| self.get(f).is_some_and(|v| v.eq_ignore_ascii_case(st)))
+                });
+                county_ok && state_ok
+            }
+            _ => false,
+        };
+        !agrees
+    }
+
     /// The location's fields, in the order its tSTATION record lists them.
     pub fn fields(&self) -> impl Iterator<Item = (&'static str, &str)> {
         self.fields.iter().map(|(n, v)| (*n, v.as_str()))
@@ -175,16 +234,33 @@ fn is_grid_list(s: &str) -> bool {
     grids.len() <= 4 && grids.iter().all(|g| is_grid(g.trim()))
 }
 
-fn is_grid(g: &str) -> bool {
+/// One Maidenhead locator in capitals, `EM17` or `EM17AB`. Read as bytes, so any input is safe.
+pub(crate) fn is_grid(g: &str) -> bool {
     let b = g.as_bytes();
     let field = |c: u8| (b'A'..=b'R').contains(&c);
     let sub = |c: u8| (b'A'..=b'X').contains(&c);
+    let square = b.len() >= 4
+        && field(b[0])
+        && field(b[1])
+        && b[2].is_ascii_digit()
+        && b[3].is_ascii_digit();
     match b.len() {
-        4 => field(b[0]) && field(b[1]) && b[2].is_ascii_digit() && b[3].is_ascii_digit(),
-        6 => is_grid(&g[..4]) && sub(b[4]) && sub(b[5]),
+        4 => square,
+        6 => square && sub(b[4]) && sub(b[5]),
         _ => false,
     }
 }
+
+/// The location fields that are a DXCC entity's first subdivision, which ADIF's MY_STATE names.
+const SUBDIVISIONS: [&str; 7] = [
+    "US_STATE",
+    "CA_PROVINCE",
+    "AU_STATE",
+    "CN_PROVINCE",
+    "RU_OBLAST",
+    "JA_PREFECTURE",
+    "FI_KUNTA",
+];
 
 /// An IOTA reference: a continent and three digits, as `NA-001`.
 fn is_iota(s: &str) -> bool {
@@ -197,6 +273,38 @@ fn is_iota(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_qsos_word_about_its_station_must_agree_with_the_location() {
+        let loc = StationLocation::new(KANSAS).expect("location");
+        for (adif, value) in [
+            ("STATION_CALLSIGN", "QG0TEST"),
+            ("MY_DXCC", "291"),
+            ("MY_GRIDSQUARE", "EM17AB"),
+            ("MY_STATE", "KS"),
+            ("MY_CNTY", "KS,SEDGWICK"),
+            ("MY_CNTY", "SEDGWICK"),
+            ("MY_CQ_ZONE", "04"),
+            ("MY_ITU_ZONE", "7"),
+        ] {
+            assert!(!loc.contradicts(adif, value), "{adif} {value}");
+        }
+        for (adif, value) in [
+            ("STATION_CALLSIGN", "QG1TEST"),
+            ("MY_DXCC", "1"),
+            ("MY_GRIDSQUARE", "FN03"),
+            ("MY_STATE", "SC"),
+            ("MY_CNTY", "SC,SEDGWICK"),
+            ("MY_CNTY", "CHARLESTON"),
+            ("MY_CQ_ZONE", "5"),
+            ("MY_ITU_ZONE", "8"),
+            // The location has no IOTA, so a QSO naming one is not signed for it.
+            ("MY_IOTA", "NA-110"),
+            ("NOT_A_FIELD", "x"),
+        ] {
+            assert!(loc.contradicts(adif, value), "{adif} {value}");
+        }
+    }
 
     const KANSAS: &[(&str, &str)] = &[
         ("CALL", "QG0TEST"),
@@ -290,6 +398,17 @@ mod tests {
             Err(StationError::Repeated("CALL".into()))
         );
         assert!(with("GRIDSQUARE", "EM17ab,EM18").is_ok());
+        // Codex review: a six-byte grid with a two-byte character inside panicked on slicing.
+        assert!(matches!(
+            with("GRIDSQUARE", "AAA\u{e9}A"),
+            Err(StationError::Invalid { .. })
+        ));
+        let many: Vec<(String, &str)> = (0..=MAX_FIELDS).map(|i| (format!("X{i}"), "")).collect();
+        let many: Vec<(&str, &str)> = many.iter().map(|(n, v)| (n.as_str(), *v)).collect();
+        assert_eq!(
+            StationLocation::new(&many),
+            Err(StationError::TooManyFields)
+        );
         assert!(with("IOTA", "NA-110").is_ok());
         assert!(with("IOTA", "NA-1").is_err());
     }

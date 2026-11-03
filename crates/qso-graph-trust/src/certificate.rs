@@ -24,6 +24,10 @@ const QSO_NOT_BEFORE: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4
 const QSO_NOT_AFTER: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.12348.1.3");
 const DXCC_ENTITY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.12348.1.4");
 
+/// The largest certificate accepted, PEM or DER: a LoTW certificate is about 1.2 KiB of DER, so
+/// this leaves room for any real one and keeps its tCERT field well inside a record's limit.
+pub const MAX_CERTIFICATE_LEN: usize = 16 * 1024;
+
 /// A LoTW callsign certificate.
 #[derive(Clone)]
 pub struct Certificate {
@@ -53,6 +57,8 @@ impl fmt::Debug for Certificate {
 pub enum CertificateError {
     /// Not a certificate in PEM or DER.
     NotACertificate,
+    /// Larger than [`MAX_CERTIFICATE_LEN`], refused before it is read.
+    TooLarge,
     /// A certificate without LoTW's callsign, DXCC entity or QSO dates.
     NotLotw,
 }
@@ -61,6 +67,7 @@ impl fmt::Display for CertificateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotACertificate => write!(f, "this is not a certificate"),
+            Self::TooLarge => write!(f, "this is too large to be a LoTW certificate"),
             Self::NotLotw => write!(f, "this is not a LoTW callsign certificate"),
         }
     }
@@ -71,6 +78,9 @@ impl std::error::Error for CertificateError {}
 impl Certificate {
     /// A certificate from PEM, as tqsllib stores it, or DER.
     pub fn from_pem_or_der(bytes: &[u8]) -> Result<Self, CertificateError> {
+        if bytes.len() > MAX_CERTIFICATE_LEN {
+            return Err(CertificateError::TooLarge);
+        }
         let cert = X509::from_pem(bytes)
             .or_else(|_| X509::from_der(bytes))
             .map_err(|_| CertificateError::NotACertificate)?;
@@ -181,6 +191,17 @@ mod tests {
         assert!(cert.is_valid_at(SystemTime::now()));
         assert!(!cert.is_valid_at(SystemTime::UNIX_EPOCH));
         assert!(!format!("{cert:?}").contains("spki"));
+    }
+
+    #[test]
+    fn a_certificate_too_large_to_be_lotws_is_refused_unread() {
+        // Codex review: a 16 MiB extension was decoded, copied and re-encoded.
+        let mut big = corpus();
+        big.resize(MAX_CERTIFICATE_LEN + 1, b'\n');
+        assert_eq!(
+            Certificate::from_pem_or_der(&big).err(),
+            Some(CertificateError::TooLarge)
+        );
     }
 
     #[test]

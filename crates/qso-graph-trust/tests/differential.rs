@@ -219,10 +219,33 @@ fn a_log_is_signed_only_for_the_certificates_station_and_dates() {
         sign(&kansas(), &[], SystemTime::now()),
         Err(LogError::Empty)
     );
-    let mut early = qsos.clone();
-    early[2].date.year = 2019;
+    let adif = |date: &str, extra: &str| {
+        let record = format!(
+            "<CALL:5>KN4YU<QSO_DATE:8>{date}<TIME_ON:4>1900<BAND:3>20m<MODE:2>CW{extra}<EOR>"
+        );
+        Qso::from_adif(&records::parse(record.as_bytes()).expect("ADIF")[0]).expect("a QSO")
+    };
+    let early = [qsos[0].clone(), qsos[1].clone(), adif("20191231", "")];
     assert_eq!(
         sign(&kansas(), &early, SystemTime::now()),
         Err(LogError::QsoOutsideCertificate { index: 2 })
     );
+    // Codex review: a QSO naming another station was signed for this one.
+    let other = [
+        qsos[0].clone(),
+        adif("20261101", "<STATION_CALLSIGN:7>QG1TEST"),
+    ];
+    assert_eq!(
+        sign(&kansas(), &other, SystemTime::now()),
+        Err(LogError::QsoFromAnotherStation {
+            index: 1,
+            field: "STATION_CALLSIGN",
+            value: "QG1TEST".into()
+        })
+    );
+    let ours = [adif(
+        "20261101",
+        "<STATION_CALLSIGN:7>QG0TEST<MY_DXCC:3>291<MY_GRIDSQUARE:4>EM17<MY_STATE:2>KS<MY_CNTY:11>KS,Sedgwick",
+    )];
+    assert!(sign(&kansas(), &ours, SystemTime::now()).is_ok());
 }

@@ -8,8 +8,9 @@
 //!
 //! Before anything is signed, the key must be the certificate's, the station location the
 //! certificate's call and DXCC entity, the certificate in force, and every QSO dated within the
-//! certificate's QSO dates. One that is not stops the whole log, so a log is signed whole or not
-//! at all.
+//! certificate's QSO dates, and every QSO whose record names its station (`STATION_CALLSIGN`,
+//! `MY_DXCC`, `MY_GRIDSQUARE` and the rest) must name this one. One that is not stops the whole
+//! log, so a log is signed whole or not at all.
 
 use std::fmt;
 use std::time::SystemTime;
@@ -36,6 +37,13 @@ pub enum LogError {
     DxccNotCertificates { station: u32, certificate: u32 },
     /// A QSO, by its place in the log from 0, dated outside the certificate's QSO dates.
     QsoOutsideCertificate { index: usize },
+    /// A QSO, by its place in the log from 0, whose record names another station: the ADIF field
+    /// and the value it gives.
+    QsoFromAnotherStation {
+        index: usize,
+        field: &'static str,
+        value: String,
+    },
     /// A log with no QSOs.
     Empty,
     /// The signing itself failed.
@@ -64,6 +72,15 @@ impl fmt::Display for LogError {
             Self::QsoOutsideCertificate { index } => write!(
                 f,
                 "QSO {} is dated outside the certificate's QSO dates",
+                index + 1
+            ),
+            Self::QsoFromAnotherStation {
+                index,
+                field,
+                value,
+            } => write!(
+                f,
+                "QSO {} gives {field} {value:?}, which is not this station location's",
                 index + 1
             ),
             Self::Empty => write!(f, "the log has no QSOs"),
@@ -104,8 +121,20 @@ pub fn sign_log(
         return Err(LogError::Empty);
     }
     let (first, last) = cert.qso_dates();
-    if let Some(index) = qsos.iter().position(|q| q.date < first || q.date > last) {
+    if let Some(index) = qsos
+        .iter()
+        .position(|q| q.date() < first || q.date() > last)
+    {
         return Err(LogError::QsoOutsideCertificate { index });
+    }
+    for (index, q) in qsos.iter().enumerate() {
+        if let Some((field, value)) = q.station().find(|(f, v)| station.contradicts(f, v)) {
+            return Err(LogError::QsoFromAnotherStation {
+                index,
+                field,
+                value: value.to_string(),
+            });
+        }
     }
 
     let (major, minor) = lotw::CONFIG_VERSION;
@@ -139,17 +168,17 @@ pub fn sign_log(
             .map_err(|_| LogError::Signing)?;
         let signature = tqsl_base64(&signature);
         out.push_str("<Rec_Type:8>tCONTACT\n<STATION_UID:1>1\n");
-        let date = q.date.to_string();
-        let time = q.time.to_string();
+        let date = q.date().to_string();
+        let time = q.time().to_string();
         let fields = [
-            ("CALL", Some(q.call.as_str())),
-            ("BAND", Some(q.band)),
-            ("MODE", Some(q.mode)),
-            ("FREQ", q.freq.as_deref()),
-            ("FREQ_RX", q.freq_rx.as_deref()),
-            ("PROP_MODE", q.prop_mode.as_deref()),
-            ("SAT_NAME", q.sat_name.as_deref()),
-            ("BAND_RX", q.band_rx),
+            ("CALL", Some(q.call())),
+            ("BAND", Some(q.band())),
+            ("MODE", Some(q.mode())),
+            ("FREQ", q.freq()),
+            ("FREQ_RX", q.freq_rx()),
+            ("PROP_MODE", q.prop_mode()),
+            ("SAT_NAME", q.sat_name()),
+            ("BAND_RX", q.band_rx()),
             ("QSO_DATE", Some(date.as_str())),
             ("QSO_TIME", Some(time.as_str())),
         ];

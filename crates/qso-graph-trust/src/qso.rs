@@ -4,18 +4,26 @@
 //! A QSO as LoTW receives it, from an ADIF record: the call in capitals, LoTW's band and mode,
 //! the frequency only if it is in that band, and the date and time in LoTW's form. A QSO LoTW
 //! would refuse is refused here, saying which field and why.
+//!
+//! A QSO's record may also say which station made it (`STATION_CALLSIGN`, `MY_DXCC`,
+//! `MY_GRIDSQUARE` and the rest). Those are kept, and a log is signed only if they agree with the
+//! station location it is signed for (`signed_log`). A [`Qso`] is made only by
+//! [`Qso::from_adif`], so every one has been checked.
 
 use std::fmt;
 
 use crate::lotw;
 use crate::records::Record;
 
-/// A calendar date.
+/// The longest frequency accepted, in characters: far more than any real one's digits.
+pub const MAX_FREQ_LEN: usize = 16;
+
+/// A calendar date, a real one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Date {
-    pub year: u16,
-    pub month: u8,
-    pub day: u8,
+    year: u16,
+    month: u8,
+    day: u8,
 }
 
 impl Date {
@@ -49,6 +57,18 @@ impl Date {
         };
         (year >= 1900 && (1..=days).contains(&day)).then_some(Self { year, month, day })
     }
+
+    pub fn year(&self) -> u16 {
+        self.year
+    }
+
+    pub fn month(&self) -> u8 {
+        self.month
+    }
+
+    pub fn day(&self) -> u8 {
+        self.day
+    }
 }
 
 impl fmt::Display for Date {
@@ -57,12 +77,12 @@ impl fmt::Display for Date {
     }
 }
 
-/// A time of day, UTC.
+/// A time of day, UTC, a real one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Time {
-    pub hour: u8,
-    pub minute: u8,
-    pub second: u8,
+    hour: u8,
+    minute: u8,
+    second: u8,
 }
 
 impl Time {
@@ -88,20 +108,35 @@ impl fmt::Display for Time {
     }
 }
 
-/// One QSO, every field as LoTW receives it.
+/// One QSO, every field as LoTW receives it, checked. Its fields are read through its methods
+/// and never changed, so what is signed is what was checked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Qso {
-    pub call: String,
-    pub band: &'static str,
-    pub mode: &'static str,
-    pub freq: Option<String>,
-    pub band_rx: Option<&'static str>,
-    pub freq_rx: Option<String>,
-    pub prop_mode: Option<String>,
-    pub sat_name: Option<String>,
-    pub date: Date,
-    pub time: Time,
+    call: String,
+    band: &'static str,
+    mode: &'static str,
+    freq: Option<String>,
+    band_rx: Option<&'static str>,
+    freq_rx: Option<String>,
+    prop_mode: Option<String>,
+    sat_name: Option<String>,
+    date: Date,
+    time: Time,
+    station: Vec<(&'static str, String)>,
 }
+
+/// The ADIF fields that say which station made a QSO, each checked against the station location
+/// before the QSO is signed.
+pub const STATION_FIELDS: [&str; 8] = [
+    "STATION_CALLSIGN",
+    "MY_DXCC",
+    "MY_GRIDSQUARE",
+    "MY_STATE",
+    "MY_CNTY",
+    "MY_CQ_ZONE",
+    "MY_ITU_ZONE",
+    "MY_IOTA",
+];
 
 /// Why a QSO cannot be signed. QSO fields are log data, not secrets, so the value is named.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -135,7 +170,15 @@ impl fmt::Display for QsoError {
 impl std::error::Error for QsoError {}
 
 /// The ADIF fields read, so a repeat of any of them is refused.
-const READ: [&str; 11] = [
+const READ: [&str; 19] = [
+    "STATION_CALLSIGN",
+    "MY_DXCC",
+    "MY_GRIDSQUARE",
+    "MY_STATE",
+    "MY_CNTY",
+    "MY_CQ_ZONE",
+    "MY_ITU_ZONE",
+    "MY_IOTA",
     "CALL",
     "QSO_DATE",
     "TIME_ON",
@@ -185,9 +228,9 @@ impl Qso {
         let time = required("TIME_ON")?;
         let time = Time::from_adif(&time).ok_or_else(|| invalid("TIME_ON", &time))?;
 
-        let (band, freq) = band_and_freq(text("BAND")?, text("FREQ")?, "BAND")?
+        let (band, freq) = band_and_freq(text("BAND")?, text("FREQ")?, ("BAND", "FREQ"))?
             .ok_or(QsoError::Missing("BAND"))?;
-        let rx = band_and_freq(text("BAND_RX")?, text("FREQ_RX")?, "BAND_RX")?;
+        let rx = band_and_freq(text("BAND_RX")?, text("FREQ_RX")?, ("BAND_RX", "FREQ_RX"))?;
         let (band_rx, freq_rx) = rx.map_or((None, None), |(b, f)| (Some(b), f));
 
         let mode = required("MODE")?;
@@ -216,6 +259,24 @@ impl Qso {
             _ => {}
         }
 
+        let mut station = Vec::new();
+        for name in STATION_FIELDS {
+            let Some(v) = text(name)? else { continue };
+            let ok = match name {
+                "STATION_CALLSIGN" => is_callsign(&v),
+                "MY_DXCC" | "MY_CQ_ZONE" | "MY_ITU_ZONE" => {
+                    v.len() <= 4 && v.parse::<u32>().is_ok()
+                }
+                "MY_GRIDSQUARE" => crate::station::is_grid(&v),
+                // Text compared with the location's own, which is never longer than this.
+                _ => v.chars().count() <= 64,
+            };
+            if !ok {
+                return Err(invalid(name, &v));
+            }
+            station.push((name, v));
+        }
+
         Ok(Self {
             call,
             band,
@@ -227,7 +288,54 @@ impl Qso {
             sat_name,
             date,
             time,
+            station,
         })
+    }
+
+    pub fn call(&self) -> &str {
+        &self.call
+    }
+
+    pub fn band(&self) -> &'static str {
+        self.band
+    }
+
+    pub fn mode(&self) -> &'static str {
+        self.mode
+    }
+
+    pub fn freq(&self) -> Option<&str> {
+        self.freq.as_deref()
+    }
+
+    pub fn band_rx(&self) -> Option<&'static str> {
+        self.band_rx
+    }
+
+    pub fn freq_rx(&self) -> Option<&str> {
+        self.freq_rx.as_deref()
+    }
+
+    pub fn prop_mode(&self) -> Option<&str> {
+        self.prop_mode.as_deref()
+    }
+
+    pub fn sat_name(&self) -> Option<&str> {
+        self.sat_name.as_deref()
+    }
+
+    pub fn date(&self) -> Date {
+        self.date
+    }
+
+    pub fn time(&self) -> Time {
+        self.time
+    }
+
+    /// What the QSO's record says about the station that made it: ADIF field names, from
+    /// [`STATION_FIELDS`], and their values in capitals.
+    pub fn station(&self) -> impl Iterator<Item = (&'static str, &str)> {
+        self.station.iter().map(|(n, v)| (*n, v.as_str()))
     }
 
     /// The fields the signature covers, in the signature specification's order, as one string in
@@ -271,9 +379,15 @@ fn invalid(field: &'static str, value: &str) -> QsoError {
 fn band_and_freq(
     band: Option<String>,
     freq: Option<String>,
-    field: &'static str,
+    (field, freq_field): (&'static str, &'static str),
 ) -> Result<Option<(&'static str, Option<String>)>, QsoError> {
-    let mhz = freq.as_deref().and_then(adif_number).filter(|&f| f > 0.0);
+    if let Some(f) = freq.as_deref().filter(|f| f.len() > MAX_FREQ_LEN) {
+        return Err(invalid(freq_field, f));
+    }
+    let mhz = freq
+        .as_deref()
+        .and_then(adif_number)
+        .filter(|&f| f.is_finite() && f > 0.0);
     let freq = freq.filter(|_| mhz.is_some());
     let band = match (band, mhz) {
         (Some(b), _) => lotw::band(&b).ok_or_else(|| invalid(field, &b))?,
@@ -398,6 +512,58 @@ mod tests {
         assert_eq!(
             qso(&format!("{BASE}<BAND:2>2m<MODE:2>FM<SAT_NAME:5>SO-50<EOR>")),
             Err(QsoError::SatelliteWithoutSat)
+        );
+    }
+
+    #[test]
+    fn a_frequency_too_long_to_be_one_is_refused() {
+        let long = format!("14.{}", "0".repeat(MAX_FREQ_LEN));
+        let adif = format!(
+            "{BASE}<BAND:5>SUBMM<FREQ:{}>{long}<MODE:2>CW<EOR>",
+            long.len()
+        );
+        assert!(matches!(
+            qso(&adif),
+            Err(QsoError::Invalid { field: "FREQ", .. })
+        ));
+        // A number too large for a float is not a frequency, so it is left out, never kept.
+        let q = qso(&format!("{BASE}<BAND:5>SUBMM<FREQ:6>1e9999<MODE:2>CW<EOR>")).expect("qso");
+        assert_eq!(q.freq(), None);
+    }
+
+    #[test]
+    fn what_the_record_says_about_its_station_is_kept_and_checked() {
+        let q = qso(&format!(
+            "{BASE}<BAND:3>20m<MODE:2>CW<STATION_CALLSIGN:7>qg0test<MY_DXCC:3>291<MY_GRIDSQUARE:6>EM17ab<EOR>"
+        ))
+        .expect("qso");
+        let station: Vec<_> = q.station().collect();
+        assert_eq!(
+            station,
+            [
+                ("STATION_CALLSIGN", "QG0TEST"),
+                ("MY_DXCC", "291"),
+                ("MY_GRIDSQUARE", "EM17AB")
+            ]
+        );
+        for bad in [
+            "<MY_DXCC:3>abc",
+            "<MY_GRIDSQUARE:4>ZZ99",
+            "<STATION_CALLSIGN:3>Q*Q",
+        ] {
+            assert!(
+                matches!(
+                    qso(&format!("{BASE}<BAND:3>20m<MODE:2>CW{bad}<EOR>")),
+                    Err(QsoError::Invalid { .. })
+                ),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            qso(&format!(
+                "{BASE}<BAND:3>20m<MODE:2>CW<MY_DXCC:3>291<MY_DXCC:1>1<EOR>"
+            )),
+            Err(QsoError::Repeated("MY_DXCC"))
         );
     }
 
