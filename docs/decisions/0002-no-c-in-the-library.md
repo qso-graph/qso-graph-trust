@@ -13,13 +13,11 @@ every platform:
 - no crate in it declares a native link (`links`);
 - no crate in it depends on a crate whose job is building native code (`cc`, `cmake`, `bindgen` and
   the like);
-- every crate in it from outside the workspace comes from crates.io, where a published version can
-  never change, and is on a reviewed list by **exact name and version**. Reading it is the review:
-  no `#[link]` or `extern` block, no assembly, and a build script or procedural macro, if any, that
-  compiles nothing. A build script can run a compiler, and an `extern` block can link a library,
-  without declaring `links`, so no metadata check can stand in for reading. A new version is a new
-  review. The list is empty today;
-- every build script or procedural macro in it, a workspace crate's included, is on that list;
+- every crate in it from outside the workspace comes from crates.io and is reviewed by exact name
+  and version, through cargo-vet (decision 0004). A build script can run a compiler, and an
+  `extern` block can link a library, without declaring `links`, so no metadata check can stand in
+  for that review;
+- every build script or procedural macro of our own crates is on `xtask`'s reviewed list (empty);
 - every crate in it keeps its sources inside its own directory, compared after resolving `..` and
   links, and holds no symbolic links;
 - as a second line, every file of every crate in it is searched: a `#[link]`, `#[link_name]` or
@@ -55,7 +53,11 @@ tokens, whatever its `cfg`: the identifiers `unsafe`, `include`, `asm`, `global_
 (raw identifiers and import aliases included), `path =` anywhere in an attribute, and an attribute
 named by a macro variable fail the check. **The workspace's crates define no macros**: no
 `macro_rules!` and no procedural-macro crate, because a macro can assemble code from pieces no scan
-sees whole (review found five such constructions before this rule replaced chasing them). Nor do
+sees whole (review found five such constructions before this rule replaced chasing them). The
+cost, named so the rule is not relaxed quietly later (Watson's review): tables of OIDs and fields,
+per-record test cases and error enums, where a signing library would usually use `macro_rules!`,
+are written out longhand. The canary already catches a macro that expands to `unsafe` in any
+build that compiles it; this rule adds coverage for macros behind a `cfg` no build compiles. Nor do
 they have shebangs: a file beginning `#!` must begin `#![`, because Rust's rules for telling a
 shebang from an attribute (Unicode whitespace, comments, doc comments) were misread twice. So that nothing compiles from a file the scan does not
 read, every crate root is a `.rs` file and a crate's directory holds only `.rs`, `.toml` and `.md`
@@ -92,8 +94,21 @@ key. The key, the signing and the parsers of files from outside are where memory
 
 ## What the check allows
 
-Calling the operating system's own interfaces (Keychain, Windows Credential Manager, the Secret
-Service over D-Bus) is not a C library linked by QGT. If a crate that reaches them declares a native
-link, it is exempted by its exact name in `xtask/src/lib.rs`, with a line here saying why.
+Decided by KI7MT, 2026-11-03, after Watson's review measured that phase 2's first dependencies
+(`rsa`, `sha1`) would otherwise fail it 181 times, none of them C:
 
-Exemptions today: none.
+- **Bindings to the operating system, as a named category** (`OS_BINDINGS` in
+  `xtask/src/lib.rs`): crates that only declare the OS's own interfaces, the C library, the
+  Windows API and its import libraries, Apple's frameworks and the OS's random-number source
+  (`libc`, `windows-sys` and `windows-targets` with its import-library crates,
+  `core-foundation-sys`, `security-framework-sys`, `getrandom`). Every program calls the OS this
+  way; these crates compile and ship no C, C++ or assembly. They are still reviewed by exact
+  version, through cargo-vet.
+- **Rust's own `asm!` in a reviewed outside crate.** It is written in Rust and compiled by rustc,
+  not a C toolchain; `zeroize`'s empty barrier, which keeps a key's wiping from being optimized
+  away, is one. In our own crates it stays refused.
+- **Only the platforms QGT ships** (`SHIPPING_TARGETS`: Windows, macOS and Linux, x86-64 and
+  ARM64): the check reads each one's dependency tree, not code for platforms QGT never builds.
+
+Still forbidden: C, C++ or assembly source a crate compiles or ships, a crate whose job is
+building native code, and a native link to anything but the operating system.

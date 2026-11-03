@@ -26,15 +26,17 @@ use std::process::Command;
 pub const PROTECTED: &[&str] = &["qso-graph-trust"];
 
 /// The crates QGT ships. Every crate they take from outside the workspace is
-/// reviewed by exact name and version, because one could hand them a macro that
-/// writes unsafe code into our own source (found by Codex review: `paste!` can
-/// build the keyword from pieces). The no-C rules are the library's alone: `qgt`
-/// carries the TLS stack, which is C (docs/decisions/0002).
+/// reviewed by exact name and version through cargo-vet, because one could hand
+/// them a macro that writes unsafe code into our own source (found by Codex
+/// review: `paste!` can build the keyword from pieces). The no-C rules are the
+/// library's alone: `qgt` carries the TLS stack, which is C (docs/decisions/0002).
 pub const SHIPPED: &[&str] = &["qso-graph-trust", "qgt"];
 
-/// Every crate from outside the workspace that a shipped crate needs to build and
-/// run (normal and build dependencies), not from crates.io or not reviewed by
-/// exact name and version. Sorted; empty means the check passes.
+/// Where a shipped crate's dependencies come from, for what this workspace builds
+/// and what a consumer of the published crates builds: crates.io only, no
+/// dependency named by both a path and a version except our own shipped crates,
+/// no other registry, and no unreviewed build script or procedural macro in our
+/// own crates. Reviewing outside crates is cargo-vet's. Sorted; empty passes.
 pub fn unreviewed_in(meta: &Value, shipped: &[&str]) -> Vec<String> {
     unreviewed_reviewing(meta, shipped, REVIEWED)
 }
@@ -102,13 +104,10 @@ fn unreviewed_reviewing(
                 ));
             }
         }
-        if !workspace.contains(id) {
-            if pkg.and_then(|p| p["source"].as_str()) != Some(CRATES_IO) {
-                problems.push(format!("{name} {version} is not a crates.io crate"));
-            }
-            if !is_reviewed {
-                problems.push(format!("{name} {version} has not been reviewed"));
-            }
+        // Outside crates come from crates.io; reviewing them is cargo-vet's,
+        // which CI runs beside this.
+        if !workspace.contains(id) && pkg.and_then(|p| p["source"].as_str()) != Some(CRATES_IO) {
+            problems.push(format!("{name} {version} is not a crates.io crate"));
         }
         // A build script or procedural macro anywhere a shipped crate reaches, our
         // own included, is reviewed too: a build script can compile a hidden crate
@@ -120,7 +119,7 @@ fn unreviewed_reviewing(
                 ("custom-build", "a build script"),
                 ("proc-macro", "a procedural macro"),
             ] {
-                if kinds.iter().any(|k| k == kind) && !is_reviewed {
+                if kinds.iter().any(|k| k == kind) && workspace.contains(id) && !is_reviewed {
                     problems.push(format!(
                         "{name} {version} has {what} that has not been reviewed"
                     ));
@@ -159,59 +158,83 @@ const NATIVE_BUILD: &[&str] = &[
     "vcpkg",
 ];
 
-/// Native links allowed in the protected tree, each by exact crate name with its
-/// reason. None today; any added here is a decision recorded in docs/decisions,
-/// never a pattern or a prefix.
-const EXEMPT: &[(&str, &str)] = &[];
+/// Crates that only bind the operating system's own interfaces: the C library,
+/// the Windows API and its import libraries, Apple's frameworks, and the OS's
+/// random-number source. They declare foreign functions and, for Windows, ship
+/// import libraries, because that is how any program calls the OS; they compile
+/// and ship no C, C++ or assembly. A named category, decided by KI7MT
+/// (2026-11-03, after Watson's review): allowed, and reviewed by exact version
+/// through cargo-vet like every outside crate (docs/decisions/0002).
+pub const OS_BINDINGS: &[&str] = &[
+    "core-foundation-sys",
+    "getrandom",
+    "libc",
+    "security-framework-sys",
+    "windows-link",
+    "windows-sys",
+    "windows-targets",
+    "windows_aarch64_gnullvm",
+    "windows_aarch64_msvc",
+    "windows_i686_gnu",
+    "windows_i686_gnullvm",
+    "windows_i686_msvc",
+    "windows_x86_64_gnu",
+    "windows_x86_64_gnullvm",
+    "windows_x86_64_msvc",
+];
 
-/// Crates from outside the workspace allowed in the protected tree, each by exact
-/// name and version from crates.io (where a published version can never change),
-/// read and found to bring no native code: no `#[link]` or `extern` block, no
-/// assembly, and a build script or procedural macro, if it has one, that compiles
-/// nothing. A new version is a new entry, because it is new code (found by Codex
-/// review: a build script can run a compiler, and an `extern` block can link a
-/// library, without declaring `links`).
+/// The platforms QGT ships for. The no-C check reads each one's dependency tree,
+/// and no other: code for platforms QGT never builds is not shipped.
+pub const SHIPPING_TARGETS: &[&str] = &[
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+];
+
+/// Build scripts and procedural macros of the workspace's own crates, each by
+/// name and version, read and found to compile nothing. None today. Outside
+/// crates are reviewed through cargo-vet instead.
 const REVIEWED: &[(&str, &str, &str)] = &[];
 
-/// The one registry a reviewed crate may come from.
+/// The one registry an outside crate may come from.
 const CRATES_IO: &str = "registry+https://github.com/rust-lang/crates.io-index";
 
-/// Rust that links native code or holds assembly, as it reads with whitespace
-/// removed. A match in a comment fails too: the check fails closed, and the crate
-/// is then read and exempted by name.
-const NATIVE_RUST: &[(&str, &str)] = &[
-    ("#[link(", "has a #[link] attribute"),
-    ("#[link_name", "has a #[link_name] attribute"),
-    ("#[link_section", "has a #[link_section] attribute"),
-    ("unsafeextern", "declares foreign functions"),
-    ("extern\"C\"{", "declares foreign functions"),
-    ("extern\"system\"{", "declares foreign functions"),
-    ("asm!(", "holds inline assembly"),
-    ("global_asm!(", "holds assembly"),
-    ("naked_asm!(", "holds assembly"),
+/// Native source and object code, by file extension: refused in every crate.
+const NATIVE_SOURCE: &[&str] = &[
+    "asm", "c", "cc", "cpp", "cxx", "dll", "dylib", "h", "hpp", "o", "obj", "s", "so",
 ];
 
-/// Native source, assembly and object code, by file extension.
-const NATIVE_FILES: &[&str] = &[
-    "a", "asm", "c", "cc", "cpp", "cxx", "dll", "dylib", "h", "hpp", "lib", "o", "obj", "s", "so",
-];
+/// Import libraries, which only an OS-binding crate may carry.
+const IMPORT_LIBRARIES: &[&str] = &["a", "lib"];
 
 /// `cargo metadata` for every platform and every feature, of the workspace at
 /// `manifest`, from its committed lockfile: a native dependency behind a feature
 /// nobody enables by default is still one a user can switch on (found by Codex
 /// review).
 pub fn metadata(manifest: &Path) -> Result<Value, String> {
+    metadata_for(manifest, None)
+}
+
+/// [`metadata`], limited to one target platform's dependency tree when given.
+pub fn metadata_for(manifest: &Path, target: Option<&str>) -> Result<Value, String> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-    let out = Command::new(cargo)
-        .args([
-            "metadata",
-            "--format-version",
-            "1",
-            "--all-features",
-            "--locked",
-            "--manifest-path",
-        ])
-        .arg(manifest)
+    let mut command = Command::new(cargo);
+    command.args([
+        "metadata",
+        "--format-version",
+        "1",
+        "--all-features",
+        "--locked",
+        "--manifest-path",
+    ]);
+    command.arg(manifest);
+    if let Some(target) = target {
+        command.args(["--filter-platform", target]);
+    }
+    let out = command
         .output()
         .map_err(|e| format!("cannot run cargo metadata: {e}"))?;
     if !out.status.success() {
@@ -223,8 +246,8 @@ pub fn metadata(manifest: &Path) -> Result<Value, String> {
     serde_json::from_slice(&out.stdout).map_err(|e| format!("cargo metadata is not JSON: {e}"))
 }
 
-fn exempt(name: &str) -> bool {
-    EXEMPT.iter().any(|(n, _)| *n == name)
+fn os_binding(name: &str) -> bool {
+    OS_BINDINGS.contains(&name)
 }
 
 fn members(meta: &Value) -> BTreeSet<&str> {
@@ -302,17 +325,12 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
         let (name, version) = (field(id, "name"), field(id, "version"));
         let pkg = packages.get(id);
         if let Some(links) = pkg.and_then(|p| p["links"].as_str())
-            && !exempt(&name)
+            && !os_binding(&name)
         {
             problems.push(format!("{name} links the native library {links}"));
         }
-        if !workspace.contains(id) {
-            if pkg.and_then(|p| p["source"].as_str()) != Some(CRATES_IO) {
-                problems.push(format!("{name} {version} is not a crates.io crate"));
-            }
-            if !reviewed(&name, &version) {
-                problems.push(format!("{name} {version} has not been reviewed"));
-            }
+        if !workspace.contains(id) && pkg.and_then(|p| p["source"].as_str()) != Some(CRATES_IO) {
+            problems.push(format!("{name} {version} is not a crates.io crate"));
         }
         if let Some(dir) = pkg
             .and_then(|p| p["manifest_path"].as_str())
@@ -332,10 +350,16 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
                     ));
                 }
             }
-            if !exempt(&name) {
-                for found in native_in(dir, &output_dir) {
-                    problems.push(format!("{name} {version}: {found}"));
+            // Rust's own `asm!` is allowed in a reviewed outside crate (KI7MT,
+            // 2026-11-03): zeroize's empty barrier, which keeps a key's wiping from
+            // being optimized away, is one. In our own crates it stays refused, by
+            // the compiler and by the token scan.
+            let outside = !workspace.contains(id);
+            for found in native_in(dir, &output_dir, os_binding(&name)) {
+                if outside && found.ends_with(" holds assembly") {
+                    continue;
                 }
+                problems.push(format!("{name} {version}: {found}"));
             }
         }
         for target in pkg.and_then(|p| p["targets"].as_array()).unwrap_or(&empty) {
@@ -344,7 +368,12 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
                 ("custom-build", "a build script"),
                 ("proc-macro", "a procedural macro"),
             ] {
-                if kinds.iter().any(|k| k == kind) && !reviewed(&name, &version) {
+                // Our own crates' only: outside crates' are reviewed with the rest
+                // of them, through cargo-vet.
+                if kinds.iter().any(|k| k == kind)
+                    && workspace.contains(id)
+                    && !reviewed(&name, &version)
+                {
                     problems.push(format!(
                         "{name} {version} has {what} that has not been reviewed"
                     ));
@@ -367,7 +396,7 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
                 continue;
             };
             let dep_name = field(dep_id, "name");
-            if NATIVE_BUILD.contains(&dep_name.as_str()) && !exempt(&name) {
+            if NATIVE_BUILD.contains(&dep_name.as_str()) {
                 problems.push(format!("{name} builds native code through {dep_name}"));
             }
             queue.push_back(dep_id);
@@ -376,6 +405,56 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
     problems.sort();
     problems.dedup();
     problems
+}
+
+/// What in a token stream links native code or holds assembly: a foreign block
+/// (`extern "ABI" { ... }`, `extern { ... }`), a `#[link]`, `#[link_name]` or
+/// `#[link_section]` attribute, and the assembly macros. A function with a foreign
+/// ABI (`extern "C" fn`) is not a binding, and words in strings never count.
+pub fn native_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
+    use proc_macro2::{Delimiter, TokenTree};
+    let trees: Vec<TokenTree> = tokens.into_iter().collect();
+    let mut found = Vec::new();
+    for (i, tree) in trees.iter().enumerate() {
+        match tree {
+            TokenTree::Ident(id) => {
+                let name = id.to_string();
+                let name = name.strip_prefix("r#").unwrap_or(&name);
+                let next = trees.get(i + 1);
+                let after = trees.get(i + 2);
+                let brace = |t: Option<&TokenTree>| matches!(t, Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace);
+                // `extern "Rust" { ... }` declares Rust functions, not native ones
+                // (found by measuring: zerocopy has one).
+                let rust_abi =
+                    matches!(next, Some(TokenTree::Literal(l)) if l.to_string() == "\"Rust\"");
+                if name == "extern"
+                    && !rust_abi
+                    && (brace(next) || matches!(next, Some(TokenTree::Literal(_))) && brace(after))
+                {
+                    found.push("declares foreign functions");
+                }
+                let bang = matches!(next, Some(TokenTree::Punct(p)) if p.as_char() == '!');
+                if bang && matches!(name, "asm" | "global_asm" | "naked_asm") {
+                    found.push("holds assembly");
+                }
+            }
+            TokenTree::Group(g) => {
+                let after_hash = i > 0
+                    && matches!(&trees[i - 1], TokenTree::Punct(p) if p.as_char() == '#' || p.as_char() == '!');
+                let first = g.stream().into_iter().next();
+                if after_hash
+                    && g.delimiter() == Delimiter::Bracket
+                    && matches!(&first, Some(TokenTree::Ident(id))
+                        if matches!(id.to_string().as_str(), "link" | "link_name" | "link_section"))
+                {
+                    found.push("has a #[link] attribute");
+                }
+                found.extend(native_tokens(g.stream()));
+            }
+            _ => {}
+        }
+    }
+    found
 }
 
 /// Whether `path` is inside `dir`, both resolved by the file system (`..` and
@@ -392,7 +471,7 @@ fn within(path: &Path, dir: &Path) -> bool {
 /// path relative to the crate and '/'-separated. A directory it cannot read is a
 /// finding, never a pass. Symbolic links are not followed, since one could point
 /// anywhere, and are findings themselves: a crate from crates.io never has one.
-fn native_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
+fn native_in(dir: &Path, skip: &[PathBuf], os_binding: bool) -> Vec<String> {
     let mut found = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
@@ -440,24 +519,28 @@ fn native_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
                 }
                 continue;
             }
-            let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase());
-            if let Some(ext) = &ext
-                && NATIVE_FILES.contains(&ext.as_str())
-            {
+            let ext = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            // Native source anywhere; import libraries only in an OS binding.
+            let native = NATIVE_SOURCE.contains(&ext.as_str())
+                || IMPORT_LIBRARIES.contains(&ext.as_str()) && !os_binding;
+            if native {
                 found.push(format!("{rel} is native code"));
-            } else if ext.as_deref() == Some("rs") {
-                let compact: String = std::fs::read_to_string(&path)
-                    .unwrap_or_else(|_| "unreadable".to_string())
-                    .chars()
-                    .filter(|c| !c.is_whitespace())
-                    .collect();
-                if compact == "unreadable" {
-                    found.push(format!("{rel} cannot be read"));
-                }
-                for (pattern, what) in NATIVE_RUST {
-                    if compact.contains(pattern) {
-                        found.push(format!("{rel} {what}"));
-                    }
+            } else if ext == "rs" && !os_binding {
+                // Read as Rust tokens, not text: syn's parser naming `extern "C"`
+                // in a string is not a binding (found by Watson's review).
+                match std::fs::read_to_string(&path) {
+                    Ok(text) => match text.parse::<proc_macro2::TokenStream>() {
+                        Ok(tokens) => {
+                            for what in native_tokens(tokens) {
+                                found.push(format!("{rel} {what}"));
+                            }
+                        }
+                        Err(e) => found.push(format!("{rel} does not tokenize as Rust: {e}")),
+                    },
+                    Err(e) => found.push(format!("{rel} cannot be read as UTF-8 text: {e}")),
                 }
             }
         }
@@ -1553,39 +1636,36 @@ mod tests {
 
     #[test]
     fn a_build_script_or_proc_macro_must_be_reviewed_by_name_and_version() {
-        // Unreviewed, a crate with a build script fails twice: as an outside crate and for the script.
+        // Our own crate's build script or procedural macro is on our reviewed list;
+        // an outside crate's is reviewed with the rest of it, through cargo-vet.
         let mut g = graph(json!("dev"));
-        g["packages"][1]["targets"] = json!([{"kind": ["lib"]}, {"kind": ["custom-build"]}]);
+        g["packages"][0]["targets"] = json!([{"kind": ["lib"]}, {"kind": ["custom-build"]}]);
         assert_eq!(
             no_c(&g, PROTECTED),
-            vec![
-                "middle 1.0.0 has a build script that has not been reviewed",
-                "middle 1.0.0 has not been reviewed",
-            ]
+            vec!["qso-graph-trust 0.1.0 has a build script that has not been reviewed"]
         );
-        g["packages"][1]["targets"] = json!([{"kind": ["proc-macro"]}]);
+        g["packages"][0]["targets"] = json!([{"kind": ["proc-macro"]}]);
         assert_eq!(
             no_c(&g, PROTECTED),
-            vec![
-                "middle 1.0.0 has a procedural macro that has not been reviewed",
-                "middle 1.0.0 has not been reviewed",
-            ]
+            vec!["qso-graph-trust 0.1.0 has a procedural macro that has not been reviewed"]
         );
-        // Reviewed, it passes: the review covers the script.
-        assert!(check(&g, PROTECTED).is_empty());
+        let mut h = graph(json!("dev"));
+        h["packages"][1]["targets"] = json!([{"kind": ["lib"]}, {"kind": ["custom-build"]}]);
+        assert!(no_c(&h, PROTECTED).is_empty());
     }
 
     #[test]
     fn every_outside_crate_a_shipped_crate_needs_is_reviewed() {
-        // A dependency of the command line, not the library, is reviewed too: it
-        // could hand qgt a macro that writes unsafe code (Codex review, round 19).
+        // A dependency of the command line, not the library, is held to the same
+        // sources: crates.io, reviewed through cargo-vet (Codex review, round 19).
         let mut g = graph(json!("dev"));
         g["packages"][0]["name"] = json!("qgt");
+        assert!(unreviewed_in(&g, &["qgt"]).is_empty());
+        g["packages"][1]["source"] = json!("git+https://example.invalid/middle");
         assert_eq!(
             unreviewed_in(&g, &["qgt"]),
-            vec!["middle 1.0.0 has not been reviewed"]
+            vec!["middle 1.0.0 is not a crates.io crate"]
         );
-        assert!(unreviewed_reviewing(&g, &["qgt"], TEST_REVIEWED).is_empty());
         assert_eq!(
             unreviewed_in(&g, &["gone"]),
             vec!["shipped crate gone is not a workspace member"]
@@ -1610,9 +1690,11 @@ mod tests {
             "{found:?}"
         );
         // The shipped crate's own build script is reviewed too (Codex review, round 25).
-        g["packages"][0]["targets"] = json!([{"kind": ["bin"]}, {"kind": ["custom-build"]}]);
+        let mut k = graph(json!("dev"));
+        k["packages"][0]["name"] = json!("qgt");
+        k["packages"][0]["targets"] = json!([{"kind": ["bin"]}, {"kind": ["custom-build"]}]);
         assert!(
-            unreviewed_reviewing(&g, &["qgt"], TEST_REVIEWED)
+            unreviewed_reviewing(&k, &["qgt"], TEST_REVIEWED)
                 .contains(&"qgt 0.1.0 has a build script that has not been reviewed".to_string())
         );
     }
@@ -1662,22 +1744,53 @@ mod tests {
 
     #[test]
     fn an_outside_crate_must_be_from_crates_io_and_reviewed() {
+        // From crates.io: the check passes, and cargo-vet reviews it.
         let mut g = graph(json!("dev"));
-        assert_eq!(
-            no_c(&g, PROTECTED),
-            vec!["middle 1.0.0 has not been reviewed"]
-        );
+        assert!(no_c(&g, PROTECTED).is_empty());
         g["packages"][1]["source"] = json!("git+https://example.invalid/middle");
         assert_eq!(
             check(&g, PROTECTED),
             vec!["middle 1.0.0 is not a crates.io crate"]
         );
-        // A reviewed name at another version is new code, so not reviewed.
-        g["packages"][1]["source"] = json!(CRATES_IO);
-        g["packages"][1]["version"] = json!("1.0.1");
+    }
+
+    #[test]
+    fn only_os_bindings_may_link_or_declare_foreign_functions() {
+        let mut g = graph(json!("dev"));
+        g["packages"][1]["name"] = json!("libc");
+        g["packages"][1]["links"] = json!("c");
+        assert!(no_c(&g, PROTECTED).is_empty());
+        g["packages"][1]["name"] = json!("not-an-os-binding");
         assert_eq!(
-            check(&g, PROTECTED),
-            vec!["middle 1.0.1 has not been reviewed"]
+            no_c(&g, PROTECTED),
+            vec!["not-an-os-binding links the native library c"]
+        );
+    }
+
+    #[test]
+    fn foreign_blocks_and_assembly_are_found_as_tokens() {
+        let scan = |s: &str| native_tokens(s.parse().expect("tokens"));
+        assert_eq!(
+            scan("extern \"C\" { fn f(); }"),
+            vec!["declares foreign functions"]
+        );
+        assert_eq!(
+            scan("unsafe extern { fn f(); }"),
+            vec!["declares foreign functions"]
+        );
+        assert_eq!(
+            scan("#[link(name = \"z\")] extern {}"),
+            vec!["has a #[link] attribute", "declares foreign functions"]
+        );
+        assert_eq!(
+            scan("core::arch::global_asm! { \"nop\" }"),
+            vec!["holds assembly"]
+        );
+        // Rust calling Rust is not a native binding.
+        assert!(scan("extern \"Rust\" { fn f(); }").is_empty());
+        // A foreign ABI on a function we define, and words in strings, are not bindings.
+        assert!(
+            scan("pub extern \"C\" fn f() {} const S: &str = \"extern \\\"C\\\" {\";").is_empty()
         );
     }
 

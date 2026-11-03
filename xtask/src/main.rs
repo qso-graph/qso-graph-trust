@@ -40,9 +40,9 @@ fn main() -> ExitCode {
     };
     let mut failed = false;
     for (check, problems) in [
-        ("no C in the library", xtask::no_c(&meta, xtask::PROTECTED)),
+        ("no C in the library", no_c_on_shipping_targets(&root)),
         (
-            "reviewed dependencies",
+            "dependency sources",
             xtask::unreviewed_in(&meta, xtask::SHIPPED),
         ),
         ("no unsafe code", xtask::no_unsafe(&meta)),
@@ -63,4 +63,21 @@ fn main() -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// The no-C check once per platform QGT ships for, each on that platform's own
+/// dependency tree.
+fn no_c_on_shipping_targets(root: &std::path::Path) -> Vec<String> {
+    let mut problems = Vec::new();
+    for target in xtask::SHIPPING_TARGETS {
+        match xtask::metadata_for(root, Some(target)) {
+            Ok(meta) => problems.extend(
+                xtask::no_c(&meta, xtask::PROTECTED)
+                    .into_iter()
+                    .map(|p| format!("{target}: {p}")),
+            ),
+            Err(e) => problems.push(format!("{target}: {e}")),
+        }
+    }
+    problems
 }

@@ -66,8 +66,8 @@ fn every_planted_way_to_bring_native_code_is_caught() {
             "planted-optional-native 0.0.0 has a build script that has not been reviewed"
                 .to_string(),
             "planted-optional-native links the native library planted_optional_native".to_string(),
-            // From outside the workspace, and not from crates.io.
-            "planted-outside 0.0.0 has not been reviewed".to_string(),
+            // From outside the workspace, and not from crates.io (reviewing
+            // crates.io crates is cargo-vet's).
             "planted-outside 0.0.0 is not a crates.io crate".to_string(),
             // Its library's source is outside its own directory, beyond the search.
             format!(

@@ -78,6 +78,18 @@ jobs:
         run: cargo xtask policy
       - name: canary
         run: cargo xtask canary
+      # Every outside crate reviewed: audits recorded in supply-chain/, imported
+      # from Mozilla, Google, the Bytecode Alliance and Zcash, or a trusted
+      # publisher (docs/decisions/0004).
+      - name: cargo vet
+        run: |
+          cargo install cargo-vet --version 0.10.3 --locked --quiet
+          cargo vet --locked
+      # Where crates come from, which may not appear, and licences (deny.toml).
+      - name: cargo deny
+        run: |
+          cargo install cargo-deny --version 0.20.2 --locked --quiet
+          cargo deny --locked check bans licenses sources
       # An exact release: --locked pins its dependencies, not which release
       # runs, so without --version a new one would run unreviewed (found by Codex review).
       - name: cargo audit

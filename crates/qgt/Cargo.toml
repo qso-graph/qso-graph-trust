@@ -9,7 +9,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-qso-graph-trust = { path = "../qso-graph-trust" }
+qso-graph-trust = { path = "../qso-graph-trust", version = "=0.1.0" }
 
 [lints]
 workspace = true

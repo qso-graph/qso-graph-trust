@@ -23,7 +23,9 @@ script is run again only to change them.
 The `.p12` files test reading the encryptions TQSL uses. They are not TQSL's own backups: TQSL also
 adds bag attributes (callsign, QSO dates, DXCC), so those come from tqsllib in phase 2.
 
-The `.p12` password is `qgt-test`: a test password for test keys.
+The `.p12` password is `qgt-test`: a test password for test keys. The key and `.p12` files are
+named one by one in `.github/secret_scanning.yml`, so GitHub's secret scanning passes over these
+and still catches a real key committed anywhere else.
 
 ## Coming with the tqsllib harness (phase 2, qso-graph-desktop#171)
 

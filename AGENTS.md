@@ -15,15 +15,15 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
 
 ## Rules (each one has a test you can apply)
 
-- **No C or C++ in the library.** Nothing in `qso-graph-trust`'s dependency tree, on any platform or feature,
-  links a native library or builds C, C++ or assembly, and every crate it takes from outside the
-  workspace comes from crates.io and is reviewed by exact name and version before it is added
-  (`REVIEWED` in `xtask/src/lib.rs`). *Test: `cargo xtask policy`.* An exemption names one exact
-  crate with a decision record in `docs/decisions/`, never a pattern.
-- **Every outside crate a shipped crate uses is reviewed.** The library and `qgt` take nothing from
-  outside the workspace that is not from crates.io and on `REVIEWED` by exact name and version: a
-  dependency's macro could write unsafe code into our source. *Test: `cargo xtask policy`.* The no-C
-  rule above is the library's alone; `qgt` carries the TLS stack, which is C (decision 0002).
+- **No C or C++ in the library.** Nothing in `qso-graph-trust`'s dependency tree, on the platforms
+  QGT ships and with every feature, compiles or ships C, C++ or assembly source, uses a crate that
+  builds native code, or links anything but the operating system. Crates that only bind the OS
+  (`OS_BINDINGS`) and Rust's own `asm!` in a reviewed outside crate are allowed (decision 0002).
+  *Test: `cargo xtask policy` and `cargo deny`.*
+- **Every outside crate a shipped crate uses is reviewed,** by exact name and version, through
+  cargo-vet: an imported audit, a trusted publisher, or our own (`supply-chain/`, decision 0004).
+  It comes from crates.io only. *Test: `cargo vet` and `cargo deny`.* The no-C rule is the
+  library's alone; `qgt` carries the TLS stack, which is C.
 - **No unsafe code.** Every crate is edition 2024, every crate root says `#![forbid(unsafe_code)]`,
   and every crate takes the workspace's lints, which forbid it too. Together these make rustc refuse
   every `extern` block and all assembly in our own code. Every source file is also read as tokens,
@@ -53,8 +53,8 @@ cargo test --workspace --locked
 cargo xtask policy
 ```
 
-**What CI checks:** formatting, clippy and the tests on Windows, macOS and Linux; the policy checks;
-and `cargo audit` of `Cargo.lock`, on every pull request and weekly. `ci-all-green` is the one result a
+**What CI checks:** formatting, clippy and the tests on Windows, macOS and Linux; the policy checks
+and the canary; `cargo vet`, `cargo deny` and `cargo audit`, on every pull request and weekly. `ci-all-green` is the one result a
 merge waits for.
 
 ## Where the real documents are
