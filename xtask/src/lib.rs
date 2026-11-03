@@ -971,8 +971,12 @@ const PROSE_ATTRIBUTES: &[&str] = &[
 fn code_strings(attr: proc_macro2::TokenStream) -> Vec<String> {
     use proc_macro2::TokenTree;
     let trees: Vec<TokenTree> = attr.into_iter().collect();
+    // `r#must_use` is `must_use` (found by Codex review).
     let first = match trees.first() {
-        Some(TokenTree::Ident(i)) => i.to_string(),
+        Some(TokenTree::Ident(i)) => {
+            let name = i.to_string();
+            name.strip_prefix("r#").unwrap_or(&name).to_string()
+        }
         _ => String::new(),
     };
     if PROSE_ATTRIBUTES.contains(&first.as_str()) {
@@ -2149,6 +2153,12 @@ pub fn proof() {}
                 .is_empty()
         );
         assert!(scan("#[deprecated(note = \"use the unsafe-free API\")] pub fn g() {}").is_empty());
+        // Raw spellings of the same names (round 34).
+        assert!(scan("#[r#must_use = \"include this value\"] pub fn r() -> u8 { 0 }").is_empty());
+        assert!(
+            scan("#[r#cfg_attr(all(), must_use = \"include this value\")] pub fn s() -> u8 { 0 }")
+                .is_empty()
+        );
         // Inside cfg_attr too, while a wrapped derive helper is still read (round 33).
         assert!(
             scan("#[cfg_attr(all(), must_use = \"include this value\")] pub fn p() -> u8 { 0 }")
