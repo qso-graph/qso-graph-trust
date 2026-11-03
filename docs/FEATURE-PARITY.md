@@ -138,7 +138,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | Feature | TQSL | Why not |
 |---|---|---|
-| `.p12` export in Apple Keychain's older format | Preferences | Uses weak encryption |
+| A separate `.p12` export for Apple Keychain | Preferences | Not needed: QG Trust's one `.p12` uses AES-256, which the Keychain imports from macOS 15 on. Only macOS 14 and older needed TQSL's older ciphers |
 | Key password on the command line (`-p`) | `-p` | A password never goes on a command line; another way is needed |
 | Choosing the upload server and its answers | Server Setup | Logs go to LoTW only |
 | Settings for upload, server or proxy taken from a backup | Restore | A file could send logs elsewhere |
