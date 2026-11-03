@@ -14,6 +14,7 @@
 #   /out/<case>/QG0TEST.p12     tqsllib's export, AES-256, password qgt-test
 #   /out/<case>/QG0TEST-weak.p12  the same, its weak-crypto option
 #   /out/<case>/qg0test-small.tq7  the test log, signed
+#   /out/<case>/key-password    the key's password, empty for none: tests read it from here
 #
 # Cases: 1024 (a key tqsllib made, no password) and 1024-password (a key tqsllib made, password
 # qgt-key). LoTW keys are 1024-bit: tqsllib 2.8.7 makes no other size (src/openssl_cert.cpp:653).
@@ -75,6 +76,7 @@ for case in 1024 1024-password; do
   export TQSLDIR=$dir/tqsl
   keypass=()
   [ "$case" = 1024-password ] && keypass=("$KEY_PASSWORD")
+  printf '%s' "${keypass[@]}" > "$dir/key-password"
 
   {
     qgt-tqsllib request "$CALL" "$DXCC" "$EMAIL" "$dir/$CALL.tq5" "${keypass[@]}"

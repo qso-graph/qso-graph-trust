@@ -44,7 +44,9 @@ fn key_field(case: &str, name: &str) -> String {
 
 /// What must not be left: labelled 16-byte pieces from the middle of each secret, so a piece
 /// is found even where an allocator has overwritten a block's first bytes with its own pointers.
-fn needles(case: &str, password: &[u8]) -> Vec<(String, Vec<u8>)> {
+fn needles(case: &str) -> Vec<(String, Vec<u8>)> {
+    let password = std::fs::read(corpus(case, "key-password")).expect("the key's password");
+    let password = password.as_slice();
     let pem = key_field(case, "PRIVATE_KEY");
     let key = if password.is_empty() {
         RsaPrivateKey::from_pkcs8_pem(&pem).expect("the key")
@@ -127,14 +129,9 @@ fn memory(pid: u32) -> Vec<(String, Vec<u8>)> {
 }
 
 /// Which needles are found in the program's memory once it says `ready`.
-fn found_in(program: &str, case: &str, password: &[u8], mode: &str) -> Vec<String> {
-    let dir = std::env::temp_dir().join(format!(
-        "qgt-custody-{}-{case}-{mode}-{program}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).expect("a temporary directory");
-    let password_file = dir.join("password");
-    std::fs::write(&password_file, password).expect("the password file");
+/// Which needles are found in the program's memory once it says `ready`. The key's password, if
+/// it has one, is read from the corpus (`key-password`), where the corpus script wrote it.
+fn found_in(program: &str, case: &str, mode: &str) -> Vec<String> {
     let arg = |p: &Path| p.to_str().expect("a UTF-8 path").to_string();
     let mut child = Command::new(program)
         .args([
@@ -142,7 +139,7 @@ fn found_in(program: &str, case: &str, password: &[u8], mode: &str) -> Vec<Strin
             arg(&corpus(case, "tqsl/certs/user")),
             arg(&PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../../tests/corpus/adif/qg0test-small.adi")),
-            arg(&password_file),
+            arg(&corpus(case, "key-password")),
             mode.to_string(),
         ])
         .stdin(Stdio::piped())
@@ -162,9 +159,8 @@ fn found_in(program: &str, case: &str, password: &[u8], mode: &str) -> Vec<Strin
         .write_all(b"\n")
         .expect("writes");
     assert!(child.wait().expect("exits").success());
-    let _ = std::fs::remove_dir_all(&dir);
 
-    let needles = needles(case, password);
+    let needles = needles(case);
     if std::env::var_os("QGT_CUSTODY_WHERE").is_some() {
         for (label, n) in &needles {
             for (region, bytes) in &regions {
@@ -200,13 +196,13 @@ const UNWIPED: &str = env!("CARGO_BIN_EXE_qgt-custody-unwiped");
 
 #[test]
 fn no_key_data_is_left_once_the_log_is_signed() {
-    assert_eq!(found_in(WIPED, "1024", b"", "done"), Vec::<String>::new());
+    assert_eq!(found_in(WIPED, "1024", "done"), Vec::<String>::new());
 }
 
 #[test]
 fn no_key_data_or_password_is_left_from_a_protected_key() {
     assert_eq!(
-        found_in(WIPED, "1024-password", b"qgt-key", "done"),
+        found_in(WIPED, "1024-password", "done"),
         Vec::<String>::new()
     );
 }
@@ -216,7 +212,7 @@ fn the_search_finds_a_key_that_is_there() {
     // Control: while the key is unlocked, each of its private values is in memory, as the signer
     // holds it, and the search must see every one: a needle it cannot find would prove nothing
     // (Codex review: q^-1 mod p was not searched for at all).
-    let found = found_in(WIPED, "1024", b"", "live");
+    let found = found_in(WIPED, "1024", "live");
     for value in ["d", "p", "q", "d mod p-1", "d mod q-1", "q^-1 mod p"] {
         assert!(
             found.iter().any(|f| f.split(", ").next() == Some(value)),
@@ -229,7 +225,7 @@ fn the_search_finds_a_key_that_is_there() {
 fn without_the_wiping_allocator_a_free_leaves_the_key_file_behind() {
     // Control: the same program, the allocator left out, leaves the key file's text in a freed
     // buffer; with it, nothing (above). This is what the allocator is for.
-    let found = found_in(UNWIPED, "1024", b"", "done");
+    let found = found_in(UNWIPED, "1024", "done");
     assert!(
         found.contains(&"the key file's text".to_string()),
         "{found:?}"
