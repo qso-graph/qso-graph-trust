@@ -3,7 +3,7 @@
 
 #[cfg(debug_assertions)]
 #[global_allocator]
-static ALLOCATOR: zeroizing_alloc::ZeroAlloc<std::alloc::System> =
-    zeroizing_alloc::ZeroAlloc(std::alloc::System);
+static ALLOCATOR: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> =
+    ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);
 
 fn main() {}

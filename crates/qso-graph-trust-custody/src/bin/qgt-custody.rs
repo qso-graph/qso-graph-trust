@@ -7,8 +7,8 @@
 
 /// Every freed block is wiped, whichever library allocated it (AGENTS.md).
 #[global_allocator]
-static ALLOCATOR: zeroizing_alloc::ZeroAlloc<std::alloc::System> =
-    zeroizing_alloc::ZeroAlloc(std::alloc::System);
+static ALLOCATOR: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> =
+    ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);
 
 fn main() -> std::process::ExitCode {
     qso_graph_trust_custody::run()

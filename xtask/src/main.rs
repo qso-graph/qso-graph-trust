@@ -8,6 +8,11 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+/// Every freed block is wiped, as in every program the workspace builds (AGENTS.md).
+#[global_allocator]
+static ALLOCATOR: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> =
+    ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let root_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");

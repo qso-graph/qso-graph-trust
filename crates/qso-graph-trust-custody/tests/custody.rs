@@ -5,10 +5,12 @@
 //! log as QG Trust does, from reading the key file to writing the `.tq8`, drops everything and
 //! waits; this test reads every byte of its memory, heap, stack and all, from outside it, as a
 //! debugger or a crash dump would see it, and looks for the key: the key file's text, the key's
-//! DER, its private exponent, primes and CRT values, `e·d`, `p−1` and `q−1`, each in both byte
-//! orders, and the password. None may be there.
+//! DER, its private exponent, primes and all three CRT values (`d mod p−1`, `d mod q−1` and
+//! `q⁻¹ mod p`), `e·d`, `p−1` and `q−1`, each in both byte orders, and the password. None may be
+//! there.
 //!
-//! Two controls prove the search finds what is there: with the key still in use, it must be found;
+//! Two controls prove the search finds what is there: with the key still in use, every one of its
+//! private values must be found, so each needle is shown to be right;
 //! and in the same program built without the wiping allocator, what an ordinary free leaves (the
 //! key file's text, read into a plain buffer as any caller reads a file) must be found.
 //!
@@ -56,6 +58,8 @@ fn needles(case: &str, password: &[u8]) -> Vec<(String, Vec<u8>)> {
     let [p, q] = key.primes() else {
         panic!("two primes")
     };
+    // q^-1 mod p, by Fermat: p is prime, so it is q^(p-2) mod p.
+    let qinv = q.modpow(&(p - BigUint::from(2u8)), p);
     let one = BigUint::from(1u8);
     let (p1, q1) = (p - &one, q - &one);
     let numbers: Vec<(&str, BigUint)> = vec![
@@ -64,6 +68,7 @@ fn needles(case: &str, password: &[u8]) -> Vec<(String, Vec<u8>)> {
         ("q", q.clone()),
         ("d mod p-1", key.d() % &p1),
         ("d mod q-1", key.d() % &q1),
+        ("q^-1 mod p", qinv),
         ("e*d", key.e() * key.d()),
         ("p-1", p1.clone()),
         ("q-1", q1.clone()),
@@ -208,14 +213,16 @@ fn no_key_data_or_password_is_left_from_a_protected_key() {
 
 #[test]
 fn the_search_finds_a_key_that_is_there() {
-    // Control: while the key is unlocked, its numbers are in memory, and the search must see them.
+    // Control: while the key is unlocked, each of its private values is in memory, as the signer
+    // holds it, and the search must see every one: a needle it cannot find would prove nothing
+    // (Codex review: q^-1 mod p was not searched for at all).
     let found = found_in(WIPED, "1024", b"", "live");
-    assert!(
-        found
-            .iter()
-            .any(|f| f.starts_with("p,") || f.starts_with("d,")),
-        "{found:?}"
-    );
+    for value in ["d", "p", "q", "d mod p-1", "d mod q-1", "q^-1 mod p"] {
+        assert!(
+            found.iter().any(|f| f.split(", ").next() == Some(value)),
+            "{value} not found in {found:?}"
+        );
+    }
 }
 
 #[test]

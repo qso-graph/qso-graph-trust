@@ -11,6 +11,10 @@ name = "planted-alloc-control"
 version = "0.0.0"
 
 [[package]]
+name = "planted-alloc-example"
+version = "0.0.0"
+
+[[package]]
 name = "planted-alloc-missing"
 version = "0.0.0"
 
@@ -19,8 +23,18 @@ name = "planted-alloc-other"
 version = "0.0.0"
 
 [[package]]
+name = "planted-alloc-renamed"
+version = "0.0.0"
+dependencies = [
+ "planted-fake-alloc",
+]
+
+[[package]]
 name = "planted-alloc-wiped"
 version = "0.0.0"
+dependencies = [
+ "zeroizing-alloc",
+]
 
 [[package]]
 name = "planted-assembled"
@@ -52,6 +66,10 @@ version = "0.0.0"
 
 [[package]]
 name = "planted-extern-block"
+version = "0.0.0"
+
+[[package]]
+name = "planted-fake-alloc"
 version = "0.0.0"
 
 [[package]]
@@ -125,3 +143,9 @@ dependencies = [
  "planted-outside",
  "planted-src-outside",
 ]
+
+[[package]]
+name = "zeroizing-alloc"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b5564c80013ee0edbfc4e4d7d66d1a5a44b8adaffbf0103069f51ce0efc5031"

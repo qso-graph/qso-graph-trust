@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# A stand-in for the allocator, wiping nothing (planted-alloc-renamed).
+[package]
+name = "planted-fake-alloc"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true

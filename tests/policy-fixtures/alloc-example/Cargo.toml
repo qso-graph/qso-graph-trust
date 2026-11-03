@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: an example without the wiping allocator, which cargo install --example would install.
+# The wiping-allocator check must catch it.
+[package]
+name = "planted-alloc-example"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
