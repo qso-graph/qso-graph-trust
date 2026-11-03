@@ -30,6 +30,7 @@ use crate::records::{self, Record, RecordError};
 #[derive(Clone)]
 pub struct KeyEntry {
     callsign: String,
+    request_dxcc: Option<u32>,
     public_key_pem: String,
     private_key_pem: Zeroizing<String>,
 }
@@ -222,7 +223,12 @@ impl KeyEntry {
     fn from_record(record: &Record) -> Result<KeyEntry, KeyError> {
         // A key field given twice is refused: QG Trust would read the first and tqsllib the last,
         // so the two could unlock different keys from one file (found by Codex review).
-        for name in ["CALLSIGN", "PUBLIC_KEY", "PRIVATE_KEY"] {
+        for name in [
+            "CALLSIGN",
+            "PUBLIC_KEY",
+            "PRIVATE_KEY",
+            "TQSL_CRQ_DXCC_ENTITY",
+        ] {
             if record
                 .fields
                 .iter()
@@ -234,8 +240,20 @@ impl KeyEntry {
             }
         }
         let text = |name: &'static str| record.text(name).ok_or(KeyError::MissingField(name));
+        // The DXCC entity the certificate was requested for, as tqsllib records it with the key.
+        // Present but not text is not absent (found by Codex review).
+        let request_dxcc = match record.get("TQSL_CRQ_DXCC_ENTITY") {
+            None => None,
+            Some(v) => Some(
+                std::str::from_utf8(v)
+                    .ok()
+                    .and_then(|d| d.trim().parse().ok())
+                    .ok_or(KeyError::NotAKey)?,
+            ),
+        };
         Ok(KeyEntry {
             callsign: text("CALLSIGN")?.to_string(),
+            request_dxcc,
             public_key_pem: text("PUBLIC_KEY")?.to_string(),
             private_key_pem: Zeroizing::new(text("PRIVATE_KEY")?.to_string()),
         })
@@ -246,9 +264,51 @@ impl KeyEntry {
         &self.callsign
     }
 
+    /// The DXCC entity the key's certificate was requested for, if the key file records it.
+    pub fn request_dxcc(&self) -> Option<u32> {
+        self.request_dxcc
+    }
+
     /// The public key, as PEM (SubjectPublicKeyInfo), for matching the key to its certificate.
     pub fn public_key_pem(&self) -> &str {
         &self.public_key_pem
+    }
+
+    /// The public key as DER (SubjectPublicKeyInfo), for comparing with a certificate's; `None` if
+    /// the PEM is not a public key.
+    pub fn public_key_der(&self) -> Option<Vec<u8>> {
+        let (label, der) = pkcs8::der::pem::decode_vec(self.public_key_pem.as_bytes()).ok()?;
+        (label == "PUBLIC KEY").then_some(der)
+    }
+
+    /// Checks what can be checked without the password: the public key is an RSA one, and a
+    /// protected private key is an encrypted PKCS#8 envelope with a protection QG Trust accepts; a
+    /// plain one is unlocked, which proves it whole. A protected key's private half is checked
+    /// against its public half when it is first unlocked (found by Codex review: a protected key
+    /// was taken on its PEM label alone).
+    pub fn check(&self) -> Result<(), KeyError> {
+        const RSA: pkcs8::ObjectIdentifier =
+            pkcs8::ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1");
+        let spki = self.public_key_der().ok_or(KeyError::PublicKeyMismatch)?;
+        let info = pkcs8::spki::SubjectPublicKeyInfoRef::from_der(&spki)
+            .map_err(|_| KeyError::PublicKeyMismatch)?;
+        if info.algorithm.oid != RSA {
+            return Err(KeyError::NotRsa);
+        }
+        if !self.is_encrypted() {
+            return self.unlock(None).map(drop);
+        }
+        let mut decoded = Zeroizing::new(vec![0u8; self.private_key_pem.len()]);
+        let (label, der) = pkcs8::der::pem::decode(self.private_key_pem.as_bytes(), &mut decoded)
+            .map_err(|_| KeyError::NotAKey)?;
+        if label != "ENCRYPTED PRIVATE KEY" {
+            return Err(KeyError::NotAKey);
+        }
+        let envelope = EncryptedPrivateKeyInfo::from_der(der).map_err(|_| KeyError::NotAKey)?;
+        if !accepted(&envelope.encryption_algorithm) {
+            return Err(KeyError::UnsupportedProtection);
+        }
+        Ok(())
     }
 
     /// Whether the private key is protected by a password.
@@ -343,6 +403,7 @@ mod tests {
     #[test]
     fn a_key_entry_never_prints_its_key() {
         let entry = KeyEntry {
+            request_dxcc: None,
             callsign: "QG0TEST".into(),
             public_key_pem: "public".into(),
             private_key_pem: Zeroizing::new("-----BEGIN PRIVATE KEY-----secret".into()),
@@ -367,6 +428,7 @@ mod tests {
     fn the_private_key_text_is_wiped_when_dropped() {
         fn wiped<T: zeroize::ZeroizeOnDrop>(_: &T) {}
         let entry = KeyEntry {
+            request_dxcc: None,
             callsign: "QG0TEST".into(),
             public_key_pem: String::new(),
             private_key_pem: Zeroizing::new(String::new()),
@@ -385,6 +447,7 @@ mod tests {
         let pem = pkcs8::der::pem::encode_string("ENCRYPTED PRIVATE KEY", LineEnding::LF, &der)
             .expect("PEM");
         KeyEntry {
+            request_dxcc: None,
             callsign: "QG0TEST".into(),
             public_key_pem: String::new(),
             private_key_pem: Zeroizing::new(pem),
@@ -437,6 +500,7 @@ mod tests {
     /// re-encrypted, and the check comes after the ones these tests aim at for any other.
     fn entry(pem: &str) -> KeyEntry {
         KeyEntry {
+            request_dxcc: None,
             callsign: "QG0TEST".into(),
             public_key_pem: test_public_key(),
             private_key_pem: Zeroizing::new(pem.into()),
@@ -604,6 +668,7 @@ mod tests {
             .to_public_key_pem(pkcs8::LineEnding::LF)
             .expect("PEM");
         KeyEntry {
+            request_dxcc: None,
             callsign: "QG0TEST".into(),
             public_key_pem: public,
             private_key_pem: Zeroizing::new(pem),

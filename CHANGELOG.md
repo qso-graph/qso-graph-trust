@@ -24,3 +24,15 @@ versions follow [Semantic Versioning](https://semver.org/).
   four park locations, KN4YU as the club call and W4W as a one-month special-event call, from a test
   CA, with `standard.tbk` written by TQSL's own app. QG Trust signs every location's log as tqsllib
   does, byte for byte.
+- Importing TQSL's backup, the `.tbk` (qso-graph-desktop#172): every certificate, key and station
+  location, and the QSOs TQSL has signed. Read by QG Trust's own XML reader, bounded as it reads, with
+  no DTD; gzip into one wiped buffer. Chains are checked as RFC 5280 asks (path length, key usage, no
+  unknown critical or repeated extensions), signatures through aws-lc-rs inside the binding. Each callsign certificate must chain, signature by signature,
+  to LoTW's root, pinned as TQSL embeds it (`src/lotw/arrl.rs`): a root a file brings establishes
+  nothing. A key must be its certificate's, for its call, DXCC entity and serial; one with no password
+  is unlocked at import to prove it. Signing with only what TQSL's backup of the standard set holds
+  gives tqsllib's signed logs, byte for byte.
+- The standard set's certificates have ARRL-style serials (10001 to 10003), so TQSL records each.
+- TQSL's settings that change what LoTW receives come with the import (`tbk::Preferences`): custom
+  ADIF modes, Cabrillo contests, ignore seconds, allow bad calls, ignore log callsigns, and the log's
+  QTH handling. Upload, server, proxy and TLS settings are never taken from a file.

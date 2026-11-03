@@ -199,61 +199,13 @@ pub fn sign_log(
     Ok(out.into_bytes())
 }
 
-/// A signed log gzipped, as a `.tq8`: one gzip member (RFC 1952) with no name and no time in its
-/// header, so the same log always gives the same bytes.
+/// A signed log gzipped, as a `.tq8`: one gzip member with no name and no time in its header, so
+/// the same log always gives the same bytes.
 pub fn tq8(tq7: &[u8]) -> Vec<u8> {
-    // ID1 ID2, deflate, no flags, no modification time, no extra flags, OS unknown.
-    let mut out = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
-    out.extend(miniz_oxide::deflate::compress_to_vec(tq7, 9));
-    out.extend(crc32(tq7).to_le_bytes());
-    // ISIZE is the length modulo 2^32, as RFC 1952 defines it.
-    out.extend((tq7.len() as u32).to_le_bytes());
-    out
-}
-
-/// The CRC-32 gzip carries (RFC 1952 section 8: polynomial 0xEDB88320, reflected).
-fn crc32(data: &[u8]) -> u32 {
-    let mut crc = !0u32;
-    for &byte in data {
-        crc ^= u32::from(byte);
-        for _ in 0..8 {
-            crc = if crc & 1 == 1 {
-                (crc >> 1) ^ 0xEDB8_8320
-            } else {
-                crc >> 1
-            };
-        }
-    }
-    !crc
+    crate::gzip::compress(tq7)
 }
 
 /// One field and its newline, `<NAME:LENGTH>VALUE`, the length in bytes.
 fn field(out: &mut String, name: &str, value: &str) {
     out.push_str(&format!("<{name}:{}>{value}\n", value.len()));
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn crc32_is_gzips() {
-        // RFC 1952's CRC-32 of "123456789", the standard check value.
-        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
-        assert_eq!(crc32(b""), 0);
-    }
-
-    #[test]
-    fn a_tq8_is_the_log_gzipped() {
-        let log = b"<TQSL_IDENT:4>test\n<Rec_Type:5>tCERT\n<eor>\n".repeat(50);
-        let gz = tq8(&log);
-        assert_eq!(gz[..4], [0x1f, 0x8b, 8, 0]);
-        let body = &gz[10..gz.len() - 8];
-        let inflated =
-            miniz_oxide::inflate::decompress_to_vec_with_limit(body, log.len()).expect("inflates");
-        assert_eq!(inflated, log);
-        assert_eq!(gz[gz.len() - 8..gz.len() - 4], crc32(&log).to_le_bytes());
-        assert_eq!(gz[gz.len() - 4..], (log.len() as u32).to_le_bytes());
-        assert_eq!(tq8(&log), gz, "the same log, the same bytes");
-    }
 }

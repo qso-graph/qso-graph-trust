@@ -74,6 +74,13 @@ start = "2020-06-05"
 end = "2027-11-03"
 notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
 
+[[trusted.aws-lc-rs]]
+criteria = "safe-to-deploy"
+user-id = 156764 # Justin W Smith (justsmth)
+start = "2023-04-11"
+end = "2027-11-03"
+notes = "AWS-LC's safe Rust API, the provider decision 0006 names, as QSO Graph Desktop ships it; reached only through qso-graph-trust-awslc, for certificate signature checks (Bob, 2026-11-03)"
+
 [[trusted.aws-lc-sys]]
 criteria = "safe-to-deploy"
 user-id = 156764 # Justin W Smith (justsmth)

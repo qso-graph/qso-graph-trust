@@ -5,6 +5,7 @@
 //! generated from `data/tqsl-config/config.xml` by `scripts/gen-lotw-tables.py`, so a new
 //! configuration from ARRL is a regenerated file, never new code.
 
+pub mod arrl;
 #[rustfmt::skip]
 mod tables;
 
