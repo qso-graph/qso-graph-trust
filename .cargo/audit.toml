@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # cargo audit's one exception (docs/decisions/0002-no-c-in-the-library.md, amended 2026-11-03).
 [advisories]
-# RUSTSEC-2023-0071 (Marvin), rsa: no fixed release exists. The advisory itself says "local use on a
-# non-compromised computer is fine"; QG Trust signs only on the ham's own machine, for that ham, never
-# for a remote caller, and blinds every signing. CI fails once rsa has a fixed release, so this goes.
+# RUSTSEC-2023-0071 (Marvin), rsa: no fixed release exists. rsa is a test tool only since decision 0006
+# (AWS-LC signs); it builds the crafted keys the tests refuse and is never shipped. CI fails once rsa has
+# a fixed release, so this goes.
 ignore = ["RUSTSEC-2023-0071"]

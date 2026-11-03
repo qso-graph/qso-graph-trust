@@ -13,11 +13,9 @@ repository.workspace = true
 # fails the build if one is (docs/decisions/0002-no-c-in-the-library.md).
 # Every one is pinned exactly: they are the key and signing path.
 [dependencies]
-# LoTW's signature, RSA PKCS#1 v1.5 with SHA-1, which aws-lc-rs does not sign
-# (decision 0002, amended 2026-11-03). getrandom: the OS's randomness, which
-# blinds every signing.
-rsa = { version = "=0.9.10", default-features = false, features = ["std", "pem", "getrandom"] }
-rand_core = { version = "=0.6.4", default-features = false, features = ["getrandom"] }
+# LoTW's signature, RSA PKCS#1 v1.5 with SHA-1, from AWS-LC through QG Trust's
+# one binding (decision 0006).
+qso-graph-trust-awslc = { path = "../qso-graph-trust-awslc", version = "=0.1.0" }
 sha1 = { version = "=0.10.6", default-features = false, features = ["oid"] }
 # tqsllib's keys: PKCS#8 PEM, plain, or encrypted (PBES2 with 3DES) when the
 # ham set a password. sha1-insecure: PBKDF2 with HMAC-SHA1, which older OpenSSL
@@ -35,8 +33,11 @@ sha2 = { version = "=0.10.9", default-features = false }
 cbc = { version = "=0.1.2", default-features = false, features = ["block-padding", "zeroize"] }
 des = { version = "=0.8.1", default-features = false, features = ["zeroize"] }
 aes = { version = "=0.8.4", default-features = false, features = ["zeroize"] }
-# Primality of a key's factors (Baillie-PSW), and random Miller-Rabin bases:
-# rsa's own big-number library, already in its tree.
+
+# Test tools only, never shipped: rsa and num-bigint-dig build the crafted keys the tests refuse.
+[dev-dependencies]
+rsa = { version = "=0.9.10", default-features = false, features = ["std", "pem", "getrandom"] }
+rand_core = { version = "=0.6.4", default-features = false, features = ["getrandom"] }
 num-bigint-dig = { version = "=0.8.6", default-features = false, features = ["prime"] }
 
 [lints]

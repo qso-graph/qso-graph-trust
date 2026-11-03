@@ -18,7 +18,8 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
 - **No C or C++ in the library.** Nothing in `qso-graph-trust`'s dependency tree, on the platforms
   QGT ships and with every feature, compiles or ships C, C++ or assembly source, uses a crate that
   builds native code, or links anything but the operating system. Crates that only bind the OS
-  (`OS_BINDINGS`) and Rust's own `asm!` in a reviewed outside crate are allowed (decision 0002).
+  (`OS_BINDINGS`), Rust's own `asm!` in a reviewed outside crate, and one cryptographic provider,
+  `aws-lc-sys`, reached only through the binding, are allowed (decisions 0002 and 0006).
   **Cryptographic primitives come from vetted providers, each named in the policy checks:**
   `aws-lc-rs` (QSO Graph Desktop's) for TLS and every operation it offers, and RustCrypto's `rsa` for
   LoTW's RSA-SHA-1 signature, which aws-lc-rs does not sign. The library never signs for a remote
@@ -27,7 +28,8 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
   cargo-vet: an imported audit, a trusted publisher, or our own (`supply-chain/`, decision 0004).
   It comes from crates.io only. *Test: `cargo vet` and `cargo deny`.* The no-C rule is the
   library's alone; the command line carries the TLS stack, which is C.
-- **No unsafe code.** Every crate is edition 2024, every crate root says `#![forbid(unsafe_code)]`,
+- **No unsafe code, but in one named binding.** `qso-graph-trust-awslc`, which calls AWS-LC to sign
+  (decision 0006), is the only crate allowed unsafe code, with its own strict lints. Every other crate is edition 2024, every crate root says `#![forbid(unsafe_code)]`,
   and every crate takes the workspace's lints, which forbid it too. Together these make rustc refuse
   every `extern` block and all assembly in our own code. Every source file is also read as tokens,
   whatever its `cfg`, and no workspace crate defines a macro (`macro_rules!` or procedural).
@@ -37,8 +39,8 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
   is overwritten; libraries such as `rsa` and `num-bigint-dig` wipe their own temporaries only in part
   (decision 0002). *Test: `cargo xtask policy` refuses a program without it (with the allocator, phase
   3, qso-graph-desktop#172), and the custody test finds no key data in memory or a crash dump.*
-- **The key never leaves the OS credential store** except as a signature, or as a backup QGT encrypts
-  itself. No API returns it, and it is never in a file, log, trace, error, IPC message or crash dump.
+- **The OS credential store holds the key at rest,** and it leaves the store only to sign, as a
+  signature, or as a backup QGT encrypts itself; while it signs, it is in memory, as in every signer. No API returns it, and it is never in a file, log, trace, error, IPC message or crash dump.
 - **Signatures match tqsllib's byte for byte.** A change to signing comes with a differential test
   against tqsllib. *Test: the differential suite (phase 2).*
 - **What LoTW receives is the same as TQSL's; how QGT gets there is its own design.** The signed

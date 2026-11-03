@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # QSO Graph Trust (QGT): one library, the CLI tools on it, and the policy checks (xtask).
 [workspace]
-members = ["crates/qso-graph-trust", "crates/qso-graph-trust-cli", "xtask"]
+members = ["crates/qso-graph-trust", "crates/qso-graph-trust-awslc", "crates/qso-graph-trust-cli", "xtask"]
 # The planted cases the policy checks must catch: a workspace of their own, never built here.
 exclude = ["tests/policy-fixtures"]
 resolver = "3"

@@ -30,7 +30,39 @@ pub const PROTECTED: &[&str] = &["qso-graph-trust"];
 /// them a macro that writes unsafe code into our own source (found by Codex
 /// review: `paste!` can build the keyword from pieces). The no-C rules are the
 /// library's alone: the command line (`qso-graph-trust-cli`) carries the TLS stack, which is C (docs/decisions/0002).
-pub const SHIPPED: &[&str] = &["qso-graph-trust", "qso-graph-trust-cli"];
+pub const SHIPPED: &[&str] = &[
+    "qso-graph-trust",
+    "qso-graph-trust-awslc",
+    "qso-graph-trust-cli",
+];
+
+/// The one cryptographic provider whose C the library may build: AWS-LC, which QSO Graph Desktop
+/// already ships, for LoTW's RSA-SHA-1 signature (KI7MT, 2026-11-03; docs/decisions/0006). Its own
+/// files and build are not scanned; everything it depends on still is.
+pub const CRYPTO_PROVIDERS: &[&str] = &["aws-lc-sys"];
+
+/// The one workspace crate allowed unsafe code, and the only one that may depend on a
+/// [`CRYPTO_PROVIDERS`] crate: QG Trust's binding to AWS-LC. Instead of the workspace's lints it must
+/// carry exactly [`BINDING_LINTS`] (docs/decisions/0006).
+pub const UNSAFE_BINDING: &str = "qso-graph-trust-awslc";
+
+/// The binding's own lints, exactly: unsafe denied unless allowed block by block, unsafe operations
+/// marked even inside unsafe functions, every unsafe block documented with its SAFETY reason, one
+/// unsafe operation per block.
+pub const BINDING_LINTS: &str = r#"[rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+
+[clippy]
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"
+"#;
+
+/// Whether a crate is the named cryptographic provider.
+fn crypto_provider(name: &str) -> bool {
+    CRYPTO_PROVIDERS.contains(&name)
+}
 
 /// Where a shipped crate's dependencies come from, for what this workspace builds
 /// and what a consumer of the published crates builds: crates.io only, no
@@ -332,6 +364,7 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
         let pkg = packages.get(id);
         if let Some(links) = pkg.and_then(|p| p["links"].as_str())
             && !os_binding(&name)
+            && !crypto_provider(&name)
         {
             problems.push(format!("{name} links the native library {links}"));
         }
@@ -361,7 +394,12 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
             // being optimized away, is one. In our own crates it stays refused, by
             // the compiler and by the token scan.
             let outside = !workspace.contains(id);
-            for found in native_in(dir, &output_dir, os_binding(&name)) {
+            let scanned = if crypto_provider(&name) {
+                Vec::new()
+            } else {
+                native_in(dir, &output_dir, os_binding(&name))
+            };
+            for found in scanned {
                 if outside && found.ends_with(" holds assembly") {
                     continue;
                 }
@@ -401,8 +439,20 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
             let Some(dep_id) = dep["pkg"].as_str() else {
                 continue;
             };
+            // The provider's build tools (cc, cmake and theirs) compile AWS-LC and never ship; what
+            // the provider needs at run time is still followed.
+            let build_only = kinds.iter().all(|k| k["kind"] == "build");
+            if crypto_provider(&name) && build_only {
+                continue;
+            }
             let dep_name = field(dep_id, "name");
-            if NATIVE_BUILD.contains(&dep_name.as_str()) {
+            // Only the binding may depend on the provider, so no other crate reaches AWS-LC's C.
+            if crypto_provider(&dep_name) && name != UNSAFE_BINDING {
+                problems.push(format!(
+                    "{name} depends on {dep_name}: only {UNSAFE_BINDING} may"
+                ));
+            }
+            if NATIVE_BUILD.contains(&dep_name.as_str()) && !crypto_provider(&name) {
                 problems.push(format!("{name} builds native code through {dep_name}"));
             }
             queue.push_back(dep_id);
@@ -648,11 +698,16 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
                 ));
             }
         }
+        let binding = pkg_name == UNSAFE_BINDING;
         match pkg["manifest_path"]
             .as_str()
             .map(|m| read_toml(Path::new(m)))
         {
-            Some(Ok(t)) if takes_workspace_lints(&t) => {}
+            Some(Ok(t)) if !binding && takes_workspace_lints(&t) => {}
+            Some(Ok(t)) if binding && has_binding_lints(&t) => {}
+            Some(Ok(_)) if binding => problems.push(format!(
+                "{pkg_name} does not carry exactly the binding's lints"
+            )),
             Some(Ok(_)) => problems.push(format!("{pkg_name} does not take the workspace's lints")),
             Some(Err(e)) => problems.push(e),
             None => problems.push(format!("{pkg_name} has no manifest path")),
@@ -664,6 +719,7 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
         if let Some(dir) = pkg["manifest_path"]
             .as_str()
             .and_then(|m| Path::new(m).parent())
+            && !binding
         {
             problems.extend(unsafe_tokens_in(dir, &skip));
         }
@@ -700,6 +756,7 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
                 problems.push(format!("{src} is a crate root outside its crate"));
             }
             match std::fs::read_to_string(src) {
+                Ok(_) if binding => {}
                 Ok(text) if forbids_unsafe(&text) => {}
                 Ok(_) => problems.push(format!("{src} does not say #![forbid(unsafe_code)]")),
                 Err(e) => problems.push(format!("cannot read {src}: {e}")),
@@ -1088,6 +1145,12 @@ pub fn takes_workspace_lints(manifest: &toml::Table) -> bool {
         .get("lints")
         .and_then(toml::Value::as_table)
         .is_some_and(|l| l.len() == 1 && l.get("workspace") == Some(&toml::Value::Boolean(true)))
+}
+
+/// Whether a manifest's `[lints]` is exactly [`BINDING_LINTS`], read as TOML.
+pub fn has_binding_lints(manifest: &toml::Table) -> bool {
+    let want: toml::Table = toml::from_str(BINDING_LINTS).unwrap_or_default();
+    manifest.get("lints").and_then(toml::Value::as_table) == Some(&want)
 }
 
 /// Whether the workspace's manifest sets `unsafe_code = "forbid"` for every member.
@@ -1998,6 +2061,82 @@ mod tests {
         assert!(
             scan("pub extern \"C\" fn f() {} const S: &str = \"extern \\\"C\\\" {\";").is_empty()
         );
+    }
+
+    /// lib -> (binding) -> aws-lc-sys, with aws-lc-sys building through cc and needing `rt` at
+    /// run time. `via` names the crate between the library and the provider.
+    fn provider_graph(via: &str) -> Value {
+        json!({
+            "workspace_members": ["lib", "bind"],
+            "packages": [
+                {"id": "lib", "name": "qso-graph-trust", "version": "0.1.0", "source": null, "links": null, "targets": [{"kind": ["lib"]}]},
+                {"id": "bind", "name": via, "version": "0.1.0", "source": null, "links": null, "targets": [{"kind": ["lib"]}]},
+                {"id": "aws", "name": "aws-lc-sys", "version": "0.45.0", "source": CRATES_IO, "links": "aws_lc_0_45_0", "targets": [{"kind": ["lib"]}, {"kind": ["custom-build"]}]},
+                {"id": "cc", "name": "cc", "version": "1.11.0", "source": CRATES_IO, "links": null, "targets": [{"kind": ["lib"]}]},
+                {"id": "rt", "name": "runtime", "version": "1.0.0", "source": CRATES_IO, "links": null, "targets": [{"kind": ["lib"]}]}
+            ],
+            "resolve": {"nodes": [
+                {"id": "lib", "deps": [{"pkg": "bind", "dep_kinds": [{"kind": null}]}]},
+                {"id": "bind", "deps": [{"pkg": "aws", "dep_kinds": [{"kind": null}]}]},
+                {"id": "aws", "deps": [{"pkg": "cc", "dep_kinds": [{"kind": "build"}]}, {"pkg": "rt", "dep_kinds": [{"kind": null}]}]},
+                {"id": "cc", "deps": []},
+                {"id": "rt", "deps": []}
+            ]}
+        })
+    }
+
+    #[test]
+    fn the_crypto_provider_is_allowed_only_through_the_binding() {
+        // Through the binding: the provider's C, links and build tools are allowed.
+        assert!(check(&provider_graph(UNSAFE_BINDING), PROTECTED).is_empty());
+        // PLANTED: any other crate depending on it is refused, so AWS-LC's C is reached only there.
+        assert_eq!(
+            check(&provider_graph("middle"), PROTECTED),
+            vec!["middle depends on aws-lc-sys: only qso-graph-trust-awslc may"]
+        );
+        // PLANTED: what the provider needs at run time is still checked: a native link there fails.
+        let mut g = provider_graph(UNSAFE_BINDING);
+        g["packages"][4]["links"] = json!("evil");
+        assert_eq!(
+            check(&g, PROTECTED),
+            vec!["runtime links the native library evil"]
+        );
+        // PLANTED: a crate of another name with the provider's links is not the provider.
+        let mut h = provider_graph(UNSAFE_BINDING);
+        h["packages"][2]["name"] = json!("aws-lc-sys-lookalike");
+        assert!(
+            check(&h, PROTECTED)
+                .iter()
+                .any(|p| p.contains("links the native library aws_lc_0_45_0"))
+        );
+    }
+
+    #[test]
+    fn the_binding_must_carry_exactly_its_own_lints() {
+        let with = |lints: &str| -> toml::Table {
+            toml::from_str(&format!("[package]\nname = \"x\"\n[lints.{lints}")).expect("toml")
+        };
+        let exact: toml::Table = toml::from_str(&format!(
+            "[lints]\n{}",
+            BINDING_LINTS
+                .replace("[rust]", "[lints.rust]")
+                .replace("[clippy]", "[lints.clippy]")
+        ))
+        .expect("toml");
+        assert!(has_binding_lints(&exact));
+        // PLANTED: weakened (unsafe allowed), one missing, or the workspace's instead.
+        assert!(!has_binding_lints(&with(
+            "rust]\nunsafe_code = \"allow\"\n"
+        )));
+        let mut missing = exact.clone();
+        missing["lints"]["clippy"]
+            .as_table_mut()
+            .expect("clippy")
+            .remove("undocumented_unsafe_blocks");
+        assert!(!has_binding_lints(&missing));
+        assert!(!has_binding_lints(
+            &toml::from_str("[lints]\nworkspace = true\n").expect("toml")
+        ));
     }
 
     #[test]

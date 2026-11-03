@@ -6,8 +6,9 @@
 //!
 //! The key is read from tqsllib's key file (`keys/<call>`), plain or protected by a password, and
 //! once unlocked it can only sign: nothing here returns it, prints it or puts it in an error.
-//! Signing is blinded with the operating system's randomness, the defence against the timing leak
-//! in RUSTSEC-2023-0071; a PKCS#1 v1.5 signature is the same either way (docs/decisions/0002).
+//! The RSA itself is AWS-LC's, through QG Trust's one binding (`qso-graph-trust-awslc`,
+//! docs/decisions/0006): constant-time, and it overwrites every block it frees, so neither the key's
+//! numbers nor their temporaries are left in memory.
 //! Every buffer here that holds key text is wiped when dropped (`Zeroizing`), and a protected key's
 //! encryption parameters are checked before any work is done with the password, so a crafted file
 //! cannot ask for unbounded memory or time (found by Codex review).
@@ -17,11 +18,8 @@ use std::fmt;
 use base64ct::{Base64, Encoding};
 use pkcs8::pkcs5::EncryptionScheme;
 use pkcs8::pkcs5::pbes2::{self, Kdf, Pbkdf2Prf};
-use pkcs8::{DecodePrivateKey, EncryptedPrivateKeyInfo, der::Decode};
-use rsa::RsaPrivateKey;
-use rsa::pkcs1v15::{Signature, SigningKey};
-use rsa::pkcs8::DecodePublicKey;
-use rsa::signature::{RandomizedSigner, SignatureEncoding};
+use pkcs8::{EncryptedPrivateKeyInfo, der::Decode};
+use qso_graph_trust_awslc::RsaKey;
 use sha1::Sha1;
 use zeroize::Zeroizing;
 
@@ -47,7 +45,7 @@ impl fmt::Debug for KeyEntry {
 
 /// A key that can sign. It cannot be read back out.
 pub struct TqslKey {
-    key: SigningKey<Sha1>,
+    key: RsaKey,
 }
 
 impl fmt::Debug for TqslKey {
@@ -116,69 +114,6 @@ const ENCRYPTED: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----";
 
 /// The largest key file read: one key file holds a key per certificate request, each a few KiB.
 pub const MAX_KEY_FILE_LEN: usize = 1024 * 1024;
-
-/// Whether a key is one LoTW uses, checked before it can sign: tqsllib 2.8.7 makes RSA keys of 1024
-/// bits (`src/openssl_cert.cpp:653`) with the exponent 65537 (`tqsl_new_rsa_key`,
-/// `BN_set_word(pubexp, 0x10001)`), whose two primes OpenSSL makes 512 bits each. Anything else
-/// cannot carry a LoTW certificate, and very unequal primes would make rsa's CRT step loop for
-/// longer than the age of the universe (found by Codex review).
-fn lotw_shaped(key: &RsaPrivateKey) -> Result<(), KeyError> {
-    use rsa::traits::{PrivateKeyParts, PublicKeyParts};
-    if shape_ok(key.n().bits(), key.e(), key.primes()) && key.primes().iter().all(is_prime) {
-        Ok(())
-    } else {
-        Err(KeyError::NotLotwKey)
-    }
-}
-
-/// The shape itself: a 1024-bit modulus, the exponent 65537, and two different 512-bit primes.
-/// Equal primes make a modulus anyone can factor with a square root (found by Codex review).
-fn shape_ok(modulus_bits: usize, e: &rsa::BigUint, primes: &[rsa::BigUint]) -> bool {
-    modulus_bits == 1024
-        && *e == rsa::BigUint::from(65_537u32)
-        && primes.len() == 2
-        && primes[0] != primes[1]
-        && primes.iter().all(|p| p.bits() == 512)
-}
-
-/// Whether `p` is prime, as far as anyone can tell from a key that may have been crafted to fool the
-/// test: neither QG Trust's checks nor rsa's test primality, and composite factors of the right
-/// sizes would sign with a modulus anyone can factor (found by Codex review). num-bigint-dig's
-/// Baillie-PSW test (`probably_prime` with no rounds of its own: its Miller-Rabin bases are
-/// predictable, and its documentation says not to rely on them against crafted input), then 32
-/// Miller-Rabin rounds with bases from the operating system's randomness, which a key file cannot
-/// anticipate. A composite passes a random round with probability at most 1/4.
-fn is_prime(p: &rsa::BigUint) -> bool {
-    use num_bigint_dig::RandBigInt;
-    use num_bigint_dig::prime::probably_prime;
-    let one = rsa::BigUint::from(1u32);
-    let two = rsa::BigUint::from(2u32);
-    if !probably_prime(p, 0) {
-        return false;
-    }
-    // Every value derived from p is wiped when dropped: p - 1 gives p back (found by Codex review).
-    // Each squaring makes a new wiped value and drops the old one, wiped, rather than overwriting it.
-    let minus_one = Zeroizing::new(p - &one);
-    let s = minus_one.trailing_zeros().unwrap_or(0);
-    let d = Zeroizing::new(&*minus_one >> s);
-    let mut rng = rand_core::OsRng;
-    'round: for _ in 0..32 {
-        let a = rng.gen_biguint_range(&two, &minus_one);
-        let mut x = Zeroizing::new(a.modpow(&d, p));
-        if *x == one || x == minus_one {
-            continue;
-        }
-        for _ in 1..s {
-            let square = Zeroizing::new(&*x * &*x);
-            x = Zeroizing::new(&*square % p);
-            if x == minus_one {
-                continue 'round;
-            }
-        }
-        return false;
-    }
-    true
-}
 
 /// A protected key's PKCS#8 bytes: PBKDF2 then CBC decryption, done here rather than in pkcs5,
 /// whose derived key sits in a buffer it never wipes (found by Codex review). The derived key, the
@@ -342,33 +277,33 @@ impl KeyEntry {
                     return Err(KeyError::UnsupportedProtection);
                 };
                 let plain = decrypt(params, password, info.encrypted_data)?;
-                RsaPrivateKey::from_pkcs8_der(&plain).map_err(|_| KeyError::NotRsa)?
+                RsaKey::from_pkcs8_der(&plain).map_err(|_| KeyError::NotRsa)?
             }
-            "PRIVATE KEY" => RsaPrivateKey::from_pkcs8_der(der).map_err(|_| KeyError::NotAKey)?,
+            "PRIVATE KEY" => RsaKey::from_pkcs8_der(der).map_err(|_| KeyError::NotAKey)?,
             _ => return Err(KeyError::NotAKey),
         };
-        lotw_shaped(&key)?;
+        // A key LoTW uses, as tqsllib makes them: 1024 bits, e = 65537 (tqsl_new_rsa_key), two
+        // different 512-bit factors, each passing AWS-LC's primality test. Anything else cannot
+        // carry a LoTW certificate; unequal, equal or composite factors would sign with a modulus
+        // anyone can factor, or hang (found by Codex review).
+        if !key.is_lotw_shaped() {
+            return Err(KeyError::NotLotwKey);
+        }
         // The public key the file states is the private key's own, so a certificate matched by it
         // is this key's (found by Codex review).
-        let stated = rsa::RsaPublicKey::from_public_key_pem(&self.public_key_pem)
+        let (label, spki) = pkcs8::der::pem::decode_vec(self.public_key_pem.as_bytes())
             .map_err(|_| KeyError::PublicKeyMismatch)?;
-        if stated != key.to_public_key() {
+        if label != "PUBLIC KEY" || !key.matches_public_key(&spki) {
             return Err(KeyError::PublicKeyMismatch);
         }
-        Ok(TqslKey {
-            key: SigningKey::<Sha1>::new(key),
-        })
+        Ok(TqslKey { key })
     }
 }
 
 impl TqslKey {
     /// The signature over `data`, as the bytes tqsllib's `tqsl_signDataBlock` returns.
     pub fn sign(&self, data: &[u8]) -> Result<Vec<u8>, KeyError> {
-        let signature: Signature = self
-            .key
-            .try_sign_with_rng(&mut rand_core::OsRng, data)
-            .map_err(|_| KeyError::Signing)?;
-        Ok(signature.to_vec())
+        self.key.sign_sha1(data).map_err(|_| KeyError::Signing)
     }
 }
 
@@ -388,6 +323,8 @@ pub fn tqsl_base64(signature: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rsa::RsaPrivateKey;
+    use rsa::pkcs8::DecodePrivateKey;
 
     #[test]
     fn base64_is_wrapped_as_tqsllib_wraps_it() {
@@ -584,28 +521,6 @@ mod tests {
     }
 
     #[test]
-    fn a_key_with_equal_primes_is_refused() {
-        use rsa::traits::{PrivateKeyParts, PublicKeyParts};
-        // Codex review: p = q gives a 1024-bit modulus of two 512-bit primes that rsa accepts.
-        assert!(
-            entry(include_str!("../../../tests/corpus/pki/user-1024.key.pem"))
-                .unlock(None)
-                .is_ok()
-        );
-        let key = RsaPrivateKey::from_pkcs8_pem(include_str!(
-            "../../../tests/corpus/pki/user-1024.key.pem"
-        ))
-        .expect("key");
-        let p = key.primes()[0].clone();
-        assert!(
-            shape_ok(key.n().bits(), key.e(), key.primes()),
-            "the test key itself is LoTW-shaped"
-        );
-        let square = &p * &p;
-        assert!(!shape_ok(square.bits(), key.e(), &[p.clone(), p]));
-    }
-
-    #[test]
     fn a_public_key_that_is_not_the_private_keys_is_refused() {
         // Codex review: certificate matching reads PUBLIC_KEY, so it must be the signing key's own.
         let file = |case: &str| -> Vec<u8> {
@@ -633,37 +548,6 @@ mod tests {
     }
 
     #[test]
-    fn composite_factors_of_the_right_size_are_refused() {
-        use rsa::traits::PrivateKeyParts;
-        // Codex review: p = 3^323 and q = 7 * 3^321 are both 512 bits, so they pass the size checks.
-        let three_to = |k: u32| (0..k).fold(rsa::BigUint::from(1u32), |acc, _| acc * 3u32);
-        let p = three_to(323);
-        let q = rsa::BigUint::from(7u32) * three_to(321);
-        assert_eq!((p.bits(), q.bits(), (&p * &q).bits()), (512, 512, 1024));
-        assert!(shape_ok(
-            1024,
-            &rsa::BigUint::from(65_537u32),
-            &[p.clone(), q.clone()]
-        ));
-        assert!(!is_prime(&p) && !is_prime(&q));
-        // The test key's own primes are prime.
-        let key = RsaPrivateKey::from_pkcs8_pem(include_str!(
-            "../../../tests/corpus/pki/user-1024.key.pem"
-        ))
-        .expect("key");
-        assert!(key.primes().iter().all(is_prime));
-        // A Carmichael number, which fools Fermat's test, and its neighbours.
-        assert!(!is_prime(&rsa::BigUint::from(561u32)));
-        assert!(is_prime(&rsa::BigUint::from(65_537u32)));
-    }
-
-    #[test]
-    fn primality_working_values_are_wiped() {
-        fn wiped<T: zeroize::ZeroizeOnDrop>() {}
-        wiped::<Zeroizing<rsa::BigUint>>();
-    }
-
-    #[test]
     fn every_buffer_in_decryption_is_wiped() {
         fn wiped<T: zeroize::ZeroizeOnDrop>() {}
         wiped::<Zeroizing<Vec<u8>>>();
@@ -671,15 +555,73 @@ mod tests {
         wiped::<cbc::Decryptor<aes::Aes256>>();
     }
 
+    /// A key file as a crafted one would be written, by hand through pkcs1 and pkcs8, from p, q
+    /// and d: rsa will not write keys whose CRT values do not exist, but a file can carry any
+    /// numbers. Its stated public key is n's and e's own, so only the shape check can refuse it.
+    fn crafted(p: &rsa::BigUint, q: &rsa::BigUint, d: &rsa::BigUint) -> KeyEntry {
+        use pkcs8::der::Encode;
+        use rsa::pkcs8::EncodePublicKey;
+        fn uint(b: &[u8]) -> pkcs8::der::asn1::UintRef<'_> {
+            pkcs8::der::asn1::UintRef::new(b).expect("uint")
+        }
+        let e = rsa::BigUint::from(65_537u32);
+        let n = p * q;
+        let (nb, eb, db, pb, qb) = (
+            n.to_bytes_be(),
+            e.to_bytes_be(),
+            d.to_bytes_be(),
+            p.to_bytes_be(),
+            q.to_bytes_be(),
+        );
+        let one = [1u8];
+        let pkcs1_key = rsa::pkcs1::RsaPrivateKey {
+            modulus: uint(&nb),
+            public_exponent: uint(&eb),
+            private_exponent: uint(&db),
+            prime1: uint(&pb),
+            prime2: uint(&qb),
+            exponent1: uint(&one),
+            exponent2: uint(&one),
+            coefficient: uint(&one),
+            other_prime_infos: None,
+        }
+        .to_der()
+        .expect("PKCS#1");
+        let info = pkcs8::PrivateKeyInfo::new(rsa::pkcs1::ALGORITHM_ID, &pkcs1_key);
+        let pem = pkcs8::der::pem::encode_string(
+            "PRIVATE KEY",
+            pkcs8::LineEnding::LF,
+            &info.to_der().expect("PKCS#8"),
+        )
+        .expect("PEM");
+        let public = rsa::RsaPublicKey::new(n, e)
+            .expect("public")
+            .to_public_key_pem(pkcs8::LineEnding::LF)
+            .expect("PEM");
+        KeyEntry {
+            callsign: "QG0TEST".into(),
+            public_key_pem: public,
+            private_key_pem: Zeroizing::new(pem),
+        }
+    }
+
+    /// The inverse of 65537 modulo `m`.
+    fn inverse_of_e(m: &rsa::BigUint) -> rsa::BigUint {
+        use num_bigint_dig::ModInverse;
+        rsa::BigUint::from(65_537u32)
+            .mod_inverse(m)
+            .and_then(|d| d.to_biguint())
+            .expect("d")
+    }
+
     #[test]
     fn a_key_with_composite_factors_does_not_unlock() {
-        use num_bigint_dig::ModInverse;
-        use rsa::pkcs8::EncodePublicKey;
-        // Codex review's key: n = 3^644 * 7 from p = 3^323 and q = 7 * 3^321, with d the inverse of
-        // e modulo lcm(p - 1, q - 1, 2 * 3^643), so rsa's own checks accept it and it would sign.
+        // Codex review's key: p = 3^323 and q = 7 * 3^321, both 512 bits, n of 1024 bits, d the
+        // inverse of e modulo lcm(p - 1, q - 1, 2 * 3^643): rsa accepts it, and it would sign.
         let three_to = |k: u32| (0..k).fold(rsa::BigUint::from(1u32), |acc, _| acc * 3u32);
         let one = rsa::BigUint::from(1u32);
         let (p, q) = (three_to(323), rsa::BigUint::from(7u32) * three_to(321));
+        assert_eq!((p.bits(), q.bits(), (&p * &q).bits()), (512, 512, 1024));
         let gcd = |mut a: rsa::BigUint, mut b: rsa::BigUint| {
             while b != rsa::BigUint::from(0u32) {
                 let r = &a % &b;
@@ -693,68 +635,37 @@ mod tests {
             lcm(&p - &one, &q - &one),
             rsa::BigUint::from(2u32) * three_to(643),
         );
-        let e = rsa::BigUint::from(65_537u32);
-        let d = e
-            .clone()
-            .mod_inverse(&lambda)
-            .and_then(|d| d.to_biguint())
-            .expect("d");
-        let key = RsaPrivateKey::from_components(
-            &p * &q,
-            e.clone(),
-            d.clone(),
-            vec![p.clone(), q.clone()],
-        )
-        .expect("rsa accepts it");
-        // rsa will not write this key (its CRT values do not exist), but a crafted file can carry any
-        // numbers, and rsa rebuilds a key from n, e, d, p and q when it reads one. So the file is
-        // written here by hand, through pkcs1's and pkcs8's own structures.
-        use pkcs8::der::Encode;
-        let bytes = |x: &rsa::BigUint| x.to_bytes_be();
-        let (n, eb, db, pb, qb) = (
-            bytes(&(&p * &q)),
-            bytes(&e),
-            bytes(&d),
-            bytes(&p),
-            bytes(&q),
-        );
-        fn uint(b: &[u8]) -> pkcs8::der::asn1::UintRef<'_> {
-            pkcs8::der::asn1::UintRef::new(b).expect("uint")
-        }
-        let one_byte = [1u8];
-        let pkcs1_key = rsa::pkcs1::RsaPrivateKey {
-            modulus: uint(&n),
-            public_exponent: uint(&eb),
-            private_exponent: uint(&db),
-            prime1: uint(&pb),
-            prime2: uint(&qb),
-            exponent1: uint(&one_byte),
-            exponent2: uint(&one_byte),
-            coefficient: uint(&one_byte),
-            other_prime_infos: None,
-        }
-        .to_der()
-        .expect("PKCS#1");
-        let info = pkcs8::PrivateKeyInfo::new(rsa::pkcs1::ALGORITHM_ID, &pkcs1_key);
-        let pem = pkcs8::der::pem::encode_string(
-            "PRIVATE KEY",
-            pkcs8::LineEnding::LF,
-            &info.to_der().expect("PKCS#8"),
-        )
-        .expect("PEM");
+        let d = inverse_of_e(&lambda);
+        let entry = crafted(&p, &q, &d);
         assert!(
-            RsaPrivateKey::from_pkcs8_pem(&pem).is_ok(),
-            "rsa reads the crafted file as a key"
+            RsaPrivateKey::from_pkcs8_pem(&entry.private_key_pem).is_ok(),
+            "rsa reads it as a key"
         );
-        let entry = KeyEntry {
-            callsign: "QG0TEST".into(),
-            public_key_pem: key
-                .to_public_key()
-                .to_public_key_pem(pkcs8::LineEnding::LF)
-                .expect("PEM"),
-            private_key_pem: Zeroizing::new(pem),
-        };
-        assert_eq!(entry.unlock(None).err(), Some(KeyError::NotLotwKey));
+        // AWS-LC's parser refuses it before QG Trust's own shape check needs to: either way it
+        // never signs.
+        let refused = entry.unlock(None).err();
+        assert!(
+            matches!(refused, Some(KeyError::NotAKey | KeyError::NotLotwKey)),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
+    fn a_key_with_equal_primes_does_not_unlock() {
+        use rsa::traits::PrivateKeyParts;
+        // Codex review: p = q gives a 1024-bit modulus of two 512-bit primes, which rsa accepts,
+        // and anyone can factor it with a square root. d is the inverse of e modulo p(p - 1).
+        let real = RsaPrivateKey::from_pkcs8_pem(include_str!(
+            "../../../tests/corpus/pki/user-1024.key.pem"
+        ))
+        .expect("key");
+        let p = real.primes()[0].clone();
+        let d = inverse_of_e(&(&p * (&p - rsa::BigUint::from(1u32))));
+        let refused = crafted(&p, &p, &d).unlock(None).err();
+        assert!(
+            matches!(refused, Some(KeyError::NotAKey | KeyError::NotLotwKey)),
+            "{refused:?}"
+        );
     }
 
     #[test]

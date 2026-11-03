@@ -23,11 +23,11 @@ allow-wildcard-paths = true
 deny = [
     { crate = "autotools", reason = "builds native code" },
     { crate = "bindgen", reason = "generates bindings for native code" },
-    { crate = "cc", reason = "builds native code" },
-    { crate = "cmake", reason = "builds native code" },
+    { crate = "cc", reason = "builds native code; allowed only to build AWS-LC (decision 0006)", wrappers = ["aws-lc-sys", "cmake"] },
+    { crate = "cmake", reason = "builds native code; allowed only to build AWS-LC (decision 0006)", wrappers = ["aws-lc-sys"] },
     { crate = "cxx-build", reason = "builds native code" },
     { crate = "nasm-rs", reason = "builds assembly" },
-    { crate = "pkg-config", reason = "finds native libraries to link" },
+    { crate = "pkg-config", reason = "finds native libraries to link; allowed only to build AWS-LC (decision 0006)", wrappers = ["aws-lc-sys"] },
     { crate = "vcpkg", reason = "finds native libraries to link" },
 ]
 

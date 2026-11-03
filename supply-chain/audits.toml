@@ -56,6 +56,13 @@ start = "2020-06-05"
 end = "2027-11-03"
 notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
 
+[[trusted.aws-lc-sys]]
+criteria = "safe-to-deploy"
+user-id = 156764 # Justin W Smith (justsmth)
+start = "2022-11-09"
+end = "2027-11-03"
+notes = "AWS-LC, the cryptographic provider KI7MT chose for LoTW's signature (2026-11-03, docs/decisions/0006), published by AWS's aws-lc-rs maintainer; the library QSO Graph Desktop already ships"
+
 [[trusted.base64ct]]
 criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
@@ -84,6 +91,13 @@ start = "2021-04-10"
 end = "2027-11-03"
 notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
 
+[[trusted.cc]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:rust-lang/cc-rs"
+start = "2025-09-01"
+end = "2027-11-03"
+notes = "The Rust project, a trusted publisher (decision 0004)"
+
 [[trusted.cfg-if]]
 criteria = "safe-to-deploy"
 user-id = 55123 # rust-lang-owner
@@ -97,6 +111,13 @@ user-id = 5059 # Artyom Pavlov (newpavlov)
 start = "2022-02-10"
 end = "2027-11-03"
 notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.cmake]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2022-10-29"
+end = "2027-11-03"
+notes = "The Rust project, a trusted publisher (decision 0004)"
 
 [[trusted.const-oid]]
 criteria = "safe-to-deploy"
@@ -140,12 +161,26 @@ start = "2020-06-10"
 end = "2027-11-03"
 notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
 
+[[trusted.find-msvc-tools]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:rust-lang/cc-rs"
+start = "2025-09-05"
+end = "2027-11-03"
+notes = "The Rust project, a trusted publisher (decision 0004)"
+
 [[trusted.getrandom]]
 criteria = "safe-to-deploy"
 user-id = 5059 # Artyom Pavlov (newpavlov)
 start = "2019-06-28"
 end = "2027-11-03"
 notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+
+[[trusted.getrandom]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:rust-random/getrandom"
+start = "2025-12-27"
+end = "2027-11-03"
+notes = "rust-random, a trusted publisher (decision 0004)"
 
 [[trusted.hmac]]
 criteria = "safe-to-deploy"
@@ -166,6 +201,13 @@ criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-05-02"
 end = "2027-11-03"
+
+[[trusted.jobserver]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2024-07-23"
+end = "2027-11-03"
+notes = "The Rust project, a trusted publisher (decision 0004)"
 
 [[trusted.lazy_static]]
 criteria = "safe-to-deploy"
