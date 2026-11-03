@@ -791,8 +791,12 @@ fn assigns_path(tokens: proc_macro2::TokenStream) -> bool {
     trees.iter().enumerate().any(|(i, tree)| match tree {
         TokenTree::Ident(id) => {
             let name = id.to_string();
+            // A standalone `=`: in `path == 0` or `path => x` the `=` is joined to
+            // the next character, which is an expression, not an attribute (found
+            // by Codex review).
             name.strip_prefix("r#").unwrap_or(&name) == "path"
-                && matches!(trees.get(i + 1), Some(TokenTree::Punct(p)) if p.as_char() == '=')
+                && matches!(trees.get(i + 1), Some(TokenTree::Punct(p))
+                    if p.as_char() == '=' && p.spacing() == proc_macro2::Spacing::Alone)
         }
         TokenTree::Group(g) => assigns_path(g.stream()),
         _ => false,
@@ -1649,6 +1653,9 @@ pub fn proof() {}
             vec!["uses #[path]"]
         );
         assert!(scan("let path = [1]; let v = [path];").is_empty());
+        // Comparisons are not assignments (Codex review, round 20).
+        assert!(scan("pub fn f(path: u8) -> bool { [path == 0][0] }").is_empty());
+        assert!(scan("let v = [match x { path => 1 }];").is_empty());
         // Codex review, round 13: a raw `path`, and an attribute named by a macro variable.
         assert_eq!(
             scan("#[r#path = \"payload.inc\"] mod hidden;"),
