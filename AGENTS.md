@@ -32,6 +32,11 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
   every `extern` block and all assembly in our own code. Every source file is also read as tokens,
   whatever its `cfg`, and no workspace crate defines a macro (`macro_rules!` or procedural).
   *Test: `cargo xtask policy`.*
+- **No key data is left in freed memory, whichever library allocated it.** Every QG Trust program
+  (`qg-trust`, QSO Graph Desktop's native code) installs a wiping global allocator, so every freed block
+  is overwritten; libraries such as `rsa` and `num-bigint-dig` wipe their own temporaries only in part
+  (decision 0002). *Test: `cargo xtask policy` refuses a program without it (with the allocator, phase
+  3, qso-graph-desktop#172), and the custody test finds no key data in memory or a crash dump.*
 - **The key never leaves the OS credential store** except as a signature, or as a backup QGT encrypts
   itself. No API returns it, and it is never in a file, log, trace, error, IPC message or crash dump.
 - **Signatures match tqsllib's byte for byte.** A change to signing comes with a differential test
