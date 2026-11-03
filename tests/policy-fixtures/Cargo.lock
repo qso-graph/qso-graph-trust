@@ -19,6 +19,10 @@ name = "planted-commented"
 version = "0.0.0"
 
 [[package]]
+name = "planted-decl-macro"
+version = "0.0.0"
+
+[[package]]
 name = "planted-decoy"
 version = "0.0.0"
 

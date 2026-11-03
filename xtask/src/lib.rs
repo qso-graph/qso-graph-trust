@@ -676,6 +676,8 @@ const REFUSED_IDENTS: &[(&str, &str)] = &[
     // A macro can assemble code no scan sees whole (Codex review found five ways
     // in turn), so the workspace's crates define none.
     ("macro_rules", "defines a macro"),
+    // `macro`, the unstable declarative macro (found by Codex review).
+    ("macro", "defines a macro"),
     ("include", "uses include"),
     ("asm", "uses asm"),
     ("global_asm", "uses global_asm"),
@@ -741,6 +743,12 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                 let bracket = g.delimiter() == proc_macro2::Delimiter::Bracket;
                 if attribute && assigns_path(g.stream()) {
                     found.push("uses #[path]");
+                }
+                // Unstable features: stable code needs none, and they include
+                // ways to build unsafe code from pieces (found by Codex review).
+                let first = g.stream().into_iter().next();
+                if attribute && matches!(&first, Some(TokenTree::Ident(i)) if i == "feature") {
+                    found.push("enables an unstable feature");
                 }
                 // A name a macro substitutes: `#[$name = ...]`, `[$name = ...]` or
                 // `cfg_attr(..., $name = ...)` could be made `path` by the caller.
@@ -1143,6 +1151,15 @@ const WORKFLOW_REFUSED: &[&str] = &[
 pub fn env_problems(vars: impl IntoIterator<Item = (String, String)>) -> Vec<String> {
     let mut problems = Vec::new();
     for (var, value) in vars {
+        // Compared without regard to case: Cargo reads `rustflags` as `RUSTFLAGS`
+        // on Windows (found by Codex review).
+        let var = var.to_ascii_uppercase();
+        // RUSTC_BOOTSTRAP unlocks unstable features on a stable compiler, among
+        // them ways to build unsafe code the scan cannot see (found by Codex review).
+        if var == "RUSTC_BOOTSTRAP" {
+            problems.push(format!("{var} unlocks unstable features: {value}"));
+            continue;
+        }
         let rustflags = matches!(
             var.as_str(),
             "RUSTFLAGS" | "CARGO_ENCODED_RUSTFLAGS" | "CARGO_BUILD_RUSTFLAGS"
@@ -1747,6 +1764,10 @@ pub fn proof() {}
             assert_eq!(env(&[(var, "/x")]).len(), 1, "{var}");
         }
         assert_eq!(env(&[("RUSTFLAGS", "@/tmp/ci.rsp")]).len(), 1);
+        // Any case, as Windows reads them, and the bootstrap switch (Codex review, round 23).
+        assert_eq!(env(&[("rustflags", "-l winmm")]).len(), 1);
+        assert_eq!(env(&[("Rustc_Wrapper", "/x")]).len(), 1);
+        assert_eq!(env(&[("RUSTC_BOOTSTRAP", "1")]).len(), 1);
     }
 
     #[test]
@@ -1800,6 +1821,12 @@ pub fn proof() {}
             scan("macro_rules! v { ($($x:expr),*) => { [$($x),*] } }"),
             vec!["defines a macro"]
         );
+        // The unstable `macro` and any unstable feature (Codex review, round 23).
+        let decl = scan(
+            "#![feature(decl_macro, macro_metavar_expr_concat)] macro read_value() { ${concat(un, safe)} { 7 } }",
+        );
+        assert!(decl.contains(&"defines a macro"), "{decl:?}");
+        assert!(decl.contains(&"enables an unstable feature"), "{decl:?}");
         // A macro of our own is refused outright (Codex review, round 17).
         assert!(
             scan(

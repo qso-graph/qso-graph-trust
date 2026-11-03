@@ -113,6 +113,9 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
         lib_root(&meta, "planted-passed-hash") + " defines a macro",
         // A whole attribute passed as a meta fragment: no macro of our own is allowed.
         lib_root(&meta, "planted-meta-macro") + " defines a macro",
+        // Unstable features, and the unstable `macro` (Codex review, round 23).
+        lib_root(&meta, "planted-decl-macro") + " enables an unstable feature",
+        fixture(&meta, "planted-decl-macro", "src/generated.rs") + " defines a macro",
         // A procedural macro can generate unsafe code from a string.
         "planted-proc-gen is a procedural macro crate".to_string(),
         // No shebangs, so no line can be dropped by misreading one: `#! /* c */ [`
