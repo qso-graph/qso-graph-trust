@@ -56,8 +56,8 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| Back up everything: certificates, keys, locations, signed-QSO record, settings | File: Backup | QG Trust's part of QSO Graph Desktop's one backup; always a full backup, encrypted under a password QG Trust makes up. To move only some calls, delete the others first | 0.7.0 | #172 |
-| Restore it on any computer (macOS, Windows, Linux), keys into that computer's credential store | File: Restore | Onto a clean slate: what this computer holds is removed first, nothing merged | 0.7.0 | #172 |
+| Back up certificates, keys and the signed-QSO record | File: Backup | A part of QSO Graph Desktop's one backup, beside Callsigns and Locations and Settings; all ticked is a full backup. This part alone is encrypted, under a password QG Trust makes up. To move only some calls, delete the others first | 0.7.0 | #172, #174 |
+| Restore it on any computer (macOS, Windows, Linux), keys into that computer's credential store | File: Restore | Part by part, onto a clean slate: what this computer holds is removed first, nothing merged | 0.7.0 | #172, #174 |
 | Restore a TQSL backup (`.tbk`): certificates, keys, locations | File: Restore | Reads and checks it; saving what it holds waits on 1.2 | Part done | #172 |
 | Restore TQSL's record of QSOs already signed | File: Restore | Read; saving waits on 1.2 | Part done | #172 |
 | Use TQSL's settings that change what's signed: custom mode mappings, ignore seconds, ignore callsigns in the log, non-amateur calls, location details in the log | Preferences | Read from the backup; not yet used when signing | Part done | #172 |
