@@ -16,3 +16,7 @@ versions follow [Semantic Versioning](https://semver.org/).
   matching tqsllib 2.8.7's `.tq7` byte for byte but for the identification line. A log is signed
   only with the certificate's own key, for its call and DXCC entity, while it is in force, and for
   QSOs within its QSO dates.
+- No key data in freed memory (qso-graph-desktop#172): `qg-trust` installs a wiping global
+  allocator (`zeroizing-alloc`), `cargo xtask policy` refuses any program without it, and the
+  custody test reads a signing program's memory and finds no key data or password, with two
+  controls proving it finds what is there.

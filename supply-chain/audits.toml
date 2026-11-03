@@ -61,6 +61,12 @@ criteria = "safe-to-deploy"
 delta = "0.9.4 -> 0.9.5"
 notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: metadata and documentation only; the implementation is unchanged."
 
+[[audits.zeroizing-alloc]]
+who = "Bob, agent for KI7MT"
+criteria = "safe-to-deploy"
+version = "0.1.1"
+notes = "Reviewed in full by Bob, 2026-11-03 (src/lib.rs, 103 lines; no dependencies, no build script, no I/O): a GlobalAlloc wrapper that writes zeroes over layout.size() bytes on dealloc, through a function pointer read volatilely so the store is not removed as dead; alloc and alloc_zeroed pass through; realloc is the trait's default, which allocates, copies and deallocates, so the old block is wiped too. The unsafe is the GlobalAlloc contract, met by passing the caller's pointer and layout straight through. QG Trust's custody test checks the effect in a running process."
+
 [[trusted.aes]]
 criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)

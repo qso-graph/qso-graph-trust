@@ -9,6 +9,12 @@
 
 use std::process::ExitCode;
 
+/// Every freed block is wiped, whichever library allocated it: no key data is left in freed
+/// memory (AGENTS.md). `cargo xtask policy` refuses a program without exactly this.
+#[global_allocator]
+static ALLOCATOR: zeroizing_alloc::ZeroAlloc<std::alloc::System> =
+    zeroizing_alloc::ZeroAlloc(std::alloc::System);
+
 /// tqsl's exit code for a command syntax error (TQSL 2.8.7, apps/tqslapp.h),
 /// kept so a logger that calls `tqsl` today reads the same meaning.
 const EXIT_SYNTAX: u8 = 10;

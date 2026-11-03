@@ -12,6 +12,11 @@
 //!   member takes the workspace's lints, and every crate root says
 //!   `#![forbid(unsafe_code)]` where the compiler reads it.
 //!
+//! - **No key data in freed memory** (AGENTS.md, KI7MT 2026-11-03): every program
+//!   a workspace crate builds (a binary, or a library another language loads)
+//!   installs [`WIPING_ALLOCATOR`], so every block is wiped when it is freed,
+//!   whichever library allocated it.
+//!
 //! Each check is proved by planted cases it must catch (tests/planted.rs), and
 //! anything a check cannot read counts as a failure, never a pass.
 
@@ -58,6 +63,16 @@ missing_docs = "warn"
 undocumented_unsafe_blocks = "deny"
 multiple_unsafe_ops_per_block = "deny"
 "#;
+
+/// The global allocator every QG Trust program installs, exactly as written:
+/// 1Password's `zeroizing-alloc` over the system allocator, which wipes each block
+/// as it is freed (AGENTS.md; reviewed in supply-chain/audits.toml).
+pub const WIPING_ALLOCATOR: &str = "zeroizing_alloc::ZeroAlloc<std::alloc::System>";
+
+/// The one program allowed to go without it: the custody test's control, which
+/// proves the test finds what an unwiped free leaves behind. A test tool, never
+/// shipped.
+pub const UNWIPED_CONTROL: &str = "qgt-custody-unwiped";
 
 /// Whether a crate is the named cryptographic provider.
 fn crypto_provider(name: &str) -> bool {
@@ -1750,6 +1765,113 @@ fn copy_repository(from: &Path, to: &Path, output: Option<&Path>) -> Result<(), 
 
 /// Whether a path is the single identifier `name`, raw spelling included:
 /// `r#unsafe_code` is `unsafe_code` (found by Codex review).
+/// Every program the workspace builds, but xtask and [`UNWIPED_CONTROL`], must install
+/// [`WIPING_ALLOCATOR`]: a binary, or a `cdylib` or `staticlib` another language loads.
+/// Its root must hold, at the top level and with no attribute but documentation,
+/// `#[global_allocator] static NAME: zeroizing_alloc::ZeroAlloc<std::alloc::System> =
+/// zeroizing_alloc::ZeroAlloc(std::alloc::System);`, so a `cfg` cannot leave it out of
+/// one build. A root that cannot be read or parsed fails. Sorted; empty passes.
+pub fn wiping_allocator(meta: &Value) -> Vec<String> {
+    let empty = Vec::new();
+    let workspace = members(meta);
+    let mut problems = Vec::new();
+    for package in meta["packages"].as_array().unwrap_or(&empty) {
+        if !package["id"]
+            .as_str()
+            .is_some_and(|id| workspace.contains(id))
+            || package["name"] == "xtask"
+        {
+            continue;
+        }
+        for target in package["targets"].as_array().unwrap_or(&empty) {
+            let kinds: Vec<&str> = target["kind"]
+                .as_array()
+                .unwrap_or(&empty)
+                .iter()
+                .filter_map(Value::as_str)
+                .collect();
+            let program = kinds
+                .iter()
+                .any(|k| matches!(*k, "bin" | "cdylib" | "staticlib"));
+            if !program || target["name"] == UNWIPED_CONTROL {
+                continue;
+            }
+            let Some(root) = target["src_path"].as_str() else {
+                problems.push(format!(
+                    "{} has a program with no root",
+                    package["name"].as_str().unwrap_or("a package")
+                ));
+                continue;
+            };
+            match std::fs::read_to_string(root) {
+                Ok(source) if installs_wiping_allocator(&source) => {}
+                Ok(_) => problems.push(format!("{root} does not install the wiping allocator")),
+                Err(e) => problems.push(format!("{root}: {e}")),
+            }
+        }
+    }
+    problems.sort();
+    problems.dedup();
+    problems
+}
+
+/// Whether a program root installs [`WIPING_ALLOCATOR`] as [`wiping_allocator`] requires.
+pub fn installs_wiping_allocator(source: &str) -> bool {
+    let Ok(file) = syn::parse_file(source) else {
+        return false;
+    };
+    let idents = |path: &syn::Path| -> Vec<String> {
+        path.segments.iter().map(|s| s.ident.to_string()).collect()
+    };
+    let system = |path: &syn::Path| {
+        idents(path) == ["std", "alloc", "System"]
+            && path.segments.iter().all(|s| s.arguments.is_none())
+            && path.leading_colon.is_none()
+    };
+    let zero_alloc = |path: &syn::Path| {
+        idents(path) == ["zeroizing_alloc", "ZeroAlloc"] && path.leading_colon.is_none()
+    };
+    file.items.iter().any(|item| {
+        let syn::Item::Static(s) = item else {
+            return false;
+        };
+        // `#[global_allocator]` and nothing else but documentation: no `cfg`, `cfg_attr`
+        // or anything else that could take it out of a build.
+        let others: Vec<&syn::Attribute> = s
+            .attrs
+            .iter()
+            .filter(|a| !(names(a.path(), "doc") && matches!(a.meta, syn::Meta::NameValue(_))))
+            .collect();
+        let attribute = matches!(&others[..], [a]
+            if matches!(a.style, syn::AttrStyle::Outer)
+                && names(a.path(), "global_allocator")
+                && matches!(a.meta, syn::Meta::Path(_)));
+        let ty = match &*s.ty {
+            syn::Type::Path(t) if t.qself.is_none() && zero_alloc(&t.path) => {
+                match &t.path.segments.last().map(|l| &l.arguments) {
+                    Some(syn::PathArguments::AngleBracketed(args)) => matches!(
+                        args.args.iter().collect::<Vec<_>>()[..],
+                        [syn::GenericArgument::Type(syn::Type::Path(inner))]
+                            if inner.qself.is_none() && system(&inner.path)
+                    ),
+                    _ => false,
+                }
+            }
+            _ => false,
+        };
+        let value = match &*s.expr {
+            syn::Expr::Call(call) if call.attrs.is_empty() => {
+                matches!(&*call.func, syn::Expr::Path(f)
+                    if f.attrs.is_empty() && f.qself.is_none() && zero_alloc(&f.path))
+                    && matches!(call.args.iter().collect::<Vec<_>>()[..],
+                        [syn::Expr::Path(a)] if a.attrs.is_empty() && a.qself.is_none() && system(&a.path))
+            }
+            _ => false,
+        };
+        attribute && ty && value && matches!(s.mutability, syn::StaticMutability::None)
+    })
+}
+
 fn names(path: &syn::Path, name: &str) -> bool {
     use syn::ext::IdentExt;
     path.get_ident().is_some_and(|i| i.unraw() == name)

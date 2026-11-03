@@ -48,6 +48,7 @@ fn main() -> ExitCode {
         ("no unsafe code", xtask::no_unsafe(&meta)),
         ("no lint overrides", xtask::no_lint_overrides(&root_dir)),
         ("the pinned compiler", xtask::pinned_compiler(&root_dir)),
+        ("the wiping allocator", xtask::wiping_allocator(&meta)),
     ] {
         if problems.is_empty() {
             println!("policy: {check}: pass");

@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: the custody control's name is excepted, and only that name: a program named like it
+# must still be caught.
+[package]
+name = "planted-alloc-control"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "qgt-custody-unwiped"
+path = "src/control.rs"
+
+[[bin]]
+name = "qgt-custody-unwiped-too"
+path = "src/lookalike.rs"
+
+[lints]
+workspace = true

@@ -37,9 +37,13 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
   *Test: `cargo xtask policy`.*
 - **No key data is left in freed memory, whichever library allocated it.** Every QG Trust program
   (`qg-trust`, QSO Graph Desktop's native code) installs a wiping global allocator, so every freed block
-  is overwritten; libraries such as `rsa` and `num-bigint-dig` wipe their own temporaries only in part
-  (decision 0002). *Test: `cargo xtask policy` refuses a program without it (with the allocator, phase
-  3, qso-graph-desktop#172), and the custody test finds no key data in memory or a crash dump.*
+  is overwritten; libraries wipe their own temporaries only in part (decision 0002). The allocator is
+  1Password's `zeroizing-alloc`, installed as exactly `#[global_allocator] static …:
+  zeroizing_alloc::ZeroAlloc<std::alloc::System>`; the custody test's control
+  (`qgt-custody-unwiped`) is the one program without it. *Test: `cargo xtask policy` refuses a
+  program without it, and the custody test (`crates/qso-graph-trust-custody`, Linux, debug and
+  release) reads a signing program's whole memory, as a crash dump holds it, and finds no key data
+  or password.*
 - **The OS credential store holds the key at rest,** and it leaves the store only to sign, as a
   signature, or as a backup QGT encrypts itself; while it signs, it is in memory, as in every signer. No API returns it, and it is never in a file, log, trace, error, IPC message or crash dump.
 - **LoTW's tables are ARRL's, never typed in.** Bands, modes, the ADIF mode map, satellites, DXCC
