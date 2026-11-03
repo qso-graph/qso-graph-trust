@@ -7,7 +7,7 @@ decision 0002, and replaces RustCrypto's `rsa` as what signs.
 
 - **AWS-LC makes LoTW's signature:** RSA PKCS#1 v1.5 over SHA-1, through AWS-LC's `RSA_sign` with
   `NID_sha1`. It is the library QSO Graph Desktop already ships, through `aws-lc-sys` 0.45.0, the
-  version aws-lc-rs 1.18.1 uses. KI7MT: the signing step must be the strongest link, not the weakest.
+  version aws-lc-rs 1.18.1 uses. The signing step must be the strongest link, not the weakest.
 - **One binding, `qso-graph-trust-awslc`, is the only crate with unsafe code.** aws-lc-rs's safe API
   signs RSA only with SHA-2, so the binding calls AWS-LC's C functions itself: parse the key, check its
   shape and primality, compare its public key, and sign. Each unsafe block is allowed on its own and

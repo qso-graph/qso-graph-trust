@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 
-//! KI7MT's standard test set (tests/corpus/standard, made by scripts/make-standard-set.sh;
+//! The standard test set (tests/corpus/standard, made by scripts/make-standard-set.sh;
 //! qso-graph-desktop#172): three certificates from a test CA, seven station locations, a log for each
 //! signed by tqsllib 2.8.7. For every location, QG Trust signs the same log with the same key and must
 //! write tqsllib's `.tq7` exactly, but for the identification line: parks, a two-park value, three

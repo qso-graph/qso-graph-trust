@@ -2,8 +2,8 @@
 # Feature parity: TQSL 2.8.7 and QSO Graph Trust
 
 Every feature and option TQSL 2.8.7 has, in its app and on its command line, and where QSO Graph Trust
-stands on each (KI7MT, 2026-11-03: "Then we can decide what we will implement, what we won't, what's
-done, and what's left"). Not everything here needs to be in QG Trust. The list is complete so the
+stands on each, so it can be decided what to implement, what not to, what is done and what is left.
+Not everything here needs to be in QG Trust. The list is complete so the
 choice is made row by row, not by omission.
 
 Read from TQSL's source at v2.8.7 (commit d9e01726): the menus and tabs (`apps/tqsl.cpp`), preferences
@@ -15,8 +15,7 @@ Read from TQSL's source at v2.8.7 (commit d9e01726): the menus and tabs (`apps/t
 **QSGD** (QG Trust's extension in QSO Graph Desktop, its only interface, decision 0005).
 
 **Status** is a fact about the code: **Done** (code and a test, on `main`), **In review** (an open pull
-request), **Not started**. **Decision** is KI7MT's: **Implement**, **Won't**, or **Undecided**; where he
-has decided, the date is given, otherwise it is Undecided.
+request), **Not started**. **Decision** is **Implement**, **Won't**, or **Undecided**.
 
 ## 1. Signing logs (File menu, Log Operations tab)
 
@@ -25,7 +24,7 @@ has decided, the date is given, otherwise it is Undecided.
 | 1.1 | Sign an ADIF log | File: Sign and save | Lib | Done | Implement | `.tq7`/`.tq8` byte for byte as tqsllib's (Gate B, #4) |
 | 1.2 | Sign a Cabrillo log | File: Sign and save | Lib | Not started | Undecided | Uses the Cabrillo contest definitions (5.4) |
 | 1.3 | Save the signed log (`.tq8`) | File: Sign and save | Lib, CLI, QSGD | Lib done | Implement | gzip, `signed_log::tq8` |
-| 1.4 | Sign and upload to LoTW | File: Sign and upload | Lib, CLI, QSGD | Not started | Undecided | Uploading is phase 4. Never in tests (KI7MT, 2026-11-03: no uploads to ARRL) |
+| 1.4 | Sign and upload to LoTW | File: Sign and upload | Lib, CLI, QSGD | Not started | Undecided | Uploading is phase 4. Never in tests: nothing is uploaded to ARRL |
 | 1.5 | Test signing (sign, upload nothing) | File: Test Signing | CLI, QSGD | Not started | Undecided | `tqsl -z` |
 | 1.6 | Choose the station location to sign for | prompt; `-l` | Lib, CLI, QSGD | Lib done | Implement | `StationLocation` |
 | 1.7 | Confirm the station location before signing | dialog | QSGD | Not started | Undecided | "Please verify that this is the correct Station Location" |
@@ -46,20 +45,20 @@ has decided, the date is given, otherwise it is Undecided.
 | 2.3 | Request: name, address, city, state, postal code, country, email | wizard | Lib, QSGD | Not started | Undecided | |
 | 2.4 | Request: kind of call (club, DXpedition, special event, former, replacing, QSL manager) | wizard | Lib, QSGD | Not started | Undecided | Some need approval with an existing certificate |
 | 2.5 | Request signed by an existing certificate | wizard | Lib, QSGD | Not started | Undecided | |
-| 2.6 | Key password chosen at request | wizard | Lib, QSGD | Not started | Undecided | Only 1024-bit keys (KI7MT, 2026-11-03) |
+| 2.6 | Key password chosen at request | wizard | Lib, QSGD | Not started | Undecided | Only 1024-bit keys |
 | 2.7 | Renew a certificate | Renew Callsign Certificate | Lib, QSGD | Not started | Undecided | |
 | 2.8 | Load a certificate (`.tq6`) | Load Callsign Certificate from File; `-i` | Lib, CLI, QSGD | Not started | Undecided | Certificate fields are read (Lib); importing a `.tq6` is not yet |
 | 2.9 | Load a certificate and key (`.p12`) | Load from File; `-i` | Lib, CLI, QSGD | Not started | Undecided | |
-| 2.10 | Save a certificate and key (`.p12`) | Save Callsign Certificate to File | Lib, QSGD | Not started | Implement (KI7MT, 2026-11-03) | Always protected by a password QG Trust generates, 80 bits or more, 14 to 24 characters (Gate C) |
+| 2.10 | Save a certificate and key (`.p12`) | Save Callsign Certificate to File | Lib, QSGD | Not started | Implement | Always protected by a password QG Trust generates, 80 bits or more, 14 to 24 characters (Gate C) |
 | 2.11 | `.p12` compatible with Apple Keychain | preference "Export P12 files compatible with Apple Keychain" | Lib | Not started | Undecided | TQSL's weak-crypto export |
 | 2.12 | Certificate properties | Display Callsign Certificate Properties | Lib, QSGD | Lib done in part | Undecided | Call, DXCC, QSO dates, validity, serial (`Certificate`) |
 | 2.13 | Delete a certificate | Delete Callsign Certificate | Lib, QSGD | Not started | Undecided | |
 | 2.14 | Restore a deleted certificate | Restore Deleted Callsign Certificate | Lib, QSGD | Not started | Undecided | |
 | 2.15 | Certificate chain checked to LoTW's root | on load | Lib | Done | Implement | Pinned root; a file's own roots trust nothing (#7) |
 | 2.16 | Expiry warning before a certificate ends | startup; preference CertWarnDays (60) | QSGD | Not started | Undecided | |
-| 2.17 | Certificate status from LoTW (by serial) | `lotw/crl?serial=` | Lib, QSGD | Not started | Undecided | Calls ARRL; none until KI7MT decides |
+| 2.17 | Certificate status from LoTW (by serial) | `lotw/crl?serial=` | Lib, QSGD | Not started | Undecided | Calls ARRL; none until decided |
 | 2.18 | Key held in the OS credential store | (TQSL: a file) | Lib, QSGD | Not started | Implement | QG Trust's requirement, not TQSL's |
-| 2.19 | No key data left in freed memory | | Lib, CLI | Done for `qg-trust` | Implement (KI7MT, 2026-11-03) | Wiping allocator, policy check, custody test (#5) |
+| 2.19 | No key data left in freed memory | | Lib, CLI | Done for `qg-trust` | Implement | Wiping allocator, policy check, custody test (#5) |
 
 ## 3. Station locations (Station Location menu and tab)
 
@@ -81,7 +80,7 @@ has decided, the date is given, otherwise it is Undecided.
 
 | # | Feature | TQSL | Where | Status | Decision | Notes |
 |---|---|---|---|---|---|---|
-| 4.1 | Restore TQSL's backup (`.tbk`): certificates, keys, locations | Restore; `-i file.tbk` | Lib, CLI, QSGD | Lib done (#7) | Implement (KI7MT, 2026-11-03) | Gate C; signing after it matches tqsllib's |
+| 4.1 | Restore TQSL's backup (`.tbk`): certificates, keys, locations | Restore; `-i file.tbk` | Lib, CLI, QSGD | Lib done (#7) | Implement | Gate C; signing after it matches tqsllib's |
 | 4.2 | Restore TQSL's settings from a backup | Restore | Lib | Read (#7), not yet applied | Undecided | Settings that change signing are read; applying them is not yet |
 | 4.3 | Back up QG Trust (its own format) | Backup | Lib, QSGD | Not started | Undecided | Keys always under a generated password (2.10) |
 | 4.4 | Record of signed QSOs (duplicate check) | `uploaded.db`; restored from `.tbk` | Lib | Read from `.tbk` (#7) | Undecided | QG Trust's own store not started |

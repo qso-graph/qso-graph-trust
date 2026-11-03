@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# CI for QSO Graph Trust. A pull request's run is the one check of a change
-# (KI7MT, 2026-11-02: "we should be able to merge a PR if it can pass checks and
-# build"), so a merge into main runs nothing. Once a week main is checked again,
+# CI for QSO Graph Trust. A pull request's run is the one check of a change,
+# so a merge into main runs nothing. Once a week main is checked again,
 # so a newly published advisory against a locked crate fails even when nothing
 # changed. ci-all-green, the name every qso-graph repository uses, is the one
 # result a merge waits for.

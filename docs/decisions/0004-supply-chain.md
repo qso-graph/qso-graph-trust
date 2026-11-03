@@ -21,8 +21,6 @@ Decided 2026-11-03 by KI7MT, after Watson's review of qso-graph-trust#1.
 
 ## The trusted publishers
 
-KI7MT, 2026-11-03:
-
 | Publisher | Crates | Why |
 | --- | --- | --- |
 | The Rust project (`rust-lang-owner`, `github:rust-lang/*`) | `libc`, `cfg-if`, `lazy_static`, … | Part of Rust itself |

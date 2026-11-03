@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 #
-# Makes tests/corpus/standard: KI7MT's standard test set (qso-graph-desktop#172), the certificates,
+# Makes tests/corpus/standard: the standard test set (qso-graph-desktop#172), the certificates,
 # station locations, signed logs and .tbk backup a ham's TQSL 2.8.7 would hold, from test keys only. It
 # builds the harness image (tests/tqsllib), runs tests/tqsllib/make-standard-set.sh inside it with no
 # network, and installs what that made. Nothing is installed on this machine.
