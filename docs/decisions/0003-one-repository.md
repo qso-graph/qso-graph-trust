@@ -1,5 +1,7 @@
 # 0003: The library, the command line and the app live in one repository
 
+> The app is superseded by [0005](0005-qso-graph-desktop-is-the-interface.md): there is no standalone app. The library and the command line still live here together.
+
 Decided 2026-11-02 by KI7MT: "the lib, app, cli, repo live together unless there is a reason to
 separate them."
 

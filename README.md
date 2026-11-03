@@ -19,18 +19,17 @@ same way.
 | --- | --- | --- |
 | The library | Certificates, station locations, signing, upload and duplicate tracking. Shared by everything below | [`crates/qso-graph-trust`](crates/qso-graph-trust) |
 | `qg-trust`, the command line | tqsl-compatible options, exit codes and status line, for loggers and scripts | [`crates/qso-graph-trust-cli`](crates/qso-graph-trust-cli) |
-| QSO Graph Trust, the app | For hams who don't use a command line; arrives in phase 5 | not yet |
-| QSO Graph Desktop | Uses the library through its own Rust core | [qso-graph-desktop](https://github.com/qso-graph/qso-graph-desktop) |
+| QSO Graph Desktop | QG Trust's interface: an extension, using the library ([decision 0005](docs/decisions/0005-qso-graph-desktop-is-the-interface.md)) | [qso-graph-desktop](https://github.com/qso-graph/qso-graph-desktop) |
 
 ## How it is built
 
 | Phase | Done when | Issue |
 | --- | --- | --- |
 | 1 Foundation | CI green on Windows, macOS and Linux; the no-C and no-unsafe checks proved by planted cases | [#170](https://github.com/qso-graph/qso-graph-desktop/issues/170) |
-| 2 Signing core | Byte-identical to tqsllib on 1024- and 2048-bit keys | [#171](https://github.com/qso-graph/qso-graph-desktop/issues/171) |
+| 2 Signing core | Byte-identical to tqsllib on LoTW's 1024-bit keys, with and without a password | [#171](https://github.com/qso-graph/qso-graph-desktop/issues/171) |
 | 3 The library | All 220 tqsllib functions mapped and tested; fuzzing clean; the key found nowhere it shouldn't be | [#172](https://github.com/qso-graph/qso-graph-desktop/issues/172) |
 | 4 CLI tools | Loggers' real calls behave the same; LoTW processes the uploads | [#173](https://github.com/qso-graph/qso-graph-desktop/issues/173) |
-| 5 QSO Graph Desktop and the app | Signed packages on three platforms | [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174) |
+| 5 QSO Graph Desktop extension and packaging | Signed packages on three platforms | [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174) |
 
 ## Building
 
