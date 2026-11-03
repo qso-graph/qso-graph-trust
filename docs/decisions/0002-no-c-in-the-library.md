@@ -130,6 +130,14 @@ from vetted providers, each named in the policy checks:
   says "local use on a non-compromised computer is fine". QG Trust signs only on the ham's own
   machine, for that ham, and the library never signs for a remote caller. `cargo audit` ignores that
   one advisory, pointing here; any other, and a fixed release of `rsa`, fails CI.
+- **What QG Trust adds around `rsa`** (Codex reviews of qso-graph-trust#3): a key signs only if it is
+  LoTW-shaped (1024-bit modulus, exponent 65537, two different 512-bit primes, each passing
+  Baillie-PSW and 32 Miller-Rabin rounds with random bases) and matches its stated public key; a
+  protected key is decrypted by QG Trust itself (PBKDF2, then 3DES- or AES-CBC), every buffer wiped.
+  **Known and outside QG Trust's code:** `rsa` 0.9.10's `validate()` multiplies e by a clone of d that
+  it drops unwiped (`src/key.rs:408-409`), and `num-bigint-dig` wipes its arithmetic temporaries only
+  in part. Patching `rsa` is refused by QG Trust's policy, so this waits for an upstream release; the
+  custody test (qso-graph-desktop#172, Gate C) measures what remains in memory.
 - **SHA-1 is ARRL's choice, not QG Trust's.** Its weakness is collisions, which need the victim to sign
   attacker-made binary blocks. QG Trust signs only strings built from fields it has validated (calls,
   bands, modes, dates, location values), which leaves such blocks no place; that is a tested rule.

@@ -23,7 +23,7 @@ notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the sou
 who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
 criteria = "safe-to-deploy"
 version = "0.9.10"
-notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: the whole crate. No unsafe code, no file, network, environment or process access, no build script. Blinding is on the try_sign_with_rng path (src/pkcs1v15/signing_key.rs:150, src/algorithms/rsa.rs:48). RsaPrivateKey and SigningKey derive an unredacted Debug (src/key.rs:37, src/pkcs1v15/signing_key.rs:22): QG Trust wraps them in TqslKey, whose Debug prints nothing. Zeroization is partial; the arithmetic is not constant-time (RUSTSEC-2023-0071), accepted for local signing only (decision 0002)."
+notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: the whole crate. No unsafe code, no file, network, environment or process access, no build script. Blinding is on the try_sign_with_rng path (src/pkcs1v15/signing_key.rs:150, src/algorithms/rsa.rs:48). RsaPrivateKey and SigningKey derive an unredacted Debug (src/key.rs:37, src/pkcs1v15/signing_key.rs:22): QG Trust wraps them in TqslKey, whose Debug prints nothing. Zeroization is partial: among others, validate() multiplies e by a clone of d that is dropped unwiped (src/key.rs:408-409), on every key QG Trust unlocks, which QG Trust cannot change without patching rsa (refused by its policy); the custody test (qso-graph-desktop#172, Gate C) measures what remains. The arithmetic is not constant-time (RUSTSEC-2023-0071), accepted for local signing only (decision 0002)."
 
 [[audits.sha1]]
 who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"

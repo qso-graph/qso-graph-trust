@@ -121,7 +121,7 @@ pub const MAX_KEY_FILE_LEN: usize = 1024 * 1024;
 /// longer than the age of the universe (found by Codex review).
 fn lotw_shaped(key: &RsaPrivateKey) -> Result<(), KeyError> {
     use rsa::traits::{PrivateKeyParts, PublicKeyParts};
-    if shape_ok(key.n().bits(), key.e(), key.primes()) {
+    if shape_ok(key.n().bits(), key.e(), key.primes()) && key.primes().iter().all(is_prime) {
         Ok(())
     } else {
         Err(KeyError::NotLotwKey)
@@ -136,6 +136,104 @@ fn shape_ok(modulus_bits: usize, e: &rsa::BigUint, primes: &[rsa::BigUint]) -> b
         && primes.len() == 2
         && primes[0] != primes[1]
         && primes.iter().all(|p| p.bits() == 512)
+}
+
+/// Whether `p` is prime, as far as anyone can tell from a key that may have been crafted to fool the
+/// test: neither QG Trust's checks nor rsa's test primality, and composite factors of the right
+/// sizes would sign with a modulus anyone can factor (found by Codex review). num-bigint-dig's
+/// Baillie-PSW test (`probably_prime` with no rounds of its own: its Miller-Rabin bases are
+/// predictable, and its documentation says not to rely on them against crafted input), then 32
+/// Miller-Rabin rounds with bases from the operating system's randomness, which a key file cannot
+/// anticipate. A composite passes a random round with probability at most 1/4.
+fn is_prime(p: &rsa::BigUint) -> bool {
+    use num_bigint_dig::RandBigInt;
+    use num_bigint_dig::prime::probably_prime;
+    let one = rsa::BigUint::from(1u32);
+    let two = rsa::BigUint::from(2u32);
+    if !probably_prime(p, 0) {
+        return false;
+    }
+    let minus_one = p - &one;
+    let s = minus_one.trailing_zeros().unwrap_or(0);
+    let d = &minus_one >> s;
+    let mut rng = rand_core::OsRng;
+    'round: for _ in 0..32 {
+        let a = rng.gen_biguint_range(&two, &minus_one);
+        let mut x = a.modpow(&d, p);
+        if x == one || x == minus_one {
+            continue;
+        }
+        for _ in 1..s {
+            x = &x * &x % p;
+            if x == minus_one {
+                continue 'round;
+            }
+        }
+        return false;
+    }
+    true
+}
+
+/// A protected key's PKCS#8 bytes: PBKDF2 then CBC decryption, done here rather than in pkcs5,
+/// whose derived key sits in a buffer it never wipes (found by Codex review). The derived key, the
+/// cipher's key schedule (the `zeroize` features of cbc, des and aes) and the plaintext are all
+/// wiped when dropped, on success or failure. `accepted` has already bounded the parameters.
+fn decrypt(
+    params: &pbes2::Parameters<'_>,
+    password: &[u8],
+    ciphertext: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, KeyError> {
+    use cbc::cipher::{BlockDecryptMut, KeyIvInit, block_padding::Pkcs7};
+    let Kdf::Pbkdf2(kdf) = &params.kdf else {
+        return Err(KeyError::UnsupportedProtection);
+    };
+    let key_len = match params.encryption {
+        pbes2::EncryptionScheme::DesEde3Cbc { .. } => 24,
+        pbes2::EncryptionScheme::Aes128Cbc { .. } => 16,
+        pbes2::EncryptionScheme::Aes256Cbc { .. } => 32,
+        _ => return Err(KeyError::UnsupportedProtection),
+    };
+    if kdf.key_length.is_some_and(|l| usize::from(l) != key_len) {
+        return Err(KeyError::UnsupportedProtection);
+    }
+    let mut key = Zeroizing::new(vec![0u8; key_len]);
+    match kdf.prf {
+        Pbkdf2Prf::HmacWithSha1 => {
+            pbkdf2::pbkdf2_hmac::<Sha1>(password, kdf.salt, kdf.iteration_count, &mut key)
+        }
+        Pbkdf2Prf::HmacWithSha256 => {
+            pbkdf2::pbkdf2_hmac::<sha2::Sha256>(password, kdf.salt, kdf.iteration_count, &mut key)
+        }
+        _ => return Err(KeyError::UnsupportedProtection),
+    }
+    let mut buf = Zeroizing::new(ciphertext.to_vec());
+    let bad = |_| KeyError::WrongPassword;
+    let len = match params.encryption {
+        pbes2::EncryptionScheme::DesEde3Cbc { iv } => {
+            cbc::Decryptor::<des::TdesEde3>::new_from_slices(&key, iv)
+                .map_err(|_| KeyError::UnsupportedProtection)?
+                .decrypt_padded_mut::<Pkcs7>(&mut buf)
+                .map_err(bad)?
+                .len()
+        }
+        pbes2::EncryptionScheme::Aes128Cbc { iv } => {
+            cbc::Decryptor::<aes::Aes128>::new_from_slices(&key, iv)
+                .map_err(|_| KeyError::UnsupportedProtection)?
+                .decrypt_padded_mut::<Pkcs7>(&mut buf)
+                .map_err(bad)?
+                .len()
+        }
+        pbes2::EncryptionScheme::Aes256Cbc { iv } => {
+            cbc::Decryptor::<aes::Aes256>::new_from_slices(&key, iv)
+                .map_err(|_| KeyError::UnsupportedProtection)?
+                .decrypt_padded_mut::<Pkcs7>(&mut buf)
+                .map_err(bad)?
+                .len()
+        }
+        _ => return Err(KeyError::UnsupportedProtection),
+    };
+    buf.truncate(len);
+    Ok(buf)
 }
 
 /// The most PBKDF2 iterations accepted. tqsllib 2.8.7 writes 2,048 (OpenSSL's default); a million
@@ -221,12 +319,11 @@ impl KeyEntry {
                 if !accepted(&info.encryption_algorithm) {
                     return Err(KeyError::UnsupportedProtection);
                 }
-                let mut plain = Zeroizing::new(info.encrypted_data.to_vec());
-                let key_der = info
-                    .encryption_algorithm
-                    .decrypt_in_place(password, &mut plain)
-                    .map_err(|_| KeyError::WrongPassword)?;
-                RsaPrivateKey::from_pkcs8_der(key_der).map_err(|_| KeyError::NotRsa)?
+                let EncryptionScheme::Pbes2(params) = &info.encryption_algorithm else {
+                    return Err(KeyError::UnsupportedProtection);
+                };
+                let plain = decrypt(params, password, info.encrypted_data)?;
+                RsaPrivateKey::from_pkcs8_der(&plain).map_err(|_| KeyError::NotRsa)?
             }
             "PRIVATE KEY" => RsaPrivateKey::from_pkcs8_der(der).map_err(|_| KeyError::NotAKey)?,
             _ => return Err(KeyError::NotAKey),
@@ -514,5 +611,124 @@ mod tests {
             crossed.unlock(None).err(),
             Some(KeyError::PublicKeyMismatch)
         );
+    }
+
+    #[test]
+    fn composite_factors_of_the_right_size_are_refused() {
+        use rsa::traits::PrivateKeyParts;
+        // Codex review: p = 3^323 and q = 7 * 3^321 are both 512 bits, so they pass the size checks.
+        let three_to = |k: u32| (0..k).fold(rsa::BigUint::from(1u32), |acc, _| acc * 3u32);
+        let p = three_to(323);
+        let q = rsa::BigUint::from(7u32) * three_to(321);
+        assert_eq!((p.bits(), q.bits(), (&p * &q).bits()), (512, 512, 1024));
+        assert!(shape_ok(
+            1024,
+            &rsa::BigUint::from(65_537u32),
+            &[p.clone(), q.clone()]
+        ));
+        assert!(!is_prime(&p) && !is_prime(&q));
+        // The test key's own primes are prime.
+        let key = RsaPrivateKey::from_pkcs8_pem(include_str!(
+            "../../../tests/corpus/pki/user-1024.key.pem"
+        ))
+        .expect("key");
+        assert!(key.primes().iter().all(is_prime));
+        // A Carmichael number, which fools Fermat's test, and its neighbours.
+        assert!(!is_prime(&rsa::BigUint::from(561u32)));
+        assert!(is_prime(&rsa::BigUint::from(65_537u32)));
+    }
+
+    #[test]
+    fn every_buffer_in_decryption_is_wiped() {
+        fn wiped<T: zeroize::ZeroizeOnDrop>() {}
+        wiped::<Zeroizing<Vec<u8>>>();
+        wiped::<cbc::Decryptor<des::TdesEde3>>();
+        wiped::<cbc::Decryptor<aes::Aes256>>();
+    }
+
+    #[test]
+    fn a_key_with_composite_factors_does_not_unlock() {
+        use num_bigint_dig::ModInverse;
+        use rsa::pkcs8::EncodePublicKey;
+        // Codex review's key: n = 3^644 * 7 from p = 3^323 and q = 7 * 3^321, with d the inverse of
+        // e modulo lcm(p - 1, q - 1, 2 * 3^643), so rsa's own checks accept it and it would sign.
+        let three_to = |k: u32| (0..k).fold(rsa::BigUint::from(1u32), |acc, _| acc * 3u32);
+        let one = rsa::BigUint::from(1u32);
+        let (p, q) = (three_to(323), rsa::BigUint::from(7u32) * three_to(321));
+        let gcd = |mut a: rsa::BigUint, mut b: rsa::BigUint| {
+            while b != rsa::BigUint::from(0u32) {
+                let r = &a % &b;
+                a = b;
+                b = r;
+            }
+            a
+        };
+        let lcm = |a: rsa::BigUint, b: rsa::BigUint| &a * &b / gcd(a.clone(), b.clone());
+        let lambda = lcm(
+            lcm(&p - &one, &q - &one),
+            rsa::BigUint::from(2u32) * three_to(643),
+        );
+        let e = rsa::BigUint::from(65_537u32);
+        let d = e
+            .clone()
+            .mod_inverse(&lambda)
+            .and_then(|d| d.to_biguint())
+            .expect("d");
+        let key = RsaPrivateKey::from_components(
+            &p * &q,
+            e.clone(),
+            d.clone(),
+            vec![p.clone(), q.clone()],
+        )
+        .expect("rsa accepts it");
+        // rsa will not write this key (its CRT values do not exist), but a crafted file can carry any
+        // numbers, and rsa rebuilds a key from n, e, d, p and q when it reads one. So the file is
+        // written here by hand, through pkcs1's and pkcs8's own structures.
+        use pkcs8::der::Encode;
+        let bytes = |x: &rsa::BigUint| x.to_bytes_be();
+        let (n, eb, db, pb, qb) = (
+            bytes(&(&p * &q)),
+            bytes(&e),
+            bytes(&d),
+            bytes(&p),
+            bytes(&q),
+        );
+        fn uint(b: &[u8]) -> pkcs8::der::asn1::UintRef<'_> {
+            pkcs8::der::asn1::UintRef::new(b).expect("uint")
+        }
+        let one_byte = [1u8];
+        let pkcs1_key = rsa::pkcs1::RsaPrivateKey {
+            modulus: uint(&n),
+            public_exponent: uint(&eb),
+            private_exponent: uint(&db),
+            prime1: uint(&pb),
+            prime2: uint(&qb),
+            exponent1: uint(&one_byte),
+            exponent2: uint(&one_byte),
+            coefficient: uint(&one_byte),
+            other_prime_infos: None,
+        }
+        .to_der()
+        .expect("PKCS#1");
+        let info = pkcs8::PrivateKeyInfo::new(rsa::pkcs1::ALGORITHM_ID, &pkcs1_key);
+        let pem = pkcs8::der::pem::encode_string(
+            "PRIVATE KEY",
+            pkcs8::LineEnding::LF,
+            &info.to_der().expect("PKCS#8"),
+        )
+        .expect("PEM");
+        assert!(
+            RsaPrivateKey::from_pkcs8_pem(&pem).is_ok(),
+            "rsa reads the crafted file as a key"
+        );
+        let entry = KeyEntry {
+            callsign: "QG0TEST".into(),
+            public_key_pem: key
+                .to_public_key()
+                .to_public_key_pem(pkcs8::LineEnding::LF)
+                .expect("PEM"),
+            private_key_pem: Zeroizing::new(pem),
+        };
+        assert_eq!(entry.unlock(None).err(), Some(KeyError::NotLotwKey));
     }
 }
