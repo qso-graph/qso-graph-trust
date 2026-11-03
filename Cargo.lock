@@ -46,15 +46,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "qgt"
+name = "qso-graph-trust"
+version = "0.1.0"
+
+[[package]]
+name = "qso-graph-trust-cli"
 version = "0.1.0"
 dependencies = [
  "qso-graph-trust",
 ]
-
-[[package]]
-name = "qso-graph-trust"
-version = "0.1.0"
 
 [[package]]
 name = "quote"

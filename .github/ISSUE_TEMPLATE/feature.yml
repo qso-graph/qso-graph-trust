@@ -13,7 +13,7 @@ body:
       label: Part
       options:
         - Library
-        - CLI (qgt)
+        - CLI (qg-trust)
         - App
         - QSO Graph Desktop integration
         - Repository, CI or docs

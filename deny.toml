@@ -15,7 +15,7 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = []
 
 # Crates whose job is building C, C++ or assembly (docs/decisions/0002). When the TLS
-# stack arrives for qgt, any exception is a recorded decision naming the exact crate.
+# stack arrives for the command line, any exception is a recorded decision naming the exact crate.
 [bans]
 multiple-versions = "allow"
 wildcards = "deny"

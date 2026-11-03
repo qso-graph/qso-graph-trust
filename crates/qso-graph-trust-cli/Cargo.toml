@@ -1,12 +1,19 @@
 # SPDX-License-Identifier: GPL-3.0-only
 [package]
-name = "qgt"
+name = "qso-graph-trust-cli"
 description = "QSO Graph Trust's command line: sign and upload logs for ARRL's Logbook of The World"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+
+# The command is qg-trust: QSO Graph's commands are qg-<word> (qg-trust, qg-rig,
+# qg-udp, qg-sim), never a short one that can collide, while every package a
+# registry carries is a full qso-graph-* name (KI7MT, 2026-11-03).
+[[bin]]
+name = "qg-trust"
+path = "src/main.rs"
 
 [dependencies]
 qso-graph-trust = { path = "../qso-graph-trust", version = "=0.1.0" }

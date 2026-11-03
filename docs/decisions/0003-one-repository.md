@@ -5,7 +5,7 @@ separate them."
 
 ## What was decided
 
-`qso-graph-trust` holds the library (`crates/qso-graph-trust`), the `qgt` command line (`crates/qgt`)
+`qso-graph-trust` holds the library (`crates/qso-graph-trust`), the `qg-trust` command line (`crates/qso-graph-trust-cli`)
 and, from phase 5, the QSO Graph Trust app. QSO Graph Desktop stays in its own repository and uses the
 library as a dependency pinned to a QGT release.
 

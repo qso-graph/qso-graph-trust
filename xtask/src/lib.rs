@@ -29,8 +29,8 @@ pub const PROTECTED: &[&str] = &["qso-graph-trust"];
 /// reviewed by exact name and version through cargo-vet, because one could hand
 /// them a macro that writes unsafe code into our own source (found by Codex
 /// review: `paste!` can build the keyword from pieces). The no-C rules are the
-/// library's alone: `qgt` carries the TLS stack, which is C (docs/decisions/0002).
-pub const SHIPPED: &[&str] = &["qso-graph-trust", "qgt"];
+/// library's alone: the command line (`qso-graph-trust-cli`) carries the TLS stack, which is C (docs/decisions/0002).
+pub const SHIPPED: &[&str] = &["qso-graph-trust", "qso-graph-trust-cli"];
 
 /// Where a shipped crate's dependencies come from, for what this workspace builds
 /// and what a consumer of the published crates builds: crates.io only, no
@@ -1518,7 +1518,7 @@ pub const CANARY_PROBE: &str =
 /// unrelated error is not a refusal (found by Codex review, as were the profile
 /// flags a stand-in crate could not see). `extra_env` is for the planted test.
 pub fn canary(root: &Path, extra_env: &[(&str, &str)]) -> Result<(), String> {
-    let work = fresh_temp_dir("qgt-canary")?;
+    let work = fresh_temp_dir("qso-graph-trust-canary")?;
     let result = canary_in(root, &work, extra_env);
     // Only the directory this call created, so cleaning up can never remove
     // anything else (found by Codex review: given a path, it once could).
@@ -1787,11 +1787,11 @@ mod tests {
         // A dependency of the command line, not the library, is held to the same
         // sources: crates.io, reviewed through cargo-vet (Codex review, round 19).
         let mut g = graph(json!("dev"));
-        g["packages"][0]["name"] = json!("qgt");
-        assert!(unreviewed_in(&g, &["qgt"]).is_empty());
+        g["packages"][0]["name"] = json!("qso-graph-trust-cli");
+        assert!(unreviewed_in(&g, &["qso-graph-trust-cli"]).is_empty());
         g["packages"][1]["source"] = json!("git+https://example.invalid/middle");
         assert_eq!(
-            unreviewed_in(&g, &["qgt"]),
+            unreviewed_in(&g, &["qso-graph-trust-cli"]),
             vec!["middle 1.0.0 is not a crates.io crate"]
         );
         assert_eq!(
@@ -1801,16 +1801,22 @@ mod tests {
         // A path and a version together build something else once published
         // (Codex review, round 29); our own shipped crates may be named so.
         let mut h = graph(json!("dev"));
-        h["packages"][0]["name"] = json!("qgt");
+        h["packages"][0]["name"] = json!("qso-graph-trust-cli");
         h["packages"][0]["dependencies"] = json!([
             {"name": "libc", "req": "=0.2.177", "path": "/x/crates/libc", "registry": null},
             {"name": "qso-graph-trust", "req": "^0.1.0", "path": "/x/crates/qso-graph-trust", "registry": null},
             {"name": "other", "req": "^1", "path": null, "registry": "https://example.invalid/index"}
         ]);
-        let found = unreviewed_reviewing(&h, &["qgt", "qso-graph-trust"], TEST_REVIEWED);
-        assert!(found.contains(&"qgt depends on libc by both a path and a version: published, it would build the registry's".to_string()), "{found:?}");
+        let found = unreviewed_reviewing(
+            &h,
+            &["qso-graph-trust-cli", "qso-graph-trust"],
+            TEST_REVIEWED,
+        );
+        assert!(found.contains(&"qso-graph-trust-cli depends on libc by both a path and a version: published, it would build the registry's".to_string()), "{found:?}");
         assert!(
-            found.contains(&"qgt depends on other from another registry".to_string()),
+            found.contains(
+                &"qso-graph-trust-cli depends on other from another registry".to_string()
+            ),
             "{found:?}"
         );
         assert!(
@@ -1819,11 +1825,13 @@ mod tests {
         );
         // The shipped crate's own build script is reviewed too (Codex review, round 25).
         let mut k = graph(json!("dev"));
-        k["packages"][0]["name"] = json!("qgt");
+        k["packages"][0]["name"] = json!("qso-graph-trust-cli");
         k["packages"][0]["targets"] = json!([{"kind": ["bin"]}, {"kind": ["custom-build"]}]);
         assert!(
-            unreviewed_reviewing(&k, &["qgt"], TEST_REVIEWED)
-                .contains(&"qgt 0.1.0 has a build script that has not been reviewed".to_string())
+            unreviewed_reviewing(&k, &["qso-graph-trust-cli"], TEST_REVIEWED).contains(
+                &"qso-graph-trust-cli 0.1.0 has a build script that has not been reviewed"
+                    .to_string()
+            )
         );
     }
 
@@ -1900,7 +1908,7 @@ mod tests {
     /// review, round 37), as would one without the implicit prelude.
     #[test]
     fn the_canary_probe_compiles_beside_any_library_and_only_lints_refuse_it() {
-        let dir = fresh_temp_dir("qgt-probe").expect("a fresh directory");
+        let dir = fresh_temp_dir("qso-graph-trust-probe").expect("a fresh directory");
         for (n, library) in [
             "pub mod core {}\n",
             "#![no_implicit_prelude]\n",
