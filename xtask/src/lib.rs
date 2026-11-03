@@ -104,6 +104,12 @@ fn unreviewed_reviewing(
                 ));
             }
         }
+        // The repository's tooling never ships: its dependencies are held only to
+        // safe-to-run, so it may not be in a shipped crate's graph (found by
+        // Codex review).
+        if name == "xtask" {
+            problems.push("xtask is in a shipped crate's dependencies".to_string());
+        }
         // Outside crates come from crates.io; reviewing them is cargo-vet's,
         // which CI runs beside this.
         if !workspace.contains(id) && pkg.and_then(|p| p["source"].as_str()) != Some(CRATES_IO) {
@@ -880,6 +886,18 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                 {
                     found.push("builds an attribute from a macro variable");
                 }
+                // A derive macro may parse a string in its attribute as Rust:
+                // `#[serde(bound = "... unsafe { ... } ...")]` (found by Codex
+                // review). Every string in an attribute but a doc comment is read
+                // as tokens and held to the same rules.
+                let doc = matches!(&g.stream().into_iter().next(), Some(TokenTree::Ident(i)) if i == "doc");
+                if attribute && !doc {
+                    for text in strings_in(g.stream()) {
+                        if let Ok(inner) = text.parse::<proc_macro2::TokenStream>() {
+                            found.extend(unsafe_tokens(inner));
+                        }
+                    }
+                }
                 found.extend(unsafe_tokens(g.stream()));
             }
             TokenTree::Literal(_) => {
@@ -929,6 +947,25 @@ fn enables_feature(tokens: proc_macro2::TokenStream) -> bool {
         TokenTree::Group(g) => enables_feature(g.stream()),
         _ => false,
     })
+}
+
+/// Every string literal's contents in a token stream, at any depth, read through
+/// syn so escapes and raw strings decode as Rust decodes them.
+fn strings_in(tokens: proc_macro2::TokenStream) -> Vec<String> {
+    use proc_macro2::TokenTree;
+    let mut found = Vec::new();
+    for tree in tokens {
+        match tree {
+            TokenTree::Literal(l) => {
+                if let Ok(s) = syn::parse_str::<syn::LitStr>(&l.to_string()) {
+                    found.push(s.value());
+                }
+            }
+            TokenTree::Group(g) => found.extend(strings_in(g.stream())),
+            _ => {}
+        }
+    }
+    found
 }
 
 /// Whether a token stream holds a `$` at any depth.
@@ -2049,6 +2086,16 @@ pub fn proof() {}
         );
         // Selecting a Cargo feature is not enabling an unstable one.
         assert!(scan("#[cfg(feature = \"std\")] fn f() {} #[cfg_attr(feature = \"x\", derive(Debug))] struct S;").is_empty());
+        // Rust in a string a derive macro parses (Codex review, round 31).
+        let bound = scan(
+            "#[serde(bound(deserialize = \"[(); unsafe { core::ptr::read(&7usize) }]: Sized\"))] pub struct P;",
+        );
+        assert!(bound.contains(&"uses unsafe"), "{bound:?}");
+        // Prose in a doc comment is not code.
+        assert!(
+            scan("/// Holds no unsafe code; see include! and asm! in the docs.\npub struct P;")
+                .is_empty()
+        );
         // The unstable `macro` and any unstable feature (Codex review, round 23).
         let decl = scan(
             "#![feature(decl_macro, macro_metavar_expr_concat)] macro read_value() { ${concat(un, safe)} { 7 } }",

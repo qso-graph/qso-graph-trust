@@ -311,7 +311,16 @@ fn a_symbolic_link_in_a_crate_is_caught() {
 #[test]
 fn this_repository_passes() {
     let meta = xtask::metadata(&here("../Cargo.toml")).expect("workspace metadata");
-    assert_eq!(xtask::no_c(&meta, xtask::PROTECTED), Vec::<String>::new());
+    // The no-C check per shipping platform, as the policy runs it (found by Codex
+    // review: unfiltered, it would refuse a dependency only another platform uses).
+    for target in xtask::SHIPPING_TARGETS {
+        let per = xtask::metadata_for(&here("../Cargo.toml"), Some(target)).expect("metadata");
+        assert_eq!(
+            xtask::no_c(&per, xtask::PROTECTED),
+            Vec::<String>::new(),
+            "{target}"
+        );
+    }
     assert_eq!(xtask::no_unsafe(&meta), Vec::<String>::new());
     assert_eq!(
         xtask::unreviewed_in(&meta, xtask::SHIPPED),
