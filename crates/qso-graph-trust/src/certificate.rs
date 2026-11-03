@@ -143,6 +143,11 @@ impl Certificate {
         (self.qso_not_before, self.qso_not_after)
     }
 
+    /// When the certificate comes into force and when it ends.
+    pub fn validity(&self) -> (SystemTime, SystemTime) {
+        (self.not_before, self.not_after)
+    }
+
     /// Whether the certificate is in force at this time.
     pub fn is_valid_at(&self, now: SystemTime) -> bool {
         self.not_before <= now && now <= self.not_after
