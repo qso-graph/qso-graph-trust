@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
+#
+# tqsllib 2.8.7, built from TrustedQSL's own repository at the release commit, for QGT's differential
+# tests (qso-graph-desktop#171): QGT's SIGNDATA, signatures and .tq8 records are checked byte for byte
+# against what this produces. It is test tooling only. It never ships, and none of TrustedQSL's code is
+# committed here: the source is fetched and checked against the release's commit at build time.
+#
+#   podman build -t qgt-tqsllib:2.8.7 tests/tqsllib
+#
+# TrustedQSL is Copyright (C) the American Radio Relay League, under its own BSD-style licence (NOTICE).
+
+# Rocky 9, the lab's OS, because TrustedQSL's top-level build always includes its app and so needs
+# wxWidgets to configure, which EPEL has (wxGTK 3.2) and UBI's repositories do not.
+FROM docker.io/rockylinux/rockylinux:9
+
+# The release tag v2.8.7, as TrustedQSL's repository has it (git ls-remote, 2026-11-03).
+ARG TQSL_REPO=https://git.code.sf.net/p/trustedqsl/tqsl
+ARG TQSL_COMMIT=d9e01726e54887f8241e86e789c5b91f02043ebd
+
+RUN dnf -y -q install epel-release dnf-plugins-core \
+    && dnf config-manager --set-enabled crb \
+    && dnf -y -q install git gcc-c++ make cmake openssl-devel sqlite-devel expat-devel zlib-devel \
+       libcurl-devel lmdb-devel wxGTK-devel diffutils \
+    && dnf clean all
+
+# The commit itself, not a branch or a tag that could move: fetched by its ID, then checked.
+RUN git init -q /src/tqsl \
+    && git -C /src/tqsl fetch -q --depth 1 "$TQSL_REPO" "$TQSL_COMMIT" \
+    && git -C /src/tqsl checkout -q FETCH_HEAD \
+    && test "$(git -C /src/tqsl rev-parse HEAD)" = "$TQSL_COMMIT"
+
+# tqsllib and its extra programs (load_cert, station_loc, converter, gen_crq); the app is configured,
+# because TrustedQSL's build always includes it, but not built.
+RUN cmake -S /src/tqsl -B /build -DCMAKE_BUILD_TYPE=Release -DBUILD_ALL_EXTRAPROGS=ON -Wno-dev \
+    && cmake --build /build -j"$(nproc)" --target tqsllib load_cert station_loc converter gen_crq
+
+# tqsllib reads config.xml from the folder its build names, $prefix/share/TrustedQSL (CONFDIR).
+RUN install -D -m 0644 /src/tqsl/src/config.xml /usr/local/share/TrustedQSL/config.xml
+
+# QGT's own driver for tqsllib's API (qgt-tqsllib.cpp): .p12 import and export, full station
+# locations, signing with a password-protected key. Built against the tqsllib above, here only.
+COPY qgt-tqsllib.cpp /src/qgt-tqsllib.cpp
+RUN g++ -std=c++17 -O2 -Wall -Wextra -Werror -I/src/tqsl/src -I/build/src \
+      /src/qgt-tqsllib.cpp -L/build/src -ltqsllib -o /build/src/qgt-tqsllib
+
+ENV PATH=/build/src:$PATH LD_LIBRARY_PATH=/build/src

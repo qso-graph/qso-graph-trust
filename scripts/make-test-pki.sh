@@ -76,8 +76,8 @@ openssl req -new -key "$work/ca.key" -subj "/O=QSO Graph Trust TEST ONLY/OU=Not 
 openssl x509 -req -in "$work/ca.csr" -CA "$out/root.pem" -CAkey "$work/root.key" -CAserial "$work/root.srl" -CAcreateserial \
   -days 36500 -sha256 -extfile "$work/ext.cnf" -extensions ca -out "$out/ca.pem"
 
-# One operator certificate per key size: TQSL generates 1024-bit keys, and imported ones can be larger.
-for bits in 1024 2048; do
+# One operator certificate, 1024-bit: LoTW's keys are, and TQSL makes no other size.
+for bits in 1024; do
   name="user-$bits"
   openssl genpkey -quiet -algorithm RSA -pkeyopt "rsa_keygen_bits:$bits" -out "$out/$name.key.pem"
   openssl req -new -config "$work/req.cnf" -key "$out/$name.key.pem" \
@@ -112,7 +112,7 @@ for bits in 1024 2048; do
 done
 
 # Prove what was made: each chain verifies, and each certificate carries what TQSL reads.
-for bits in 1024 2048; do
+for bits in 1024; do
   openssl verify -CAfile "$out/root.pem" -untrusted "$out/ca.pem" "$out/user-$bits.pem" >/dev/null
   subject=$(openssl x509 -in "$out/user-$bits.pem" -noout -subject -nameopt oid,sep_comma_plus)
   grep -q "1\.3\.6\.1\.4\.1\.12348\.1\.1=$CALL," <<<"$subject"
