@@ -79,12 +79,30 @@ fn unreviewed_reviewing(
         let pkg = packages.get(id);
         let name = pkg.and_then(|p| p["name"].as_str()).unwrap_or(id);
         let version = pkg.and_then(|p| p["version"].as_str()).unwrap_or("?");
+        let is_reviewed = list.iter().any(|(n, v, _)| *n == name && *v == version);
         if !workspace.contains(id) {
             if pkg.and_then(|p| p["source"].as_str()) != Some(CRATES_IO) {
                 problems.push(format!("{name} {version} is not a crates.io crate"));
             }
-            if !list.iter().any(|(n, v, _)| *n == name && *v == version) {
+            if !is_reviewed {
                 problems.push(format!("{name} {version} has not been reviewed"));
+            }
+        }
+        // A build script or procedural macro anywhere a shipped crate reaches, our
+        // own included, is reviewed too: a build script can compile a hidden crate
+        // and hand the shipped crate its search path, outside Cargo's graph (found
+        // by Codex review).
+        for target in pkg.and_then(|p| p["targets"].as_array()).unwrap_or(&empty) {
+            let kinds = target["kind"].as_array().unwrap_or(&empty);
+            for (kind, what) in [
+                ("custom-build", "a build script"),
+                ("proc-macro", "a procedural macro"),
+            ] {
+                if kinds.iter().any(|k| k == kind) && !is_reviewed {
+                    problems.push(format!(
+                        "{name} {version} has {what} that has not been reviewed"
+                    ));
+                }
             }
         }
         for dep in nodes
@@ -1525,6 +1543,12 @@ mod tests {
         assert_eq!(
             unreviewed_in(&g, &["gone"]),
             vec!["shipped crate gone is not a workspace member"]
+        );
+        // The shipped crate's own build script is reviewed too (Codex review, round 25).
+        g["packages"][0]["targets"] = json!([{"kind": ["bin"]}, {"kind": ["custom-build"]}]);
+        assert!(
+            unreviewed_reviewing(&g, &["qgt"], TEST_REVIEWED)
+                .contains(&"qgt 0.1.0 has a build script that has not been reviewed".to_string())
         );
     }
 
