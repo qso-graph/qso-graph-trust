@@ -373,6 +373,9 @@ fn the_allocator_must_be_exactly_the_wiping_one() {
         // Codex review: relative paths, which a local module of the same name answers, here one
         // that makes the line install the plain system allocator.
         "mod zeroizing_alloc { pub type ZeroAlloc<T> = T; }\n#[global_allocator]\nstatic A: zeroizing_alloc::ZeroAlloc<std::alloc::System> = zeroizing_alloc::ZeroAlloc(std::alloc::System);",
+        // This crate put behind the name with a raw identifier, aliasing the allocator to plain
+        // System (Codex review round 2).
+        "extern crate self as r#zeroizing_alloc;\npub type ZeroAlloc<T> = T;\n#[global_allocator]\nstatic A: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> = ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);",
         // Another crate put behind the name.
         "extern crate other as zeroizing_alloc;\n#[global_allocator]\nstatic A: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> = ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);",
         // Only in a comment or a string.

@@ -1897,10 +1897,12 @@ pub fn installs_wiping_allocator(source: &str) -> bool {
     let zero_alloc = |path: &syn::Path| {
         idents(path) == ["zeroizing_alloc", "ZeroAlloc"] && path.leading_colon.is_some()
     };
-    // An `extern crate` binding the name would put another crate behind it.
+    // An `extern crate` binding the name would put another crate, or this one, behind it, raw
+    // identifier or not (found by Codex review: `extern crate self as r#zeroizing_alloc;`).
     if file.items.iter().any(|item| {
+        use syn::ext::IdentExt;
         matches!(item, syn::Item::ExternCrate(e)
-            if e.rename.as_ref().map_or(&e.ident, |(_, r)| r) == "zeroizing_alloc")
+            if e.rename.as_ref().map_or(&e.ident, |(_, r)| r).unraw() == "zeroizing_alloc")
     }) {
         return false;
     }
