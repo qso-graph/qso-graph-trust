@@ -25,9 +25,9 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | List | Features | Done | Part done | To do |
 |---|---|---|---|---|
-| Needed for 0.7.0 | 44 | 15 | 4 | 25 |
+| Needed for 0.7.0 | 43 | 15 | 4 | 24 |
 | Nice to have | 15 | | | 15 |
-| Won't add | 14 | | | |
+| Won't add | 15 | | | |
 
 ## 1. Needed for 0.7.0
 
@@ -56,8 +56,8 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| Back up everything to one file: certificates, keys, locations, signed-QSO record, settings | File: Backup | The whole file encrypted under a password QG Trust makes up | 0.7.0 | #172 |
-| Restore that backup on any computer (macOS, Windows, Linux), keys into that computer's credential store | File: Restore | | 0.7.0 | #172 |
+| Back up everything: certificates, keys, locations, signed-QSO record, settings | File: Backup | QG Trust's part of QSO Graph Desktop's one backup; always a full backup, encrypted under a password QG Trust makes up. To move only some calls, delete the others first | 0.7.0 | #172 |
+| Restore it on any computer (macOS, Windows, Linux), keys into that computer's credential store | File: Restore | Onto a clean slate: what this computer holds is removed first, nothing merged | 0.7.0 | #172 |
 | Restore a TQSL backup (`.tbk`): certificates, keys, locations | File: Restore | Reads and checks it; saving what it holds waits on 1.2 | Part done | #172 |
 | Restore TQSL's record of QSOs already signed | File: Restore | Read; saving waits on 1.2 | Part done | #172 |
 | Use TQSL's settings that change what's signed: custom mode mappings, ignore seconds, ignore callsigns in the log, non-amateur calls, location details in the log | Preferences | Read from the backup; not yet used when signing | Part done | #172 |
@@ -70,7 +70,6 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Check a certificate leads to LoTW's root | on load | A file's own root certificates count for nothing | Done | #172 |
 | Load a certificate from ARRL (`.tq6`) | Load Callsign Certificate | Reads its fields; loading not yet | 0.7.0 | #172 |
 | Load a certificate and key (`.p12`) | Load Callsign Certificate | | 0.7.0 | #172 |
-| Save a certificate and key (`.p12`) | Save Callsign Certificate | Always under a password QG Trust makes up, 14 to 24 characters | 0.7.0 | #172 |
 | Certificate details: call, DXCC, QSO dates, valid dates, serial | Display Properties | Read | Done | #172 |
 | Delete a certificate | Delete Callsign Certificate | | 0.7.0 | #172 |
 | Warn before a certificate expires | at startup, 60 days | | 0.7.0 | #172 |
@@ -139,6 +138,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | Feature | TQSL | Why not |
 |---|---|---|
+| Save one certificate and key (`.p12`) | Save Callsign Certificate | The full backup moves keys; to move only some, delete the rest first |
 | A separate `.p12` export for Apple Keychain | Preferences | Not needed: QG Trust's one `.p12` uses AES-256, which the Keychain imports from macOS 15 on. Only macOS 14 and older needed TQSL's older ciphers |
 | Key password on the command line (`-p`) | `-p` | A password never goes on a command line; another way is needed |
 | Choosing the upload server and its answers | Server Setup | Logs go to LoTW only |
