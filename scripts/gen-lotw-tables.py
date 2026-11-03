@@ -84,7 +84,7 @@ def generate():
 
     w("pub const DXCC: &[DxccEntity] = &[")
     for e in top.find("dxcc"):
-        w(f"    DxccEntity {{ id: {int(e.get('arrlId'))}, name: {rs(e.text.strip())}, deleted: {'true' if e.get('deleted') == '1' else 'false'} }},")
+        w(f"    DxccEntity {{ id: {int(e.get('arrlId'))}, name: {rs(e.text.strip())}, deleted: {'true' if e.get('deleted') == '1' else 'false'}, zones: {rs(e.get('zonemap') or '')} }},")
     w("];")
     w("")
 
@@ -97,13 +97,14 @@ def generate():
         w(f"    LocField {{ id: {rs(f.get('Id'))}, kind: FieldKind::{kind}, len: {int(f.get('len'))}, range: {rng}, depends_on: {opt(f.get('dependsOn'))}, shown: {'false' if f.get('intype') == '4' else 'true'} }},")
         for group in f.findall("enums"):
             for e in group.findall("enum"):
-                enums.append((f.get("Id"), group.get("dependency") or "", e.get("value")))
+                enums.append((f.get("Id"), group.get("dependency") or "", e.get("value"), e.get("zonemap") or ""))
     w("];")
     w("")
-    w("/// Each list field's values: (field, the value of the field it depends on or \"\", value).")
-    w("pub const LOC_ENUMS: &[(&str, &str, &str)] = &[")
-    for f, d, v in enums:
-        w(f"    ({rs(f)}, {rs(d)}, {rs(v)}),")
+    w("/// Each list field's values: (field, the value of the field it depends on or \"\", value,")
+    w("/// the ITU:CQ zone pairs it lies in or \"\").")
+    w("pub const LOC_ENUMS: &[(&str, &str, &str, &str)] = &[")
+    for f, d, v, z in enums:
+        w(f"    ({rs(f)}, {rs(d)}, {rs(v)}, {rs(z)}),")
     w("];")
     w("")
 

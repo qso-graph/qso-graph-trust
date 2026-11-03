@@ -41,6 +41,8 @@ pub struct DxccEntity {
     pub id: u32,
     pub name: &'static str,
     pub deleted: bool,
+    /// The ITU and CQ zones it lies in, as config.xml writes them: `ITU:CQ` pairs, comma-separated.
+    pub zones: &'static str,
 }
 
 /// Whether a station-location field holds text or a whole number.
@@ -149,13 +151,29 @@ pub fn loc_values<'a>(
 ) -> impl Iterator<Item = &'static str> + 'a {
     tables::LOC_ENUMS
         .iter()
-        .filter(move |(f, d, _)| *f == field && *d == dependency)
-        .map(|(_, _, v)| *v)
+        .filter(move |(f, d, _, _)| *f == field && *d == dependency)
+        .map(|(_, _, v, _)| *v)
 }
 
 /// Whether this field is a list in any case, so its value must be one of the list's.
 pub fn is_list(field: &str) -> bool {
-    tables::LOC_ENUMS.iter().any(|(f, _, _)| *f == field)
+    tables::LOC_ENUMS.iter().any(|(f, _, _, _)| *f == field)
+}
+
+/// The ITU and CQ zones a list value lies in, as config.xml writes them, or "" if it says none.
+pub fn loc_value_zones(field: &str, dependency: &str, value: &str) -> &'static str {
+    tables::LOC_ENUMS
+        .iter()
+        .find(|(f, d, v, _)| *f == field && *d == dependency && *v == value)
+        .map_or("", |(_, _, _, z)| *z)
+}
+
+/// The (ITU, CQ) zone pairs in a zone map as config.xml writes it, `07:04,08:05`.
+pub fn zone_pairs(map: &str) -> impl Iterator<Item = (u32, u32)> + '_ {
+    map.split(',').filter_map(|pair| {
+        let (itu, cq) = pair.split_once(':')?;
+        Some((itu.trim().parse().ok()?, cq.trim().parse().ok()?))
+    })
 }
 
 /// The station-location fields for a DXCC entity, in the order a location lists them: the first
@@ -225,5 +243,8 @@ mod tests {
         assert!(loc_values("US_STATE", "291").any(|v| v == "KS"));
         assert!(loc_values("US_COUNTY", "KS").any(|v| v == "Sedgwick"));
         assert!(loc_values("US_COUNTY", "SC").any(|v| v == "Charleston"));
+        assert_eq!(loc_value_zones("US_STATE", "291", "KS"), "07:04");
+        let us: Vec<_> = zone_pairs(dxcc(291).expect("USA").zones).collect();
+        assert!(us.contains(&(7, 4)) && !us.contains(&(45, 25)));
     }
 }

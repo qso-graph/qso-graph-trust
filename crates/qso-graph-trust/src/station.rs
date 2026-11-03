@@ -103,6 +103,8 @@ impl StationLocation {
         }
 
         let mut fields: Vec<(&'static str, String)> = Vec::new();
+        // The zones the entity, and each list value that says so, lie in.
+        let mut zone_maps = vec![lotw::dxcc(dxcc).map_or("", |e| e.zones)];
         for id in allowed {
             let Some(v) = value(id) else { continue };
             let field = lotw::loc_field(id).ok_or(StationError::NotAField(id.to_string()))?;
@@ -125,10 +127,11 @@ impl StationLocation {
                             .map(|(_, v)| v.clone())
                             .unwrap_or_default(),
                     };
-                    lotw::loc_values(id, &dependency)
+                    let known = lotw::loc_values(id, &dependency)
                         .find(|known| known.eq_ignore_ascii_case(v))
-                        .ok_or_else(|| invalid(id, v))?
-                        .to_string()
+                        .ok_or_else(|| invalid(id, v))?;
+                    zone_maps.push(lotw::loc_value_zones(id, &dependency, known));
+                    known.to_string()
                 }
                 FieldKind::Text => {
                     let v = v.to_ascii_uppercase();
@@ -145,6 +148,31 @@ impl StationLocation {
                 }
             };
             fields.push((id, v));
+        }
+        let zone = |name: &str| {
+            fields
+                .iter()
+                .find(|(n, _)| *n == name)
+                .and_then(|(_, v)| v.parse::<u32>().ok())
+        };
+        let (itu, cq) = (zone("ITUZ"), zone("CQZ"));
+        // Each zone map that applies must hold a pair matching the zones given: the location's
+        // zones are where its entity, state and the rest are, as ARRL's configuration says.
+        let fits = |map: &&str| {
+            map.is_empty()
+                || lotw::zone_pairs(map)
+                    .any(|(i, c)| itu.is_none_or(|z| z == i) && cq.is_none_or(|z| z == c))
+        };
+        if (itu.is_some() || cq.is_some()) && !zone_maps.iter().all(fits) {
+            let shown = format!(
+                "ITUZ {} CQZ {}",
+                itu.map_or("-".into(), |z| z.to_string()),
+                cq.map_or("-".into(), |z| z.to_string())
+            );
+            return Err(StationError::Invalid {
+                field: "ZONES",
+                value: shown,
+            });
         }
         Ok(Self { fields, dxcc })
     }
@@ -249,11 +277,51 @@ fn invalid(field: &'static str, value: &str) -> StationError {
     }
 }
 
-/// One to four Maidenhead locators, comma-separated: a field and square (`EM17`), with an
-/// optional subsquare (`EM17ab`).
+/// A location's grid, or the grids of one on a boundary, as ARRL's station-location rules allow
+/// them: one locator (`EM17`, `EM17AB`), two squares that share an edge (`EM17,EM18`), or four
+/// that meet at a corner (`EM17,EM18,EM27,EM28`).
 pub(crate) fn is_grid_list(s: &str) -> bool {
-    let grids: Vec<&str> = s.split(',').collect();
-    grids.len() <= 4 && grids.iter().all(|g| is_grid(g.trim()))
+    let grids: Vec<&str> = s.split(',').map(str::trim).collect();
+    if let [one] = grids[..] {
+        return is_grid(one);
+    }
+    let Some(mut squares) = grids.iter().map(|g| square(g)).collect::<Option<Vec<_>>>() else {
+        return false;
+    };
+    squares.sort_unstable();
+    squares.dedup();
+    if squares.len() != grids.len() {
+        return false;
+    }
+    // Longitude wraps at the antimeridian; latitude does not.
+    let next_lon = |a: u32, b: u32| (a + 1) % 180 == b || (b + 1) % 180 == a;
+    let next_lat = |a: u32, b: u32| a.abs_diff(b) == 1;
+    match squares[..] {
+        [(lon_a, lat_a), (lon_b, lat_b)] => {
+            (lat_a == lat_b && next_lon(lon_a, lon_b)) || (lon_a == lon_b && next_lat(lat_a, lat_b))
+        }
+        [a, b, c, d] => {
+            let mut lons: Vec<u32> = vec![a.0, b.0, c.0, d.0];
+            let mut lats: Vec<u32> = vec![a.1, b.1, c.1, d.1];
+            lons.sort_unstable();
+            lons.dedup();
+            lats.sort_unstable();
+            lats.dedup();
+            // Four distinct squares on two longitudes and two latitudes are the 2x2 block.
+            matches!((&lons[..], &lats[..]), ([x, y], [p, q]) if next_lon(*x, *y) && next_lat(*p, *q))
+        }
+        _ => false,
+    }
+}
+
+/// A square, `EM17`, as (longitude, latitude) in squares from 180W and 90S.
+fn square(g: &str) -> Option<(u32, u32)> {
+    let b = g.as_bytes();
+    (b.len() == 4 && is_grid(g)).then(|| {
+        let lon = u32::from(b[0] - b'A') * 10 + u32::from(b[2] - b'0');
+        let lat = u32::from(b[1] - b'A') * 10 + u32::from(b[3] - b'0');
+        (lon, lat)
+    })
 }
 
 /// One Maidenhead locator in capitals, `EM17` or `EM17AB`. Read as bytes, so any input is safe.
@@ -437,7 +505,34 @@ mod tests {
             StationLocation::new(&[("CALL", "QG0TEST"), ("CALL", "QG0TEST"), ("DXCC", "291")]),
             Err(StationError::Repeated("CALL".into()))
         );
-        assert!(with("GRIDSQUARE", "EM17ab,EM18").is_ok());
+        assert!(with("GRIDSQUARE", "EM17,EM18").is_ok());
+        assert!(with("GRIDSQUARE", "EM17,EM27").is_ok());
+        assert!(with("GRIDSQUARE", "EM19,EN10").is_ok());
+        assert!(with("GRIDSQUARE", "EM17,EM18,EM27,EM28").is_ok());
+        // Codex review: grids that do not meet were accepted as one location.
+        for bad in [
+            "EM17,FN31",
+            "EM17,EM18,EM19",
+            "EM17,EM17",
+            "EM17,EM28",
+            "EM17AB,EM18",
+            "EM17,EM18,EM27,EM29",
+        ] {
+            assert!(
+                matches!(with("GRIDSQUARE", bad), Err(StationError::Invalid { .. })),
+                "{bad}"
+            );
+        }
+        // Codex review: zones the entity does not lie in were accepted.
+        assert!(matches!(
+            with("CQZ", "25"),
+            Err(StationError::Invalid { field: "ZONES", .. })
+        ));
+        // Kansas is ITU 7, CQ 4: ITU 8 is the USA's, but not Kansas's.
+        assert!(matches!(
+            with("ITUZ", "8"),
+            Err(StationError::Invalid { field: "ZONES", .. })
+        ));
         // Codex review: a six-byte grid with a two-byte character inside panicked on slicing.
         assert!(matches!(
             with("GRIDSQUARE", "AAA\u{e9}A"),
