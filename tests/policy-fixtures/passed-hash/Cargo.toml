@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: the # of #[path] passed into a macro as its own argument. The token scan must catch path =.
+[package]
+name = "planted-passed-hash"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true

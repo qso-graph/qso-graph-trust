@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: the words "[lints] workspace = true" are inside a string, not a table. The no-unsafe check must catch it.
+[package]
+name = "planted-in-a-string"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = """
+[lints]
+workspace = true
+"""

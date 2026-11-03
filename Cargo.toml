@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# QSO Graph Trust (QGT): one library, the CLI tools on it, and the policy checks (xtask).
+[workspace]
+members = ["crates/qso-graph-trust", "crates/qgt", "xtask"]
+# The planted cases the policy checks must catch: a workspace of their own, never built here.
+exclude = ["tests/policy-fixtures"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-only"
+repository = "https://github.com/qso-graph/qso-graph-trust"
+
+# Every crate inherits these with `[lints] workspace = true`. The policy check also
+# requires `#![forbid(unsafe_code)]` at each crate root, so neither can be lowered alone.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

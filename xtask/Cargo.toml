@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "xtask"
+description = "QSO Graph Trust's own checks: cargo xtask policy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+# Reads `cargo metadata`. Repository tooling only: never in the library's tree.
+serde_json = "=1.0.145"
+# Reads the manifests as TOML, so text inside a string is never taken for a table.
+toml = "=1.1.8"
+# Parses crate roots as Rust, so only an attribute the compiler applies counts.
+syn = { version = "=3.0.9", default-features = false, features = ["full", "parsing"] }
+# Tokenizes every source file, whatever its cfg, to find `unsafe` that no build compiles.
+proc-macro2 = { version = "=1.0.107", default-features = false }
+
+[lints]
+workspace = true

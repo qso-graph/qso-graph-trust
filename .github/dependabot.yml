@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Dependabot: security updates only, grouped into one pull request per ecosystem, as across the org.
+# open-pull-requests-limit: 0 switches off version updates; security updates have their own limit and
+# are unaffected. CI's weekly audit fails on a vulnerable lock whether or not a pull request comes.
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule: { interval: "weekly", day: "monday" }
+    open-pull-requests-limit: 0
+    groups:
+      security: { applies-to: security-updates, patterns: ["*"] }
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule: { interval: "weekly", day: "monday" }
+    open-pull-requests-limit: 0
+    groups:
+      security: { applies-to: security-updates, patterns: ["*"] }

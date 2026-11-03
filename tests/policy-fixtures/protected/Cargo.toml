@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Stands in for the library: the check follows its dependencies.
+[package]
+name = "qso-graph-trust"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+planted-native = { path = "../native" }
+planted-build-script = { path = "../build-script" }
+planted-extern-block = { path = "../extern-block" }
+planted-outside = { path = "../outside" }
+planted-src-outside = { path = "../src-outside" }
+planted-optional-native = { path = "../optional-native", optional = true }
+
+[features]
+extra = ["dep:planted-optional-native"]
+
+[lints]
+workspace = true

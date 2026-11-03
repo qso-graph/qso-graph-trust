@@ -1,0 +1,6 @@
+# Left out of release archives: CI that only runs in this repository.
+.github export-ignore
+# The corpus is test data: kept byte for byte.
+tests/corpus/** -text
+# Not UTF-8 on purpose (a planted case).
+tests/policy-fixtures/decoy/src/not_utf8.rs binary

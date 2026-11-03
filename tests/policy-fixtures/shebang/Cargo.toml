@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# PLANTED: a crate root that opens with a shebang. Workspace crates may have none, so it must be caught.
+[package]
+name = "planted-shebang"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true

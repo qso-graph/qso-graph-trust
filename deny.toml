@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# cargo-deny: the mechanical dependency rules (KI7MT, 2026-11-03, after Watson's review).
+# Reviewing what each crate does is cargo-vet's (supply-chain/); this file says where crates
+# may come from, which may not appear at all, and which licences fit a GPL-3.0-only project.
+# CI runs `cargo deny --locked check bans licenses sources`; advisories stay with cargo audit.
+
+[graph]
+all-features = true
+
+# Only crates.io: no other registry, and no git dependency.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+# Crates whose job is building C, C++ or assembly (docs/decisions/0002). When the TLS
+# stack arrives for qgt, any exception is a recorded decision naming the exact crate.
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = [
+    { crate = "autotools", reason = "builds native code" },
+    { crate = "bindgen", reason = "generates bindings for native code" },
+    { crate = "cc", reason = "builds native code" },
+    { crate = "cmake", reason = "builds native code" },
+    { crate = "cxx-build", reason = "builds native code" },
+    { crate = "nasm-rs", reason = "builds assembly" },
+    { crate = "pkg-config", reason = "finds native libraries to link" },
+    { crate = "vcpkg", reason = "finds native libraries to link" },
+]
+
+# Licences compatible with GPL-3.0-only, which QGT is.
+[licenses]
+confidence-threshold = 0.93
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "GPL-3.0-only",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
