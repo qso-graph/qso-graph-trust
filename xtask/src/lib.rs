@@ -890,13 +890,11 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                 // `#[serde(bound = "... unsafe { ... } ...")]` (found by Codex
                 // review). Every string in an attribute but a doc comment is read
                 // as tokens and held to the same rules.
-                // Rust's own attributes whose strings are prose, never code: a doc
-                // comment, a diagnostic or deprecation message, a cfg value, a lint's
-                // reason (found by Codex review: `#[must_use = "include ..."]`).
-                let prose = matches!(&g.stream().into_iter().next(), Some(TokenTree::Ident(i))
-                    if PROSE_ATTRIBUTES.iter().any(|n| i == n));
-                if attribute && !prose {
-                    for text in strings_in(g.stream()) {
+                // Strings in an attribute a derive macro may parse as Rust, read as
+                // tokens; Rust's own prose attributes excepted, inside `cfg_attr` too
+                // (found by Codex review, rounds 31 to 33).
+                if attribute {
+                    for text in code_strings(g.stream()) {
                         if let Ok(inner) = text.parse::<proc_macro2::TokenStream>() {
                             found.extend(unsafe_tokens(inner));
                         }
@@ -966,6 +964,42 @@ const PROSE_ATTRIBUTES: &[&str] = &[
     "must_use",
     "warn",
 ];
+
+/// The strings in one attribute's tokens that a macro might read as code: none
+/// for Rust's own prose attributes; for `cfg_attr(predicate, a, b, ...)`, those of
+/// each wrapped attribute in turn; otherwise every string in it.
+fn code_strings(attr: proc_macro2::TokenStream) -> Vec<String> {
+    use proc_macro2::TokenTree;
+    let trees: Vec<TokenTree> = attr.into_iter().collect();
+    let first = match trees.first() {
+        Some(TokenTree::Ident(i)) => i.to_string(),
+        _ => String::new(),
+    };
+    if PROSE_ATTRIBUTES.contains(&first.as_str()) {
+        return Vec::new();
+    }
+    if first == "cfg_attr" {
+        let Some(TokenTree::Group(args)) = trees.get(1) else {
+            return strings_in(trees.into_iter().collect());
+        };
+        // Split the arguments at top-level commas; the first is the predicate,
+        // whose strings (`feature = "x"`) are cfg values, not code.
+        let mut parts: Vec<Vec<TokenTree>> = vec![Vec::new()];
+        for tree in args.stream() {
+            if matches!(&tree, TokenTree::Punct(p) if p.as_char() == ',') {
+                parts.push(Vec::new());
+            } else if let Some(last) = parts.last_mut() {
+                last.push(tree);
+            }
+        }
+        return parts
+            .into_iter()
+            .skip(1)
+            .flat_map(|part| code_strings(part.into_iter().collect()))
+            .collect();
+    }
+    strings_in(trees.into_iter().collect())
+}
 
 /// Every string literal's contents in a token stream, at any depth, read through
 /// syn so escapes and raw strings decode as Rust decodes them.
@@ -2115,6 +2149,12 @@ pub fn proof() {}
                 .is_empty()
         );
         assert!(scan("#[deprecated(note = \"use the unsafe-free API\")] pub fn g() {}").is_empty());
+        // Inside cfg_attr too, while a wrapped derive helper is still read (round 33).
+        assert!(
+            scan("#[cfg_attr(all(), must_use = \"include this value\")] pub fn p() -> u8 { 0 }")
+                .is_empty()
+        );
+        assert!(scan("#[cfg_attr(feature = \"x\", serde(bound = \"[(); unsafe { 0 }]: Sized\"))] struct Q;").contains(&"uses unsafe"));
         assert!(
             scan("#[allow(dead_code, reason = \"asm! is mentioned here\")] fn h() {}").is_empty()
         );
