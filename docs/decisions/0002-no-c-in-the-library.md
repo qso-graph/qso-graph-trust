@@ -63,6 +63,12 @@ files. A directory is left out only when it is another workspace crate, or Cargo
 or a workspace exclusion lying outside every crate; inside one, `mod` could still load it. The
 planted fixtures therefore live at the repository root, in `tests/policy-fixtures`.
 
+**Every shipped crate's dependencies are reviewed.** A dependency's macro (`paste!`, for one) can
+build `unsafe` code inside our crate from pieces, so every crate outside the workspace that the
+library or `qgt` needs, not only the library's tree, comes from crates.io and is reviewed by exact
+name and version. The no-C rules stay the library's: `qgt` may link the TLS stack's C. The library's
+root may not switch itself off with a crate-level `#![cfg]`, which would also switch off the canary.
+
 **For the workspace's own crates the compiler is the enforcer.** Each is edition 2024 and forbids
 unsafe code (both checked by `cargo xtask policy`), and under those two rules rustc refuses every
 `extern` block, `#[link]`ed or not, all inline and global assembly, and `no_mangle`: checked against

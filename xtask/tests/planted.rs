@@ -260,6 +260,10 @@ fn this_repository_passes() {
     let meta = xtask::metadata(&here("../Cargo.toml")).expect("workspace metadata");
     assert_eq!(xtask::no_c(&meta, xtask::PROTECTED), Vec::<String>::new());
     assert_eq!(xtask::no_unsafe(&meta), Vec::<String>::new());
+    assert_eq!(
+        xtask::unreviewed_in(&meta, xtask::SHIPPED),
+        Vec::<String>::new()
+    );
     assert_eq!(xtask::no_lint_overrides(&here("..")), Vec::<String>::new());
     assert_eq!(xtask::pinned_compiler(&here("..")), Vec::<String>::new());
 }

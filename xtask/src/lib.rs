@@ -25,6 +25,88 @@ use std::process::Command;
 /// The crates that hold the key, the signing and the file parsers.
 pub const PROTECTED: &[&str] = &["qso-graph-trust"];
 
+/// The crates QGT ships. Every crate they take from outside the workspace is
+/// reviewed by exact name and version, because one could hand them a macro that
+/// writes unsafe code into our own source (found by Codex review: `paste!` can
+/// build the keyword from pieces). The no-C rules are the library's alone: `qgt`
+/// carries the TLS stack, which is C (docs/decisions/0002).
+pub const SHIPPED: &[&str] = &["qso-graph-trust", "qgt"];
+
+/// Every crate from outside the workspace that a shipped crate needs to build and
+/// run (normal and build dependencies), not from crates.io or not reviewed by
+/// exact name and version. Sorted; empty means the check passes.
+pub fn unreviewed_in(meta: &Value, shipped: &[&str]) -> Vec<String> {
+    unreviewed_reviewing(meta, shipped, REVIEWED)
+}
+
+fn unreviewed_reviewing(
+    meta: &Value,
+    shipped: &[&str],
+    list: &[(&str, &str, &str)],
+) -> Vec<String> {
+    let empty = Vec::new();
+    let packages: HashMap<&str, &Value> = meta["packages"]
+        .as_array()
+        .unwrap_or(&empty)
+        .iter()
+        .filter_map(|p| Some((p["id"].as_str()?, p)))
+        .collect();
+    let nodes: HashMap<&str, &Value> = meta["resolve"]["nodes"]
+        .as_array()
+        .unwrap_or(&empty)
+        .iter()
+        .filter_map(|n| Some((n["id"].as_str()?, n)))
+        .collect();
+    let workspace = members(meta);
+    let mut problems = Vec::new();
+    let mut queue: VecDeque<&str> = VecDeque::new();
+    for want in shipped {
+        let found: Vec<&str> = packages
+            .iter()
+            .filter(|(id, p)| p["name"].as_str() == Some(want) && workspace.contains(*id))
+            .map(|(id, _)| *id)
+            .collect();
+        if found.is_empty() {
+            problems.push(format!("shipped crate {want} is not a workspace member"));
+        }
+        queue.extend(found);
+    }
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    while let Some(id) = queue.pop_front() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let pkg = packages.get(id);
+        let name = pkg.and_then(|p| p["name"].as_str()).unwrap_or(id);
+        let version = pkg.and_then(|p| p["version"].as_str()).unwrap_or("?");
+        if !workspace.contains(id) {
+            if pkg.and_then(|p| p["source"].as_str()) != Some(CRATES_IO) {
+                problems.push(format!("{name} {version} is not a crates.io crate"));
+            }
+            if !list.iter().any(|(n, v, _)| *n == name && *v == version) {
+                problems.push(format!("{name} {version} has not been reviewed"));
+            }
+        }
+        for dep in nodes
+            .get(id)
+            .and_then(|n| n["deps"].as_array())
+            .unwrap_or(&empty)
+        {
+            let shipped_kind = dep["dep_kinds"]
+                .as_array()
+                .unwrap_or(&empty)
+                .iter()
+                .any(|k| k["kind"].is_null() || k["kind"] == "build");
+            if shipped_kind && let Some(d) = dep["pkg"].as_str() {
+                queue.push_back(d);
+            }
+        }
+    }
+    problems.sort();
+    problems.dedup();
+    problems
+}
+
 /// Crates whose only job is to compile or find native code for a build script.
 const NATIVE_BUILD: &[&str] = &[
     "autotools",
@@ -461,6 +543,13 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
                 .is_some_and(|k| k.iter().any(|k| k == "proc-macro"))
             {
                 problems.push(format!("{pkg_name} is a procedural macro crate"));
+            }
+            // The library may not switch itself off with a crate-level `#![cfg]`:
+            // that would also switch off the canary's probe (found by Codex review).
+            if PROTECTED.contains(&pkg_name)
+                && std::fs::read_to_string(src).is_ok_and(|s| has_crate_cfg(&s))
+            {
+                problems.push(format!("{src} has a crate-level #![cfg]"));
             }
             // A crate root of another extension would escape the token scan.
             if !src.ends_with(".rs") {
@@ -1185,6 +1274,15 @@ fn copy_repository(from: &Path, to: &Path, output: Option<&Path>) -> Result<(), 
     Ok(())
 }
 
+/// Whether a crate root has an inner `#![cfg(...)]`, read with syn.
+fn has_crate_cfg(source: &str) -> bool {
+    syn::parse_file(source).is_ok_and(|f| {
+        f.attrs
+            .iter()
+            .any(|a| matches!(a.style, syn::AttrStyle::Inner(_)) && a.path().is_ident("cfg"))
+    })
+}
+
 /// Whether a crate root forbids unsafe code with an inner attribute that the
 /// compiler applies: `#![forbid(...)]` naming the lint `unsafe_code`, not under
 /// `cfg_attr`. The file is parsed by `syn`, a complete Rust parser, so shebangs,
@@ -1268,6 +1366,31 @@ mod tests {
         );
         // Reviewed, it passes: the review covers the script.
         assert!(check(&g, PROTECTED).is_empty());
+    }
+
+    #[test]
+    fn every_outside_crate_a_shipped_crate_needs_is_reviewed() {
+        // A dependency of the command line, not the library, is reviewed too: it
+        // could hand qgt a macro that writes unsafe code (Codex review, round 19).
+        let mut g = graph(json!("dev"));
+        g["packages"][0]["name"] = json!("qgt");
+        assert_eq!(
+            unreviewed_in(&g, &["qgt"]),
+            vec!["middle 1.0.0 has not been reviewed"]
+        );
+        assert!(unreviewed_reviewing(&g, &["qgt"], TEST_REVIEWED).is_empty());
+        assert_eq!(
+            unreviewed_in(&g, &["gone"]),
+            vec!["shipped crate gone is not a workspace member"]
+        );
+    }
+
+    #[test]
+    fn a_crate_level_cfg_is_found() {
+        assert!(has_crate_cfg("#![cfg(unix)]\n#![forbid(unsafe_code)]"));
+        assert!(!has_crate_cfg(
+            "#![forbid(unsafe_code)]\n#[cfg(unix)] fn f() {}"
+        ));
     }
 
     #[test]

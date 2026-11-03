@@ -41,6 +41,10 @@ fn main() -> ExitCode {
     let mut failed = false;
     for (check, problems) in [
         ("no C in the library", xtask::no_c(&meta, xtask::PROTECTED)),
+        (
+            "reviewed dependencies",
+            xtask::unreviewed_in(&meta, xtask::SHIPPED),
+        ),
         ("no unsafe code", xtask::no_unsafe(&meta)),
         ("no lint overrides", xtask::no_lint_overrides(&root_dir)),
         ("the pinned compiler", xtask::pinned_compiler(&root_dir)),
