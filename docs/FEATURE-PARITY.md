@@ -1,200 +1,178 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
-# Feature parity: TQSL 2.8.7 and QSO Graph Trust
+# Feature parity: TQSL and QG Trust
 
-Every feature and option TQSL 2.8.7 has, in its app and on its command line, and where QSO Graph Trust
-stands on each (KI7MT, 2026-11-03: "Then we can decide what we will implement, what we won't, what's
-done, and what's left"). Not everything here needs to be in QG Trust. The list is complete so the
-choice is made row by row, not by omission.
+Everything TQSL 2.8.7 does, and what QG Trust does about each. QG Trust doesn't need everything TQSL
+has, so every feature is placed in one of three lists, in priority order:
 
-Read from TQSL's source at v2.8.7 (commit d9e01726): the menus and tabs (`apps/tqsl.cpp`), preferences
-(`apps/tqsl_prefs.cpp`), the certificate request wizard (`apps/crqwiz.cpp`), certificate loading
-(`apps/loadcertwiz.cpp`), station locations (`apps/stationdial.cpp`, `apps/tqslwiz.cpp`), QSO entry
-(`apps/qsodatadialog.cpp`), passwords (`apps/getpassword.cpp`) and the command line (`cmdLineDesc`).
+1. **Needed for 0.7.0:** what an operator needs to stop using TQSL. Built first, in the order listed.
+2. **Nice to have:** worth doing later, not needed to replace TQSL.
+3. **Won't add:** left out on purpose, with the reason.
 
-**Where** says where it would live: **Lib** (the `qso-graph-trust` library), **CLI** (`qg-trust`),
-**QSGD** (QG Trust's extension in QSO Graph Desktop, its only interface, decision 0005).
+This is the library's list. The command line (`qg-trust`) and QSO Graph Desktop are built on the
+library, so their lists follow from it: the command line is at the end, and Desktop's screens are
+in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
-**Status** is a fact about the code: **Done** (code and a test, on `main`), **In review** (an open pull
-request), **Not started**. **Decision** is KI7MT's: **Implement**, **Won't**, or **Undecided**; where he
-has decided, the date is given, otherwise it is Undecided.
+**Status:** **Done** (built and tested) · **Part done** (what's missing is in the next column) ·
+**0.7.0** (planned for milestone 0.7.0) · **Later** · **Won't**.
+**Issue** is where the work is tracked: the phases of
+[#169](https://github.com/qso-graph/qso-graph-desktop/issues/169), which are
+[#171](https://github.com/qso-graph/qso-graph-desktop/issues/171) (signing),
+[#172](https://github.com/qso-graph/qso-graph-desktop/issues/172) (the library),
+[#173](https://github.com/qso-graph/qso-graph-desktop/issues/173) (the command line) and
+[#174](https://github.com/qso-graph/qso-graph-desktop/issues/174) (Desktop).
 
-## 1. Signing logs (File menu, Log Operations tab)
+## Summary
 
-| # | Feature | TQSL | Where | Status | Decision | Notes |
-|---|---|---|---|---|---|---|
-| 1.1 | Sign an ADIF log | File: Sign and save | Lib | Done | Implement | `.tq7`/`.tq8` byte for byte as tqsllib's (Gate B, #4) |
-| 1.2 | Sign a Cabrillo log | File: Sign and save | Lib | Not started | Undecided | Uses the Cabrillo contest definitions (5.4) |
-| 1.3 | Save the signed log (`.tq8`) | File: Sign and save | Lib, CLI, QSGD | Lib done | Implement | gzip, `signed_log::tq8` |
-| 1.4 | Sign and upload to LoTW | File: Sign and upload | Lib, CLI, QSGD | Not started | Undecided | Uploading is phase 4. Never in tests (KI7MT, 2026-11-03: no uploads to ARRL) |
-| 1.5 | Test signing (sign, upload nothing) | File: Test Signing | CLI, QSGD | Not started | Undecided | `tqsl -z` |
-| 1.6 | Choose the station location to sign for | prompt; `-l` | Lib, CLI, QSGD | Lib done | Implement | `StationLocation` |
-| 1.7 | Confirm the station location before signing | dialog | QSGD | Not started | Undecided | "Please verify that this is the correct Station Location" |
-| 1.8 | QSO date range to sign | dialog; `-b`, `-e` | Lib, CLI, QSGD | Not started | Undecided | Preference "Prompt for QSO Date range" (5.2) |
-| 1.9 | Refuse QSOs outside the certificate's QSO dates | converter | Lib | Done | Implement | `LogError::QsoOutsideCertificate` |
-| 1.10 | Previously signed QSOs: new only, re-upload, or cancel | dialog; `-a` | Lib, CLI, QSGD | Not started | Undecided | Needs QG Trust's own record of signed QSOs (4.4) |
-| 1.11 | Show details of previously signed QSOs | dialog | QSGD | Not started | Undecided | Preference "Display details of previously signed QSOs" |
-| 1.12 | Check the log's own station fields (`MY_*`, `STATION_CALLSIGN`) | converter | Lib | Done | Implement | Refused if they disagree (TQSL's default, "Report") |
-| 1.13 | Refuse what LoTW would refuse (calls, bands, modes, dates, satellites) | converter | Lib | Done | Implement | `QsoError`, naming the field |
-| 1.14 | Status log of what was signed or refused | Status Log tab | QSGD | Not started | Undecided | |
-
-## 2. Callsign certificates (Callsign Certificate menu and tab)
-
-| # | Feature | TQSL | Where | Status | Decision | Notes |
-|---|---|---|---|---|---|---|
-| 2.1 | Request a new certificate (`.tq5`) | Request New Callsign Certificate | Lib, QSGD | Not started | Undecided | Gate C: `.tq5` output matches tqsllib's |
-| 2.2 | Request: callsign, DXCC entity, first and last QSO date | wizard | Lib, QSGD | Not started | Undecided | Dates checked against the entity's valid dates |
-| 2.3 | Request: name, address, city, state, postal code, country, email | wizard | Lib, QSGD | Not started | Undecided | |
-| 2.4 | Request: kind of call (club, DXpedition, special event, former, replacing, QSL manager) | wizard | Lib, QSGD | Not started | Undecided | Some need approval with an existing certificate |
-| 2.5 | Request signed by an existing certificate | wizard | Lib, QSGD | Not started | Undecided | |
-| 2.6 | Key password chosen at request | wizard | Lib, QSGD | Not started | Undecided | Only 1024-bit keys (KI7MT, 2026-11-03) |
-| 2.7 | Renew a certificate | Renew Callsign Certificate | Lib, QSGD | Not started | Undecided | |
-| 2.8 | Load a certificate (`.tq6`) | Load Callsign Certificate from File; `-i` | Lib, CLI, QSGD | Not started | Undecided | Certificate fields are read (Lib); importing a `.tq6` is not yet |
-| 2.9 | Load a certificate and key (`.p12`) | Load from File; `-i` | Lib, CLI, QSGD | Not started | Undecided | |
-| 2.10 | Save a certificate and key (`.p12`) | Save Callsign Certificate to File | Lib, QSGD | Not started | Implement (KI7MT, 2026-11-03) | Always protected by a password QG Trust generates, 80 bits or more, 14 to 24 characters (Gate C) |
-| 2.11 | `.p12` compatible with Apple Keychain | preference "Export P12 files compatible with Apple Keychain" | Lib | Not started | Undecided | TQSL's weak-crypto export |
-| 2.12 | Certificate properties | Display Callsign Certificate Properties | Lib, QSGD | Lib done in part | Undecided | Call, DXCC, QSO dates, validity, serial (`Certificate`) |
-| 2.13 | Delete a certificate | Delete Callsign Certificate | Lib, QSGD | Not started | Undecided | |
-| 2.14 | Restore a deleted certificate | Restore Deleted Callsign Certificate | Lib, QSGD | Not started | Undecided | |
-| 2.15 | Certificate chain checked to LoTW's root | on load | Lib | Done | Implement | Pinned root; a file's own roots trust nothing (#7) |
-| 2.16 | Expiry warning before a certificate ends | startup; preference CertWarnDays (60) | QSGD | Not started | Undecided | |
-| 2.17 | Certificate status from LoTW (by serial) | `lotw/crl?serial=` | Lib, QSGD | Not started | Undecided | Calls ARRL; none until KI7MT decides |
-| 2.18 | Key held in the OS credential store | (TQSL: a file) | Lib, QSGD | Not started | Implement | QG Trust's requirement, not TQSL's |
-| 2.19 | No key data left in freed memory | | Lib, CLI | Done for `qg-trust` | Implement (KI7MT, 2026-11-03) | Wiping allocator, policy check, custody test (#5) |
-
-## 3. Station locations (Station Location menu and tab)
-
-| # | Feature | TQSL | Where | Status | Decision | Notes |
-|---|---|---|---|---|---|---|
-| 3.1 | Add a station location | Add Station Location; `-s` | Lib, QSGD | Lib done | Undecided | `StationLocation::new`, checked against ARRL's configuration |
-| 3.2 | Edit a station location | Edit Station Location; `-s -l` | QSGD | Not started | Undecided | |
-| 3.3 | Delete a station location | Delete | QSGD | Not started | Undecided | |
-| 3.4 | Restore a deleted station location | Restore a Deleted Station Location | QSGD | Not started | Undecided | |
-| 3.5 | Location properties | Display Station Location Properties | QSGD | Not started | Undecided | |
-| 3.6 | Fields per DXCC entity (state, county, province, oblast, prefecture, park) | wizard pages | Lib | Done | Implement | From `config.xml` |
-| 3.7 | Zones consistent with entity and state | wizard | Lib | Done | Implement | Refused; TQSL warns |
-| 3.8 | Grid checked against the entity, state or county (`vuccgrids.dat`) | wizard | Lib | Not started | Undecided | TQSL warns and lets you go on |
-| 3.9 | Grid lists (VUCC: two or four) | wizard | Lib | Done | Implement | |
-| 3.10 | IOTA reference checked | wizard | Lib | Done | Implement | |
-| 3.11 | Continent and WPX prefix fields | wizard | Lib | Not started | Undecided | In TQSL's field list; not signed |
-
-## 4. Backup and restore (File menu)
-
-| # | Feature | TQSL | Where | Status | Decision | Notes |
-|---|---|---|---|---|---|---|
-| 4.1 | Restore TQSL's backup (`.tbk`): certificates, keys, locations | Restore; `-i file.tbk` | Lib, CLI, QSGD | Lib done (#7) | Implement (KI7MT, 2026-11-03) | Gate C; signing after it matches tqsllib's |
-| 4.2 | Restore TQSL's settings from a backup | Restore | Lib | Read (#7), not yet applied | Undecided | Settings that change signing are read; applying them is not yet |
-| 4.3 | Back up QG Trust (its own format) | Backup | Lib, QSGD | Not started | Undecided | Keys always under a generated password (2.10) |
-| 4.4 | Record of signed QSOs (duplicate check) | `uploaded.db`; restored from `.tbk` | Lib | Read from `.tbk` (#7) | Undecided | QG Trust's own store not started |
-| 4.5 | Automatic backup on exit; folder; versions kept | preferences (Options) | QSGD | Not started | Undecided | |
-
-## 5. Preferences (File: Preferences, six tabs)
-
-### 5.1 Options
-
-| # | Setting | Status | Decision | Notes |
+| List | Features | Done | Part done | To do |
 |---|---|---|---|---|
-| 5.1.1 | ADIF file extensions (`adi adif`) | Not started | Undecided | TQSL's file dialogs |
-| 5.1.2 | Cabrillo file extensions (`log cbr`) | Not started | Undecided | |
-| 5.1.3 | Allow automatic configuration backup | Not started | Undecided | 4.5 |
-| 5.1.4 | Backup file folder | Not started | Undecided | 4.5 |
-| 5.1.5 | Number of backups to retain (10) | Not started | Undecided | 4.5 |
-| 5.1.6 | Open ADIF files in ADIF editor | Not started | Undecided | 7.2 |
-| 5.1.7 | Display status messages in separate tab | Not started | Undecided | TQSL's window |
-| 5.1.8 | Enable passphrases for callsign certificates | Not started | Undecided | 2.6 |
-| 5.1.9 | Export P12 files compatible with Apple Keychain | Not started | Undecided | 2.11 |
+| Needed for 0.7.0 | 43 | 15 | 4 | 24 |
+| Nice to have | 15 | | | 15 |
+| Won't add | 15 | | | |
 
-### 5.2 Log Handling
+## 1. Needed for 0.7.0
 
-| # | Setting | Status | Decision | Notes |
+### 1.1 Signing a log
+
+| Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| 5.2.1 | Ignore seconds in QSO times | Read (#7) | Undecided | Changes `QSO_TIME`; not yet applied when signing |
-| 5.2.2 | Ignore callsigns in ADIF files | Read (#7) | Undecided | Skips the `STATION_CALLSIGN`/`OPERATOR` check |
-| 5.2.3 | Allow nonamateur call signs | Read (#7) | Undecided | Signs calls TQSL thinks invalid |
-| 5.2.4 | QTH details in the log: ignore, report, or override the location | Read (#7) | Undecided | Report is TQSL's default and QG Trust's behaviour |
-| 5.2.5 | Prompt for QSO date range when signing | Not started | Undecided | 1.8 |
-| 5.2.6 | Display details of previously signed QSOs | Not started | Undecided | 1.11 |
-| 5.2.7 | Primary QSL manager callsign | Not started | Undecided | |
+| Sign an ADIF log | File: Sign and save | Matches TQSL's output exactly | Done | #171 |
+| Save the signed log (`.tq8`) | File: Sign and save | | Done | #171 |
+| Read ADIF | | | Done | #171 |
+| Choose the station location to sign for | prompt | | Done | #171 |
+| Refuse QSOs outside the certificate's dates | | | Done | #171 |
+| Refuse what LoTW would refuse (calls, bands, modes, dates, satellites) | | Names the field at fault | Done | #171 |
+| Check the log's own station fields against the location | | Refuses a mismatch, as TQSL does by default | Done | #171 |
+| No key left in memory after use | | Done for `qg-trust`; Desktop's native code still to do | Part done | #172 |
 
-### 5.3 ADIF Modes
+### 1.2 Keys and storage
 
-| # | Setting | Status | Decision | Notes |
+| Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| 5.3.1 | Custom ADIF mode mappings (ADIF mode to LoTW mode) | Read (#7) | Undecided | Changes `MODE`; one naming a standard mode is left out, as TQSL does |
+| Keys kept in the OS credential store | a file | | 0.7.0 | #172 |
+| Certificates and locations saved, in one format the command line and Desktop share | files | | 0.7.0 | #172 |
+| Record of QSOs already signed (the duplicate check) | `uploaded.db` | | 0.7.0 | #172 |
 
-### 5.4 Cabrillo Specs
+### 1.3 Moving from TQSL
 
-| # | Setting | Status | Decision | Notes |
+| Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| 5.4.1 | Custom Cabrillo contest definitions (name, HF or VHF, call-worked field) | Read (#7) | Undecided | For Cabrillo signing (1.2) |
+| Back up certificates, keys and the signed-QSO record | File: Backup | A part of QSO Graph Desktop's one backup, beside Callsigns and Locations and Settings; all ticked is a full backup. This part alone is encrypted, under a password QG Trust makes up. To move only some calls, delete the others first | 0.7.0 | #172, #174 |
+| Restore it on any computer (macOS, Windows, Linux), keys into that computer's credential store | File: Restore | Part by part, onto a clean slate: what this computer holds is removed first, nothing merged | 0.7.0 | #172, #174 |
+| Restore a TQSL backup (`.tbk`): certificates, keys, locations | File: Restore | Reads and checks it; saving what it holds waits on 1.2 | Part done | #172 |
+| Restore TQSL's record of QSOs already signed | File: Restore | Read; saving waits on 1.2 | Part done | #172 |
+| Use TQSL's settings that change what's signed: custom mode mappings, ignore seconds, ignore callsigns in the log, non-amateur calls, location details in the log | Preferences | Read from the backup; not yet used when signing | Part done | #172 |
+| Say which of TQSL's settings were not taken | | Listed | Done | #172 |
 
-### 5.5 Network Proxy
+### 1.4 Certificates
 
-| # | Setting | Status | Decision | Notes |
+| Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| 5.5.1 | Enable a proxy; address, port, type | Not started | Undecided | Never taken from a backup (#7) |
+| Check a certificate leads to LoTW's root | on load | A file's own root certificates count for nothing | Done | #172 |
+| Load a certificate from ARRL (`.tq6`) | Load Callsign Certificate | Reads its fields; loading not yet | 0.7.0 | #172 |
+| Load a certificate and key (`.p12`) | Load Callsign Certificate | | 0.7.0 | #172 |
+| Certificate details: call, DXCC, QSO dates, valid dates, serial | Display Properties | Read | Done | #172 |
+| Delete a certificate | Delete Callsign Certificate | | 0.7.0 | #172 |
+| Warn before a certificate expires | at startup, 60 days | | 0.7.0 | #172 |
 
-### 5.6 Server Setup (hidden in TQSL unless enabled)
+### 1.5 Station locations
 
-| # | Setting | Status | Decision | Notes |
+| Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| 5.6.1 | Upload URL, form field, status and message patterns | Not started | Undecided | Never taken from a backup (#7): a file could send logs elsewhere |
-| 5.6.2 | Verify the upload server's certificate | Not started | Implement | Never off (AGENTS.md: TLS verification is never turned off) |
+| Add a station location | Add Station Location | | Done | #172 |
+| The right fields for each DXCC entity (state, county, province, park and others) | wizard | From ARRL's configuration | Done | #172 |
+| Zones must fit the entity and state | wizard warns | Refused | Done | #172 |
+| Grid squares, including VUCC lists of two or four | wizard | | Done | #172 |
+| IOTA reference | wizard | | Done | #172 |
+| Edit a station location | Edit Station Location | | 0.7.0 | #172 |
+| Delete a station location | Delete | | 0.7.0 | #172 |
 
-## 6. LoTW online (Help menu, upload)
+### 1.6 Signing choices
 
-| # | Feature | TQSL | Where | Status | Decision | Notes |
-|---|---|---|---|---|---|---|
-| 6.1 | Upload a signed log, report LoTW's answer | Sign and upload; `-u` | Lib, CLI, QSGD | Not started | Undecided | Phase 4 |
-| 6.2 | Synchronize uploaded data with LoTW | Help: Synchronize | Lib, QSGD | Not started | Undecided | Downloads your QSOs to rebuild the signed-QSO record |
-| 6.3 | Log in to the LoTW website | Log Operations: button | QSGD | Not started | Undecided | Opens a browser |
-| 6.4 | Check for program updates | Help: Check for Updates; `-n` | QSGD | Not started | Undecided | QSO Graph Desktop has its own updater |
-| 6.5 | Update ARRL's configuration (`config.xml`) | automatic; `-n` | Lib | Not started | Undecided | QG Trust regenerates its tables from a new `config.xml` (AGENTS.md) |
+| Feature | TQSL | QG Trust today | Status | Issue |
+|---|---|---|---|---|
+| Sign only QSOs in a date range | dialog | | 0.7.0 | #172 |
+| Confirm the station location before signing | dialog | | 0.7.0 | #174 |
+| QSOs signed before: new only, sign again, or cancel | dialog | Needs 1.2's record | 0.7.0 | #172 |
+| Show which QSOs were signed before | dialog | | 0.7.0 | #172 |
+| Report what was signed and what was refused | Status Log | | 0.7.0 | #172 |
 
-## 7. Log files
+### 1.7 New certificates
 
-| # | Feature | TQSL | Where | Status | Decision | Notes |
-|---|---|---|---|---|---|---|
-| 7.1 | Create a new ADIF file (QSO entry) | File: Create New ADIF file | QSGD | Not started | Undecided | Band, frequency, mode, propagation, satellite, date, time |
-| 7.2 | Edit an existing ADIF file | File: Edit existing ADIF file | QSGD | Not started | Undecided | |
-| 7.3 | Read ADIF | converter | Lib | Done | Implement | |
-| 7.4 | Read ADX (XML ADIF) | | Lib | Not started | Undecided | In Gate C's fuzzing list |
-| 7.5 | Read Cabrillo | converter | Lib | Not started | Undecided | 1.2 |
+| Feature | TQSL | QG Trust today | Status | Issue |
+|---|---|---|---|---|
+| Request a new certificate (`.tq5`), matching TQSL's | Request New Callsign Certificate | | 0.7.0 | #172 |
+| Request: call, DXCC entity, first and last QSO date | wizard | | 0.7.0 | #172 |
+| Request: name, address, email | wizard | | 0.7.0 | #172 |
+| Request: kind of call (club, DXpedition, special event, former, replacing, QSL manager) | wizard | | 0.7.0 | #172 |
+| Request signed by a certificate already held | wizard | | 0.7.0 | #172 |
+| Renew a certificate | Renew Callsign Certificate | | 0.7.0 | #172 |
 
-## 8. Command line
+### 1.8 Upload to LoTW
 
-TQSL's options (`tqsl -h`), and `qg-trust`'s. A logger calling `tqsl` today should find the same meaning.
+| Feature | TQSL | QG Trust today | Status | Issue |
+|---|---|---|---|---|
+| Upload a signed log and report LoTW's answer | Sign and upload | Never in tests: nothing is uploaded to ARRL | 0.7.0 | #172 |
+| Always check LoTW's server certificate | a setting | Never turned off | 0.7.0 | #172 |
 
-| # | TQSL | Meaning | Status in `qg-trust` | Decision | Notes |
-|---|---|---|---|---|---|
-| 8.1 | `-a`, `--action` | previously signed QSOs: abort, all, compliant, ask | Not started | Undecided | |
-| 8.2 | `-b`, `--begindate` | first QSO date to sign | Not started | Undecided | |
-| 8.3 | `-c`, `--callsign` | default callsign | Not started | Undecided | |
-| 8.4 | `-d`, `--nodate` | no date range dialog | Not started | Undecided | |
-| 8.5 | `-e`, `--enddate` | last QSO date to sign | Not started | Undecided | |
-| 8.6 | `-f`, `--verify` | QTH details: ignore, report, update | Not started | Undecided | 5.2.4 |
-| 8.7 | `-h`, `--help` | help | Done | Implement | |
-| 8.8 | `-i`, `--import` | import `.p12`, `.tq6` or `.tbk` | Not started | Undecided | 2.8, 2.9, 4.1 |
-| 8.9 | `-l`, `--location` | station location | Not started | Undecided | |
-| 8.10 | `-n`, `--updates` | check for updates | Not started | Undecided | 6.4 |
-| 8.11 | `-o`, `--output` | output file (default the input's name, `.tq8`) | Not started | Undecided | |
-| 8.12 | `-p`, `--password` | key password on the command line | Not started | Won't as-is | AGENTS.md: a password never appears on a command line. Another way is needed |
-| 8.13 | `-q`, `--quiet` | quiet, as `-x` | Not started | Undecided | |
-| 8.14 | `-s`, `--editlocation` | create, or with `-l` edit, a location | Not started | Undecided | |
-| 8.15 | `-t`, `--diagnose` | diagnostic log file | Not started | Undecided | No key data or password ever in it |
-| 8.16 | `-u`, `--upload` | upload after signing | Not started | Undecided | 6.1 |
-| 8.17 | `-v`, `--version` | version | Done | Implement | |
-| 8.18 | `-w`, `--wipe` | wipe the uploads database | Not started | Undecided | |
-| 8.19 | `-x`, `--batch` | exit after processing | Not started | Undecided | |
-| 8.20 | `-z`, `--test-sign` | test sign a log | Not started | Undecided | 1.5 |
-| 8.21 | `FILE` | the ADIF or Cabrillo log to sign | Not started | Undecided | |
-| 8.22 | Exit codes 0 to 15 | Success, Cancel, Rejected, Unexpected response, TQSL error, Library error, Input, Output, No QSOs, Some not processed, Syntax, Connection failed, Unknown, Busy, Already uploaded, Bad passphrase | Syntax (10) done | Undecided | Same numbers, so a logger reads the same meaning |
+## 2. Nice to have
 
-## 9. The app itself
+| Feature | TQSL | Why later | Status |
+|---|---|---|---|
+| Sign a Cabrillo log, read Cabrillo, custom contest definitions | Sign and save; Preferences | Most loggers export ADIF | Later |
+| Read ADX (ADIF in XML) | | Few loggers write it | Later |
+| Test signing: sign, upload nothing | Test Signing | Saving `.tq8` without uploading already does this | Later |
+| Grid checked against the entity, state or county | warns | TQSL only warns | Later |
+| Continent and WPX prefix in a location | wizard | Not signed | Later |
+| Primary QSL manager call | Preferences | Rarely used | Later |
+| Restore a deleted certificate | Restore Deleted | Delete comes first | Later |
+| Restore a deleted station location | Restore Deleted | Delete comes first | Later |
+| Automatic backup on exit | Preferences | Comes after backup itself (1.3) | Later |
+| Rebuild the record of signed QSOs from LoTW | Help: Synchronize | Needs upload first | Later |
+| Ask LoTW whether a certificate is still good (by serial) | | Calls ARRL; needs a decision first | Later |
+| Take a new ARRL configuration (`config.xml`) without a new release | automatic | A release with new tables works meanwhile | Later |
+| Wipe the record of signed QSOs | `-w` | Rarely needed | Later |
+| Create a new ADIF file (QSO entry) | Create New ADIF file | A logger's job | Later |
+| Edit an ADIF file | Edit existing ADIF file | A logger's job | Later |
 
-| # | Feature | TQSL | Where | Status | Decision | Notes |
-|---|---|---|---|---|---|---|
-| 9.1 | Language | File: Language | QSGD | Not started | Undecided | QSO Graph Desktop's own |
-| 9.2 | Diagnostic mode (trace file) | File: Diagnostic Mode | QSGD | Not started | Undecided | No key data or password ever in it |
-| 9.3 | Documentation, About | Help | QSGD | Not started | Undecided | |
-| 9.4 | Tabs: Log Operations, Station Locations, Callsign Certificates, Status Log | main window | QSGD | Not started | Undecided | The Callsigns page (decision 0005) |
-| 9.5 | First-run help | startup | QSGD | Not started | Undecided | |
+## 3. Won't add
+
+| Feature | TQSL | Why not |
+|---|---|---|
+| Save one certificate and key (`.p12`) | Save Callsign Certificate | The full backup moves keys; to move only some, delete the rest first |
+| `.p12` export in Apple Keychain's older format | Preferences | QG Trust saves no `.p12`; the Keychain reads modern AES-256 files from macOS 15 on anyway |
+| Key password on the command line (`-p`) | `-p` | A password never goes on a command line; another way is needed |
+| Choosing the upload server and its answers | Server Setup | Logs go to LoTW only |
+| Settings for upload, server or proxy taken from a backup | Restore | A file could send logs elsewhere |
+| A choice to turn off key passwords | Preferences | Handled by the key store (1.2) |
+| Proxy settings | Network Proxy | Desktop's own network settings |
+| Check for program updates | Help | Desktop's updater |
+| Language | File: Language | Desktop's own |
+| Documentation, About, first-run help | Help | Desktop's own |
+| Diagnostic mode | File: Diagnostic Mode | Desktop's own diagnostics |
+| TQSL's window: tabs, status tab, file extensions, open in ADIF editor | main window, Preferences | Desktop's own screens |
+| Log in to the LoTW website | button | Opens a browser; nothing for the library to do |
+| Show the options at startup without a date dialog (`-d`) | `-d` | No dialog in the library |
+| Quiet and batch modes as TQSL's window has them (`-q`, `-x`) | `-q`, `-x` | The command line has no window |
+
+## 4. The command line (`qg-trust`)
+
+Follows the library: each option comes once the library feature under it is built. A logger that
+calls TQSL's command line today should get the same meaning, including exit codes.
+
+| TQSL option | Meaning | Needs | Status | Issue |
+|---|---|---|---|---|
+| `-h`, `-v` | help, version | | Done | #173 |
+| `FILE`, `-o` | the log to sign; the `.tq8` to write | 1.1 | 0.7.0 | #173 |
+| `-l` | station location | 1.5 | 0.7.0 | #173 |
+| `-b`, `-e` | first and last QSO date | 1.6 | 0.7.0 | #173 |
+| `-a` | QSOs signed before: abort, all, compliant, ask | 1.6 | 0.7.0 | #173 |
+| `-f` | location details in the log: ignore, report, update | 1.3 | 0.7.0 | #173 |
+| `-i` | import `.tq6`, `.p12` or `.tbk` | 1.3, 1.4 | 0.7.0 | #173 |
+| `-s` | add, or with `-l` edit, a location | 1.5 | 0.7.0 | #173 |
+| `-u` | upload after signing | 1.8 | 0.7.0 | #173 |
+| `-c` | default call | 1.4 | 0.7.0 | #173 |
+| `-t` | diagnostic log, with no key or password in it | | 0.7.0 | #173 |
+| Exit codes 0 to 15 | the same numbers TQSL uses | | Part done: 10 (syntax) | #173 |
+| `-z` | test signing | 2 | Later | |
+| `-n` | check for updates | 3 | Won't | |
+| `-p`, `-d`, `-q`, `-x` | see Won't add | 3 | Won't | |

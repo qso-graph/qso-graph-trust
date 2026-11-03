@@ -56,7 +56,7 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
   against tqsllib. *Test: the differential suite (phase 2).*
 - **What LoTW receives is the same as TQSL's; how QGT gets there is its own design.** The signed
   string, signature and `.tq8` records match tqsllib's exactly. QGT's errors, storage and interface
-  follow its own requirements, not tqsllib's internal behaviour (KI7MT, 2026-11-03). Code written to
+  follow its own requirements, not tqsllib's internal behaviour. Code written to
   drive tqsllib lives only in `tests/tqsllib/`.
 - **TLS verification is never turned off,** the user agent names QGT truthfully, and a password never
   appears on a command line, in a URL, a trace or a log.

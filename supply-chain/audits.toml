@@ -72,7 +72,7 @@ criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
 start = "2020-06-05"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.aws-lc-rs]]
 criteria = "safe-to-deploy"
@@ -86,35 +86,35 @@ criteria = "safe-to-deploy"
 user-id = 156764 # Justin W Smith (justsmth)
 start = "2022-11-09"
 end = "2027-11-03"
-notes = "AWS-LC, the cryptographic provider KI7MT chose for LoTW's signature (2026-11-03, docs/decisions/0006), published by AWS's aws-lc-rs maintainer; the library QSO Graph Desktop already ships"
+notes = "AWS-LC, the cryptographic provider for LoTW's signature (docs/decisions/0006), published by AWS's aws-lc-rs maintainer; the library QSO Graph Desktop already ships"
 
 [[trusted.base64ct]]
 criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
 start = "2021-01-21"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.block-buffer]]
 criteria = "safe-to-deploy"
 user-id = 5059 # Artyom Pavlov (newpavlov)
 start = "2019-04-15"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.block-padding]]
 criteria = "safe-to-deploy"
 user-id = 5059 # Artyom Pavlov (newpavlov)
 start = "2019-04-22"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.cbc]]
 criteria = "safe-to-deploy"
 user-id = 5059 # Artyom Pavlov (newpavlov)
 start = "2021-04-10"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.cc]]
 criteria = "safe-to-deploy"
@@ -135,7 +135,7 @@ criteria = "safe-to-deploy"
 user-id = 5059 # Artyom Pavlov (newpavlov)
 start = "2022-02-10"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.cmake]]
 criteria = "safe-to-deploy"
@@ -149,49 +149,49 @@ criteria = "safe-to-deploy"
 user-id = 11235 # Arthur Gautier (baloo)
 start = "2023-07-10"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.cpufeatures]]
 criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
 start = "2021-04-26"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.crypto-common]]
 criteria = "safe-to-deploy"
 user-id = 5059 # Artyom Pavlov (newpavlov)
 start = "2021-02-10"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.der]]
 criteria = "safe-to-deploy"
 user-id = 11235 # Arthur Gautier (baloo)
 start = "2023-04-19"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.der_derive]]
 criteria = "safe-to-deploy"
 user-id = 11235 # Arthur Gautier (baloo)
 start = "2023-04-19"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.des]]
 criteria = "safe-to-deploy"
 user-id = 5059 # Artyom Pavlov (newpavlov)
 start = "2020-08-07"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.digest]]
 criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
 start = "2020-06-10"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.find-msvc-tools]]
 criteria = "safe-to-deploy"
@@ -205,7 +205,7 @@ criteria = "safe-to-deploy"
 user-id = 5059 # Artyom Pavlov (newpavlov)
 start = "2019-06-28"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.getrandom]]
 criteria = "safe-to-deploy"
@@ -219,14 +219,14 @@ criteria = "safe-to-deploy"
 user-id = 5059 # Artyom Pavlov (newpavlov)
 start = "2019-07-11"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.inout]]
 criteria = "safe-to-deploy"
 user-id = 5059 # Artyom Pavlov (newpavlov)
 start = "2021-08-13"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.itoa]]
 criteria = "safe-to-deploy"
@@ -267,35 +267,35 @@ criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
 start = "2020-06-10"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.pem-rfc7468]]
 criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
 start = "2021-02-16"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.pkcs1]]
 criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
 start = "2020-06-12"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.pkcs5]]
 criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
 start = "2020-06-12"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.pkcs8]]
 criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
 start = "2020-06-12"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.proc-macro2]]
 criteria = "safe-to-deploy"
@@ -335,14 +335,14 @@ criteria = "safe-to-deploy"
 user-id = 5059 # Artyom Pavlov (newpavlov)
 start = "2019-07-30"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.scrypt]]
 criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
 start = "2020-08-18"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.serde]]
 criteria = "safe-to-deploy"
@@ -373,21 +373,21 @@ criteria = "safe-to-deploy"
 user-id = 5059 # Artyom Pavlov (newpavlov)
 start = "2020-01-06"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.signature]]
 criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
 start = "2019-05-25"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.spki]]
 criteria = "safe-to-deploy"
 user-id = 11235 # Arthur Gautier (baloo)
 start = "2023-05-04"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.syn]]
 criteria = "safe-to-deploy"
@@ -413,7 +413,7 @@ criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
 start = "2021-01-21"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.zerocopy]]
 criteria = "safe-to-deploy"
@@ -434,11 +434,11 @@ criteria = "safe-to-deploy"
 trusted-publisher = "github:RustCrypto/utils"
 start = "2026-06-12"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"
 
 [[trusted.zeroize_derive]]
 criteria = "safe-to-deploy"
 trusted-publisher = "github:RustCrypto/utils"
 start = "2026-06-12"
 end = "2027-11-03"
-notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md, KI7MT 2026-11-03)"
+notes = "RustCrypto, a trusted publisher (docs/decisions/0004-supply-chain.md)"

@@ -9,7 +9,7 @@ license.workspace = true
 repository.workspace = true
 
 # The only crate in QSO Graph Trust allowed unsafe code, and only to call AWS-LC's C functions for the
-# key (KI7MT, 2026-11-03; docs/decisions/0006). aws-lc-rs's safe API does not sign RSA with SHA-1,
+# key (docs/decisions/0006). aws-lc-rs's safe API does not sign RSA with SHA-1,
 # which LoTW requires, so this calls RSA_sign itself. Pinned exactly: it is the signing path.
 [dependencies]
 aws-lc-sys = { version = "=0.45.0", default-features = false, features = ["all-bindings"] }

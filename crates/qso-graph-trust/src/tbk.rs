@@ -62,7 +62,7 @@ pub struct Backup {
     /// TQSL's settings that change what LoTW receives.
     pub preferences: Preferences,
     /// TQSL's other settings, by group and name, not taken: its own interface, and anything that
-    /// sets where logs go (KI7MT, 2026-11-03).
+    /// sets where logs go.
     pub settings_not_taken: Vec<String>,
     /// The sections of the backup not read: TQSL's own settings, and anything newer.
     pub not_read: Vec<String>,
@@ -381,8 +381,8 @@ fn read_user_certificate(entry: &Element) -> Result<BackedUpCertificate, TbkErro
         if cert.dxcc() != dxcc {
             return Err(mismatch("the certificate is for another DXCC entity"));
         }
-        // The serial TQSL wrote is the certificate's, as tqsllib reads one (KI7MT, 2026-11-03: the
-        // serial is how one call's certificates are told apart).
+        // The serial TQSL wrote is the certificate's, as tqsllib reads one: the serial is how one
+        // call's certificates are told apart.
         // TQSL on Windows reads it into a 32-bit `long`, so writes -1 for one past 2^31 - 1.
         let written = cert.serial();
         let windows = written.is_some_and(|n| n > i64::from(i32::MAX)) && serial == -1;

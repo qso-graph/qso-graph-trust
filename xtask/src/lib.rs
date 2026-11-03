@@ -12,7 +12,7 @@
 //!   member takes the workspace's lints, and every crate root says
 //!   `#![forbid(unsafe_code)]` where the compiler reads it.
 //!
-//! - **No key data in freed memory** (AGENTS.md, KI7MT 2026-11-03): every program
+//! - **No key data in freed memory** (AGENTS.md): every program
 //!   a workspace crate builds (a binary, or a library another language loads)
 //!   installs [`WIPING_ALLOCATOR`], so every block is wiped when it is freed,
 //!   whichever library allocated it.
@@ -42,7 +42,7 @@ pub const SHIPPED: &[&str] = &[
 ];
 
 /// The one cryptographic provider whose C the library may build: AWS-LC, which QSO Graph Desktop
-/// already ships (KI7MT, 2026-11-03; docs/decisions/0006), as its C (`aws-lc-sys`, for LoTW's
+/// already ships (docs/decisions/0006), as its C (`aws-lc-sys`, for LoTW's
 /// RSA-SHA-1 signature, which the safe API does not make) and its safe API (`aws-lc-rs`, for the
 /// operations it offers, as AGENTS.md requires: certificate signature checks). One may depend on the
 /// other; any other crate only through the binding. Their own files and build are not scanned;
@@ -230,8 +230,7 @@ const NATIVE_BUILD: &[&str] = &[
 /// the Windows API and its import libraries, Apple's frameworks, and the OS's
 /// random-number source. They declare foreign functions and, for Windows, ship
 /// import libraries, because that is how any program calls the OS; they compile
-/// and ship no C, C++ or assembly. A named category, decided by KI7MT
-/// (2026-11-03, after Watson's review): allowed, and reviewed by exact version
+/// and ship no C, C++ or assembly. A named category: allowed, and reviewed by exact version
 /// through cargo-vet like every outside crate (docs/decisions/0002).
 pub const OS_BINDINGS: &[&str] = &[
     "core-foundation-sys",
@@ -419,8 +418,8 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
                     ));
                 }
             }
-            // Rust's own `asm!` is allowed in a reviewed outside crate (KI7MT,
-            // 2026-11-03): zeroize's empty barrier, which keeps a key's wiping from
+            // Rust's own `asm!` is allowed in a reviewed outside crate:
+            // zeroize's empty barrier, which keeps a key's wiping from
             // being optimized away, is one. In our own crates it stays refused, by
             // the compiler and by the token scan.
             let outside = !workspace.contains(id);

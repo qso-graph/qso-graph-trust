@@ -36,8 +36,8 @@ plain and password-protected), `.p12` exports with TQSL's bag attributes, `stati
 ## The test log
 
 `adif/qg0test-small.adi` is six QSOs from QG0TEST, for TQSL to sign into the reference `.tq8` and
-for QGT's mapping from ADIF to LoTW's signed fields. The station is the test call QG0TEST; the contacted calls are KI7MT's own former calls,
-KC4QPQ, KN4YU, M0EHA and KE1HA, used at his choice (2026-11-03), so no stranger's call is in a test.
+for QGT's mapping from ADIF to LoTW's signed fields. The station is the test call QG0TEST; the contacted calls,
+KC4QPQ, KN4YU, M0EHA and KE1HA, are used with their holder's permission, so no stranger's call is in a test.
 The station call can start with Q, but a contacted call can't: tqsllib refuses one starting with Q
 or 0, or with 1 before anything but A, M or S (TQSL 2.8.7 `src/tqslconvert.cpp`,
 `hasValidCallSignChars`). The records cover ADIF MODE and SUBMODE (FT8 and
@@ -73,10 +73,10 @@ The station location is `QG0TEST Home`: Kansas, Sedgwick County, EM17, CQ zone 4
 
 ## `standard/`: the standard test set
 
-KI7MT's standard test set (2026-11-03, qso-graph-desktop#172): what a ham's TQSL 2.8.7 holds, made by
+The standard test set (qso-graph-desktop#172): what a ham's TQSL 2.8.7 holds, made by
 `scripts/make-standard-set.sh` in the harness container with no network. tqsllib makes each key and
 request and loads each certificate; then TQSL's app itself runs in a virtual display and, as it closes,
-writes its own automatic backup, `standard.tbk`. The calls are KI7MT's former ones, his choice; every
+writes its own automatic backup, `standard.tbk`. The calls are used with their holder's permission; every
 key, certificate and password is a test one, from the same kind of test CA ("TEST ONLY", "Not ARRL").
 
 | Call | Certificate | Key password | Locations |

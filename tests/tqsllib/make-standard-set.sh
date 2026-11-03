@@ -3,9 +3,9 @@
 # Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 #
 # Runs inside the harness image (Containerfile), started by scripts/make-standard-set.sh: makes the
-# standard test set (KI7MT, 2026-11-03; qso-graph-desktop#172), the certificates, locations and backup a
+# standard test set (qso-graph-desktop#172), the certificates, locations and backup a
 # ham's TQSL would hold, into /out. A test CA plays the part ARRL plays: "TEST ONLY, Not ARRL". The calls
-# are KI7MT's former ones, his choice; every key, certificate and password here is a test one.
+# are used with their holder's permission; every key, certificate and password here is a test one.
 #
 #   KC4QPQ   North Charleston, SC: KC4QPQ-HOME (Charleston County, FM02) and four parks, MN35 Fort
 #            Sumter, NS09 Charles Pinckney (Charleston, FM02), NP12 Congaree (Richland, EM93) and
@@ -124,7 +124,7 @@ done
 
 # A test log for each location, dated today so every certificate covers it, W4W's included. Each
 # location's QSOs are its own (tqsllib signs a QSO once, wherever from: its duplicate check). The calls
-# worked are KI7MT's former ones and the set's own.
+# worked are used with their holder's permission, and the set's own.
 d=$(date -u +%Y%m%d)
 n=0
 for entry in "${LOCATIONS[@]}"; do
