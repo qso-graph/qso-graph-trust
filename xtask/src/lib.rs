@@ -448,8 +448,11 @@ pub fn native_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                 }
             }
             TokenTree::Group(g) => {
-                let after_hash = i > 0
-                    && matches!(&trees[i - 1], TokenTree::Punct(p) if p.as_char() == '#' || p.as_char() == '!');
+                // An attribute is `#[...]` or `#![...]`: a `!` alone is a macro
+                // call, as in `assert![link]` (Codex review, round 37).
+                let punct = |k: usize, c: char| matches!(trees.get(k), Some(TokenTree::Punct(p)) if p.as_char() == c);
+                let after_hash =
+                    i > 0 && (punct(i - 1, '#') || i > 1 && punct(i - 1, '!') && punct(i - 2, '#'));
                 let first = g.stream().into_iter().next();
                 if after_hash
                     && g.delimiter() == Delimiter::Bracket
@@ -1483,6 +1486,10 @@ pub fn flags_allowed(flags: &str) -> bool {
     true
 }
 
+/// What the canary appends to the library: unsafe code the compiler must refuse.
+/// `::core` by its absolute path, so a module of the library's own cannot shadow it.
+pub const CANARY_PROBE: &str = "\n/// The canary's probe: the compiler must refuse it.\npub fn qgt_canary() -> u8 {\n    unsafe { ::core::ptr::read(&7) }\n}\n";
+
 /// The canary: build the real library, in a copy of this repository (its
 /// manifests and profiles, its Cargo configuration, its toolchain file) with an
 /// `unsafe` block added, in this build's real environment (its flags and any
@@ -1568,7 +1575,7 @@ fn canary_in(root: &Path, work: &Path, extra_env: &[(&str, &str)]) -> Result<(),
     }
     let mut source =
         std::fs::read_to_string(&lib).map_err(|e| format!("cannot read {}: {e}", lib.display()))?;
-    source.push_str("\n/// The canary's probe: the compiler must refuse it.\npub fn qgt_canary() -> u8 {\n    unsafe { core::ptr::read(&7) }\n}\n");
+    source.push_str(CANARY_PROBE);
     std::fs::write(&lib, source).map_err(|e| format!("cannot write {}: {e}", lib.display()))?;
 
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
@@ -1870,6 +1877,56 @@ mod tests {
         );
     }
 
+    /// The probe compiles beside whatever a valid library declares, so only the
+    /// lints can refuse it: a library with its own `mod core` once broke it (Codex
+    /// review, round 37), as would one without the implicit prelude.
+    #[test]
+    fn the_canary_probe_compiles_beside_any_library_and_only_lints_refuse_it() {
+        let dir = fresh_temp_dir("qgt-probe").expect("a fresh directory");
+        for (n, library) in [
+            "pub mod core {}\n",
+            "#![no_implicit_prelude]\n",
+            "pub mod ptr {}\npub mod core { pub mod ptr {} }\n",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let src = dir.join(format!("lib{n}.rs"));
+            std::fs::write(&src, format!("{library}{CANARY_PROBE}")).expect("write");
+            let rustc = |flag: &str| {
+                Command::new("rustc")
+                    .args([
+                        "--edition",
+                        "2024",
+                        "--crate-type",
+                        "lib",
+                        "--emit",
+                        "metadata",
+                    ])
+                    .arg("--out-dir")
+                    .arg(&dir)
+                    .arg(flag)
+                    .arg(&src)
+                    .output()
+                    .expect("rustc runs")
+            };
+            let capped = rustc("--cap-lints=allow");
+            assert!(
+                capped.status.success(),
+                "{library:?}: {}",
+                String::from_utf8_lossy(&capped.stderr)
+            );
+            let refused = rustc("-Funsafe_code");
+            assert!(!refused.status.success(), "{library:?}: not refused");
+            assert!(
+                String::from_utf8_lossy(&refused.stderr).contains("usage of an `unsafe` block"),
+                "{library:?}: {}",
+                String::from_utf8_lossy(&refused.stderr)
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn foreign_blocks_and_assembly_are_found_as_tokens() {
         let scan = |s: &str| native_tokens(s.parse().expect("tokens"));
@@ -1891,6 +1948,13 @@ mod tests {
         );
         // Rust calling Rust is not a native binding.
         assert!(scan("extern \"Rust\" { fn f(); }").is_empty());
+        // `assert![link]` is a macro call, not a `#![link]` attribute (Codex review,
+        // round 37); `#![link]` and `#[link]` still are.
+        assert!(scan("pub fn f(link: bool) { assert![link]; }").is_empty());
+        assert_eq!(
+            scan("#![link(name = \"z\")]"),
+            vec!["has a #[link] attribute"]
+        );
         // `r#extern` is an identifier, not the keyword (found by Codex review);
         // `r#asm!` is still the asm macro, and `#[r#link]` still the attribute.
         assert!(scan("pub struct r#extern { pub value: u8 }").is_empty());
