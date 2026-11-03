@@ -746,8 +746,9 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                 }
                 // Unstable features: stable code needs none, and they include
                 // ways to build unsafe code from pieces (found by Codex review).
-                let first = g.stream().into_iter().next();
-                if attribute && matches!(&first, Some(TokenTree::Ident(i)) if i == "feature") {
+                // Anywhere in the attribute, so inside cfg_attr too (found by Codex
+                // review); `cfg(feature = "x")` selects a Cargo feature and is not one.
+                if attribute && enables_feature(g.stream()) {
                     found.push("enables an unstable feature");
                 }
                 // A name a macro substitutes: `#[$name = ...]`, `[$name = ...]` or
@@ -788,6 +789,23 @@ fn names_by_variable(tokens: proc_macro2::TokenStream) -> bool {
             && matches!(&w[1], TokenTree::Group(g) if has_dollar(g.stream()))
     });
     opens_assignment || cfg_attr
+}
+
+/// Whether an attribute's tokens hold `feature(...)` at any depth, raw `r#feature`
+/// included.
+fn enables_feature(tokens: proc_macro2::TokenStream) -> bool {
+    use proc_macro2::TokenTree;
+    let trees: Vec<TokenTree> = tokens.into_iter().collect();
+    trees.iter().enumerate().any(|(i, tree)| match tree {
+        TokenTree::Ident(id) => {
+            let name = id.to_string();
+            name.strip_prefix("r#").unwrap_or(&name) == "feature"
+                && matches!(trees.get(i + 1), Some(TokenTree::Group(g))
+                    if g.delimiter() == proc_macro2::Delimiter::Parenthesis)
+        }
+        TokenTree::Group(g) => enables_feature(g.stream()),
+        _ => false,
+    })
 }
 
 /// Whether a token stream holds a `$` at any depth.
@@ -994,10 +1012,11 @@ pub fn outside_configs(root: &Path) -> Vec<String> {
         files.push(d.join(".cargo"));
         dir = d.parent().map(Path::to_path_buf);
     }
-    let home = std::env::var_os("CARGO_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cargo")));
-    files.extend(home);
+    // Both Cargo's home if set and the platform's default one: the user's home
+    // directory as the platform defines it (USERPROFILE on Windows, not HOME;
+    // found by Codex review).
+    files.extend(std::env::var_os("CARGO_HOME").map(PathBuf::from));
+    files.extend(std::env::home_dir().map(|h| h.join(".cargo")));
     let mut problems = Vec::new();
     for cargo_dir in files {
         let Ok(entries) = std::fs::read_dir(&cargo_dir) else {
@@ -1821,6 +1840,13 @@ pub fn proof() {}
             scan("macro_rules! v { ($($x:expr),*) => { [$($x),*] } }"),
             vec!["defines a macro"]
         );
+        // A feature switched on only in some configurations (Codex review, round 24).
+        assert!(
+            scan("#![cfg_attr(not(debug_assertions), feature(decl_macro))]")
+                .contains(&"enables an unstable feature")
+        );
+        // Selecting a Cargo feature is not enabling an unstable one.
+        assert!(scan("#[cfg(feature = \"std\")] fn f() {} #[cfg_attr(feature = \"x\", derive(Debug))] struct S;").is_empty());
         // The unstable `macro` and any unstable feature (Codex review, round 23).
         let decl = scan(
             "#![feature(decl_macro, macro_metavar_expr_concat)] macro read_value() { ${concat(un, safe)} { 7 } }",
