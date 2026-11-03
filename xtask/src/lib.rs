@@ -1030,29 +1030,34 @@ pub fn outside_configs(root: &Path) -> Vec<String> {
         files.push(d.join(".cargo"));
         dir = d.parent().map(Path::to_path_buf);
     }
-    // Both Cargo's home if set and the platform's default one: the user's home
-    // directory as the platform defines it (USERPROFILE on Windows, not HOME;
-    // found by Codex review).
-    files.extend(std::env::var_os("CARGO_HOME").map(PathBuf::from));
-    files.extend(std::env::home_dir().map(|h| h.join(".cargo")));
+    // The effective Cargo home: CARGO_HOME if set, otherwise the user's home
+    // directory as the platform defines it (USERPROFILE on Windows; found by
+    // Codex review). Cargo reads no other home, so neither does this.
+    files.extend(
+        std::env::var_os("CARGO_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::home_dir().map(|h| h.join(".cargo"))),
+    );
     let mut problems = Vec::new();
     for cargo_dir in files {
-        let Ok(entries) = std::fs::read_dir(&cargo_dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-            if !matches!(name.as_str(), "config" | "config.toml") {
-                continue;
-            }
-            let path = entry.path();
-            match read_toml(&path) {
-                Ok(t) => {
-                    for key in weakening_keys(&t) {
-                        problems.push(format!("{} sets {key}", path.display()));
+        // Each filename probed directly, as Cargo does: a directory that cannot be
+        // listed can still have a file Cargo opens (found by Codex review). Only
+        // "not found" is no finding; on a case-insensitive file system the probe
+        // finds any case of the name, as Cargo's does.
+        for name in ["config", "config.toml"] {
+            let path = cargo_dir.join(name);
+            match std::fs::read_to_string(&path) {
+                Ok(text) => match text.parse::<toml::Table>() {
+                    Ok(t) => {
+                        for key in weakening_keys(&t) {
+                            problems.push(format!("{} sets {key}", path.display()));
+                        }
                     }
-                }
-                Err(e) => problems.push(e),
+                    Err(e) => problems.push(format!("{} is not valid TOML: {e}", path.display())),
+                },
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => {}
+                Err(e) => problems.push(format!("{} cannot be read: {e}", path.display())),
             }
         }
     }
