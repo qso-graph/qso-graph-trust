@@ -153,18 +153,21 @@ fn is_prime(p: &rsa::BigUint) -> bool {
     if !probably_prime(p, 0) {
         return false;
     }
-    let minus_one = p - &one;
+    // Every value derived from p is wiped when dropped: p - 1 gives p back (found by Codex review).
+    // Each squaring makes a new wiped value and drops the old one, wiped, rather than overwriting it.
+    let minus_one = Zeroizing::new(p - &one);
     let s = minus_one.trailing_zeros().unwrap_or(0);
-    let d = &minus_one >> s;
+    let d = Zeroizing::new(&*minus_one >> s);
     let mut rng = rand_core::OsRng;
     'round: for _ in 0..32 {
         let a = rng.gen_biguint_range(&two, &minus_one);
-        let mut x = a.modpow(&d, p);
-        if x == one || x == minus_one {
+        let mut x = Zeroizing::new(a.modpow(&d, p));
+        if *x == one || x == minus_one {
             continue;
         }
         for _ in 1..s {
-            x = &x * &x % p;
+            let square = Zeroizing::new(&*x * &*x);
+            x = Zeroizing::new(&*square % p);
             if x == minus_one {
                 continue 'round;
             }
@@ -636,6 +639,12 @@ mod tests {
         // A Carmichael number, which fools Fermat's test, and its neighbours.
         assert!(!is_prime(&rsa::BigUint::from(561u32)));
         assert!(is_prime(&rsa::BigUint::from(65_537u32)));
+    }
+
+    #[test]
+    fn primality_working_values_are_wiped() {
+        fn wiped<T: zeroize::ZeroizeOnDrop>() {}
+        wiped::<Zeroizing<rsa::BigUint>>();
     }
 
     #[test]
