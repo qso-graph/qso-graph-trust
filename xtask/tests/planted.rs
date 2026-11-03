@@ -174,7 +174,8 @@ fn every_planted_way_to_override_the_lints_is_caught() {
     write(
         "Cargo.toml",
         "cargo-features = [\"profile-rustflags\"]\n\n[workspace]\n\n\
-         [profile.dev.package.qso-graph-trust]\nrustflags = [\"--cap-lints=allow\"]\n",
+         [profile.dev.package.qso-graph-trust]\nrustflags = [\"--cap-lints=allow\"]\n\n\
+         [patch.crates-io]\nlibc = { path = \"crates/libc\" }\n",
     );
     // An extensionless toolchain file, which rustup reads first, and one in a crate.
     write("rust-toolchain", "nightly\n");
@@ -237,6 +238,8 @@ fn every_planted_way_to_override_the_lints_is_caught() {
             root.join("crates").join("lib").join("rust-toolchain.toml").display()
         ),
         "Cargo.toml has cargo-features".to_string(),
+        // A patch consumers would not see (Codex review, round 28).
+        "Cargo.toml has [patch]".to_string(),
         "Cargo.toml sets profile.dev.package.qso-graph-trust.rustflags".to_string(),
         "rust-toolchain.toml must name an exact stable release, not Some(\"nightly-2026-10-01\")"
             .to_string(),

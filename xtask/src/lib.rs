@@ -943,6 +943,15 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
             if t.contains_key("cargo-features") {
                 problems.push("Cargo.toml has cargo-features".to_string());
             }
+            // A patch or replacement holds only here: a consumer building QGT as a
+            // dependency ignores it and gets the crate the patch stood in for,
+            // unchecked (found by Codex review). What is checked must be what
+            // consumers build, so neither is allowed.
+            for key in ["patch", "replace"] {
+                if t.contains_key(key) {
+                    problems.push(format!("Cargo.toml has [{key}]"));
+                }
+            }
             if let Some(profiles) = t.get("profile") {
                 for path in rustflags_in(profiles, "profile") {
                     problems.push(format!("Cargo.toml sets {path}"));
