@@ -890,8 +890,12 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                 // `#[serde(bound = "... unsafe { ... } ...")]` (found by Codex
                 // review). Every string in an attribute but a doc comment is read
                 // as tokens and held to the same rules.
-                let doc = matches!(&g.stream().into_iter().next(), Some(TokenTree::Ident(i)) if i == "doc");
-                if attribute && !doc {
+                // Rust's own attributes whose strings are prose, never code: a doc
+                // comment, a diagnostic or deprecation message, a cfg value, a lint's
+                // reason (found by Codex review: `#[must_use = "include ..."]`).
+                let prose = matches!(&g.stream().into_iter().next(), Some(TokenTree::Ident(i))
+                    if PROSE_ATTRIBUTES.iter().any(|n| i == n));
+                if attribute && !prose {
                     for text in strings_in(g.stream()) {
                         if let Ok(inner) = text.parse::<proc_macro2::TokenStream>() {
                             found.extend(unsafe_tokens(inner));
@@ -948,6 +952,20 @@ fn enables_feature(tokens: proc_macro2::TokenStream) -> bool {
         _ => false,
     })
 }
+
+/// Built-in attributes whose string arguments Rust treats as text, never as code.
+const PROSE_ATTRIBUTES: &[&str] = &[
+    "allow",
+    "cfg",
+    "deny",
+    "deprecated",
+    "diagnostic",
+    "doc",
+    "expect",
+    "forbid",
+    "must_use",
+    "warn",
+];
 
 /// Every string literal's contents in a token stream, at any depth, read through
 /// syn so escapes and raw strings decode as Rust decodes them.
@@ -2091,6 +2109,15 @@ pub fn proof() {}
             "#[serde(bound(deserialize = \"[(); unsafe { core::ptr::read(&7usize) }]: Sized\"))] pub struct P;",
         );
         assert!(bound.contains(&"uses unsafe"), "{bound:?}");
+        // Prose in Rust's own attributes is not code (Codex review, round 32).
+        assert!(
+            scan("#[must_use = \"include this value in the report\"] pub fn f() -> usize { 0 }")
+                .is_empty()
+        );
+        assert!(scan("#[deprecated(note = \"use the unsafe-free API\")] pub fn g() {}").is_empty());
+        assert!(
+            scan("#[allow(dead_code, reason = \"asm! is mentioned here\")] fn h() {}").is_empty()
+        );
         // Prose in a doc comment is not code.
         assert!(
             scan("/// Holds no unsafe code; see include! and asm! in the docs.\npub struct P;")
