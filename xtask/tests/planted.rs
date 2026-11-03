@@ -255,7 +255,14 @@ fn the_canary_is_refused_here_and_compiles_under_a_lint_cap() {
     assert_eq!(xtask::canary(&root, &[]), Ok(()));
     // PLANTED: a lint cap in the environment. The canary must notice it compiled.
     assert_eq!(
-        xtask::canary(&root, &[("RUSTFLAGS", "--cap-lints=allow")]),
+        xtask::canary(
+            &root,
+            &[
+                ("RUSTFLAGS", "--cap-lints=allow"),
+                // Cargo prefers this one when it is set at all (found by Codex review).
+                ("CARGO_ENCODED_RUSTFLAGS", "--cap-lints=allow"),
+            ]
+        ),
         Err("the canary compiled: something in this build weakens forbid(unsafe_code)".to_string())
     );
     // unsafe_code forced to a warning: the workspace's forbid still wins in a
@@ -263,7 +270,13 @@ fn the_canary_is_refused_here_and_compiles_under_a_lint_cap() {
     // A warning beside another error is not taken for a refusal either:
     // refused_by_unsafe_code's own test.
     assert_eq!(
-        xtask::canary(&root, &[("RUSTFLAGS", "--force-warn=unsafe_code")]),
+        xtask::canary(
+            &root,
+            &[
+                ("RUSTFLAGS", "--force-warn=unsafe_code"),
+                ("CARGO_ENCODED_RUSTFLAGS", "--force-warn=unsafe_code"),
+            ]
+        ),
         Ok(())
     );
 }

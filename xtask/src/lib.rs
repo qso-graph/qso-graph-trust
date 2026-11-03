@@ -967,8 +967,86 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
         }
     }
     problems.extend(env_problems(std::env::vars()));
+    problems.extend(outside_configs(root));
     problems.sort();
     problems
+}
+
+/// Every Cargo configuration file Cargo would read from outside the repository,
+/// each folder above it and Cargo's home, that changes how the repository
+/// compiles: a crate's own configuration stays inside the repository, but a configuration above the
+/// checkout reaches every build in it, and the canary, working elsewhere, would
+/// not see it (found by Codex review).
+pub fn outside_configs(root: &Path) -> Vec<String> {
+    let mut files = Vec::new();
+    let mut dir = std::fs::canonicalize(root)
+        .ok()
+        .and_then(|r| r.parent().map(Path::to_path_buf));
+    while let Some(d) = dir {
+        files.push(d.join(".cargo"));
+        dir = d.parent().map(Path::to_path_buf);
+    }
+    let home = std::env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cargo")));
+    files.extend(home);
+    let mut problems = Vec::new();
+    for cargo_dir in files {
+        let Ok(entries) = std::fs::read_dir(&cargo_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if !matches!(name.as_str(), "config" | "config.toml") {
+                continue;
+            }
+            let path = entry.path();
+            match read_toml(&path) {
+                Ok(t) => {
+                    for key in weakening_keys(&t) {
+                        problems.push(format!("{} sets {key}", path.display()));
+                    }
+                }
+                Err(e) => problems.push(e),
+            }
+        }
+    }
+    problems
+}
+
+/// The settings in a Cargo configuration that change how code is compiled:
+/// flags, the compiler, wrappers, linkers, environment, unstable features and
+/// further files.
+pub fn weakening_keys(config: &toml::Table) -> Vec<String> {
+    let mut found = Vec::new();
+    for key in ["env", "unstable", "include", "profile"] {
+        if config.contains_key(key) {
+            found.push(format!("[{key}]"));
+        }
+    }
+    if let Some(build) = config.get("build").and_then(toml::Value::as_table) {
+        for key in [
+            "rustflags",
+            "rustdocflags",
+            "rustc",
+            "rustc-wrapper",
+            "rustc-workspace-wrapper",
+        ] {
+            if build.contains_key(key) {
+                found.push(format!("build.{key}"));
+            }
+        }
+    }
+    if let Some(targets) = config.get("target").and_then(toml::Value::as_table) {
+        for (name, target) in targets {
+            for key in ["rustflags", "linker", "runner"] {
+                if target.get(key).is_some() {
+                    found.push(format!("target.{name}.{key}"));
+                }
+            }
+        }
+    }
+    found
 }
 
 /// Whether a toolchain channel is an exact stable release, such as `1.99.1`.
@@ -1412,6 +1490,21 @@ mod tests {
             unreviewed_in(&g, &["gone"]),
             vec!["shipped crate gone is not a workspace member"]
         );
+    }
+
+    #[test]
+    fn a_configuration_above_the_checkout_that_changes_compiling_is_found() {
+        let t = |s: &str| weakening_keys(&table(s));
+        assert_eq!(
+            t("[build]\nrustflags = [\"--cap-lints=allow\"]\n"),
+            vec!["build.rustflags"]
+        );
+        assert_eq!(
+            t("[target.x86_64-unknown-linux-gnu]\nlinker = \"cc\"\n"),
+            vec!["target.x86_64-unknown-linux-gnu.linker"]
+        );
+        assert_eq!(t("[env]\nX = \"1\"\n"), vec!["[env]"]);
+        assert!(t("[net]\ngit-fetch-with-cli = true\n[build]\njobs = 4\n").is_empty());
     }
 
     #[test]
