@@ -117,15 +117,15 @@ const ENCRYPTED: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----";
 pub const MAX_KEY_FILE_LEN: usize = 1024 * 1024;
 
 /// A protected key's PKCS#8 bytes: PBKDF2 then CBC decryption, done here rather than in pkcs5,
-/// whose derived key sits in a buffer it never wipes (found by Codex review). The derived key, the
-/// cipher's key schedule (the `zeroize` features of cbc, des and aes) and the plaintext are all
+/// whose derived key sits in a buffer it never wipes (found by Codex review). CBC runs through
+/// AWS-LC's safe API via the binding; the derived key, provider key schedule and plaintext are all
 /// wiped when dropped, on success or failure. `accepted` has already bounded the parameters.
-fn decrypt(
+pub(crate) fn decrypt(
     params: &pbes2::Parameters<'_>,
     password: &[u8],
     ciphertext: &[u8],
 ) -> Result<Zeroizing<Vec<u8>>, KeyError> {
-    use cbc::cipher::{BlockDecryptMut, KeyIvInit, block_padding::Pkcs7};
+    use qso_graph_trust_awslc::{ImportCipher, import_cbc_decrypt};
     let Kdf::Pbkdf2(kdf) = &params.kdf else {
         return Err(KeyError::UnsupportedProtection);
     };
@@ -148,34 +148,13 @@ fn decrypt(
         }
         _ => return Err(KeyError::UnsupportedProtection),
     }
-    let mut buf = Zeroizing::new(ciphertext.to_vec());
-    let bad = |_| KeyError::WrongPassword;
-    let len = match params.encryption {
-        pbes2::EncryptionScheme::DesEde3Cbc { iv } => {
-            cbc::Decryptor::<des::TdesEde3>::new_from_slices(&key, iv)
-                .map_err(|_| KeyError::UnsupportedProtection)?
-                .decrypt_padded_mut::<Pkcs7>(&mut buf)
-                .map_err(bad)?
-                .len()
-        }
-        pbes2::EncryptionScheme::Aes128Cbc { iv } => {
-            cbc::Decryptor::<aes::Aes128>::new_from_slices(&key, iv)
-                .map_err(|_| KeyError::UnsupportedProtection)?
-                .decrypt_padded_mut::<Pkcs7>(&mut buf)
-                .map_err(bad)?
-                .len()
-        }
-        pbes2::EncryptionScheme::Aes256Cbc { iv } => {
-            cbc::Decryptor::<aes::Aes256>::new_from_slices(&key, iv)
-                .map_err(|_| KeyError::UnsupportedProtection)?
-                .decrypt_padded_mut::<Pkcs7>(&mut buf)
-                .map_err(bad)?
-                .len()
-        }
+    let (cipher, iv): (_, &[u8]) = match params.encryption {
+        pbes2::EncryptionScheme::DesEde3Cbc { iv } => (ImportCipher::DesEde3, iv),
+        pbes2::EncryptionScheme::Aes128Cbc { iv } => (ImportCipher::Aes128, iv),
+        pbes2::EncryptionScheme::Aes256Cbc { iv } => (ImportCipher::Aes256, iv),
         _ => return Err(KeyError::UnsupportedProtection),
     };
-    buf.truncate(len);
-    Ok(buf)
+    import_cbc_decrypt(cipher, &key, iv, ciphertext).map_err(|_| KeyError::WrongPassword)
 }
 
 /// The most PBKDF2 iterations accepted. tqsllib 2.8.7 writes 2,048 (OpenSSL's default); a million
@@ -186,7 +165,7 @@ pub const MAX_PBKDF2_ITERATIONS: u32 = 1_000_000;
 /// with the password: PBES2 with PBKDF2 (never scrypt, whose memory a file could set without bound),
 /// HMAC-SHA1 or HMAC-SHA256, at most [`MAX_PBKDF2_ITERATIONS`], and 3DES or AES-CBC. tqsllib 2.8.7
 /// writes PBES2, PBKDF2, HMAC-SHA256, 2,048 iterations and 3DES-CBC.
-fn accepted(scheme: &EncryptionScheme<'_>) -> bool {
+pub(crate) fn accepted(scheme: &EncryptionScheme<'_>) -> bool {
     let EncryptionScheme::Pbes2(params) = scheme else {
         return false;
     };
@@ -636,8 +615,8 @@ mod tests {
     fn every_buffer_in_decryption_is_wiped() {
         fn wiped<T: zeroize::ZeroizeOnDrop>() {}
         wiped::<Zeroizing<Vec<u8>>>();
-        wiped::<cbc::Decryptor<des::TdesEde3>>();
-        wiped::<cbc::Decryptor<aes::Aes256>>();
+        // The provider-owned CBC schedules and its temporaries are checked by custody scans,
+        // including AES-protected PKCS#12 imports, in debug and release.
     }
 
     /// A key file as a crafted one would be written, by hand through pkcs1 and pkcs8, from p, q

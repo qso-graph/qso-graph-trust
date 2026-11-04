@@ -193,6 +193,8 @@ fn found_in(program: &str, case: &str, mode: &str) -> Vec<String> {
     let arg = |p: &Path| p.to_str().expect("a UTF-8 path").to_string();
     let folder = SecretsFolder::new();
     let secrets_file = folder.0.join("export-secrets");
+    let import_password_file = folder.0.join("import-password");
+    std::fs::write(&import_password_file, b"qgt-test").expect("test import password");
     let mut child = Command::new(program)
         .args([
             arg(&corpus(case, "tqsl/keys/QG0TEST")),
@@ -200,6 +202,7 @@ fn found_in(program: &str, case: &str, mode: &str) -> Vec<String> {
             arg(&PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../../tests/corpus/adif/qg0test-small.adi")),
             arg(&corpus(case, "key-password")),
+            arg(&import_password_file),
             arg(&secrets_file),
             mode.to_string(),
         ])
@@ -238,6 +241,7 @@ fn found_in(program: &str, case: &str, mode: &str) -> Vec<String> {
     assert!(child.wait().expect("exits").success());
 
     let mut needles = needles(case);
+    needles.push(("PKCS#12 password".into(), b"qgt-test".to_vec()));
     needles.extend(export_needles);
     if std::env::var_os("QGT_CUSTODY_WHERE").is_some() {
         for (label, n) in &needles {
@@ -309,7 +313,11 @@ fn without_the_wiping_allocator_a_free_leaves_the_key_file_behind() {
 #[test]
 fn the_search_catches_both_planted_export_passwords() {
     let found = found_in(WIPED, "1024", "export-passwords");
-    for label in ["export password", "failed-open password"] {
+    for label in [
+        "export password",
+        "failed-open password",
+        "PKCS#12 password",
+    ] {
         assert!(
             found.iter().any(|f| f == label),
             "{label} not found in {found:?}"

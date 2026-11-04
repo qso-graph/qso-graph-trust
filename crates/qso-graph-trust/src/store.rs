@@ -10,9 +10,11 @@
 //! Callers select a [`KeyBackend`]; raw credential access stays inside the library.
 
 mod format;
+mod import;
 mod keys;
 mod part;
 
+pub use import::ExpiringCertificate;
 pub use part::{PartError, RestoreReport};
 
 pub use keys::{KeyStoreError, MAX_KEYS, SERVICE, TEST_SERVICE};

@@ -11,7 +11,9 @@ pub mod export;
 // API and may change in any release.
 #[doc(hidden)]
 pub mod gzip;
+pub mod import;
 mod lotw;
+mod pkcs12;
 pub mod qso;
 pub mod records;
 pub mod request;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 
-//! Safe AWS-LC APIs for encrypted exports. No native calls belong here.
+//! Safe AWS-LC APIs for encrypted exports and legacy key imports. No native calls belong here.
 
 use std::fmt;
 use std::num::NonZeroU32;
@@ -130,4 +130,52 @@ mod tests {
             expected
         );
     }
+}
+
+/// CBC ciphers accepted only for decrypting legacy key imports.
+#[derive(Clone, Copy, Debug)]
+pub enum ImportCipher {
+    /// AES with a 128-bit key.
+    Aes128,
+    /// AES with a 256-bit key.
+    Aes256,
+    /// Three-key Triple DES, for existing TQSL exports only.
+    DesEde3,
+}
+
+/// Decrypt PKCS#7-padded CBC directly into wiped heap storage. Provider-owned key schedules are
+/// wiped too. Using the safe AWS-LC API avoids RustCrypto CBC's unwiped parallel-block plaintext
+/// copies on the stack (caught by the release custody test with an AES-protected PKCS#12 key).
+#[allow(deprecated)] // 3DES is read-only interoperability with tqsllib, never new encryption.
+pub fn import_cbc_decrypt(
+    cipher: ImportCipher,
+    key: &[u8],
+    iv: &[u8],
+    ciphertext: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, EncryptionError> {
+    use aws_lc_rs::cipher::{self, DecryptionContext, PaddedBlockDecryptingKey, UnboundCipherKey};
+    use aws_lc_rs::iv::FixedLength;
+    let (algorithm, context) = match cipher {
+        ImportCipher::Aes128 => (
+            &cipher::AES_128,
+            DecryptionContext::Iv128(FixedLength::try_from(iv).map_err(|_| EncryptionError)?),
+        ),
+        ImportCipher::Aes256 => (
+            &cipher::AES_256,
+            DecryptionContext::Iv128(FixedLength::try_from(iv).map_err(|_| EncryptionError)?),
+        ),
+        ImportCipher::DesEde3 => (
+            &cipher::DES_EDE3_FOR_LEGACY_USE_ONLY,
+            DecryptionContext::Iv64(FixedLength::try_from(iv).map_err(|_| EncryptionError)?),
+        ),
+    };
+    let key = UnboundCipherKey::new(algorithm, key).map_err(|_| EncryptionError)?;
+    let key = PaddedBlockDecryptingKey::cbc_pkcs7(key).map_err(|_| EncryptionError)?;
+    let mut out = Zeroizing::new(ciphertext.to_vec());
+    let len = key
+        .decrypt(&mut out, context)
+        .map_err(|_| EncryptionError)?
+        .len();
+    out.truncate(len);
+    Ok(out)
 }
