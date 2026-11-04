@@ -5,6 +5,27 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0-beta.2] - 2026-11-04
+
+Documentation only: no change to what the library does or signs.
+
+### Changed
+
+- The library's description on crates.io: "Sign ADIF logs for ARRL's Logbook of The World (LoTW)".
+- The README and the library's README say what the beta does today and what is still to come, with
+  the status of each phase, how to add the library, and the feature-parity list. The beta reads the
+  certificate and key from a TQSL backup; QG Trust does the signing.
+- `SECURITY.md` says what is promised now: the key only ever signs and is wiped from freed memory, the
+  library's own code has no `unsafe`, and the one binding with `unsafe` code is AWS-LC's. The OS
+  credential store and upload are marked as still to come.
+- `AGENTS.md` and `CONTRIBUTING.md` list every CI check and say how a release is made; the decisions
+  index names what each superseded decision became.
+- The Sources no longer link a private repository.
+
+## [0.1.0-beta.1] - 2026-11-04
+
+The first release on crates.io: `qso-graph-trust` and `qso-graph-trust-awslc`.
+
 ### Added
 
 - Ready for crates.io (decision 0007): `qso-graph-trust` and its binding `qso-graph-trust-awslc` at

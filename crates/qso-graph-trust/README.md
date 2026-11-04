@@ -4,14 +4,15 @@
 Sign logs for ARRL's [Logbook of The World](https://lotw.arrl.org) (LoTW). The signed log is the same,
 byte for byte, as the one TQSL makes from the same key, station location and QSOs.
 
-QSO Graph Trust is one library shared by [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop),
-its `qg-trust` command line and other people's programs. Its parsers are safe Rust, and the library
+QSO Graph Trust is the library behind LoTW signing in [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop)
+and the `qg-trust` command line, both still to come, and it is for other people's programs too. Its parsers are safe Rust, and the library
 forbids `unsafe` code. LoTW's signature is AWS-LC's, through one small binding, `qso-graph-trust-awslc`,
 the only crate here with `unsafe` code; a password-protected key is unlocked with RustCrypto.
 
 **This is a beta.** For now it reads your certificate and key from a TQSL backup (`.tbk`), with the
 key's password. Still to come: keeping keys in the operating system's credential store, uploading to
-LoTW, and requesting certificates.
+LoTW, and requesting certificates. What is done, planned and left out, feature by feature against
+TQSL: [`docs/FEATURE-PARITY.md`](https://github.com/qso-graph/qso-graph-trust/blob/main/docs/FEATURE-PARITY.md).
 
 ## Example
 
@@ -66,7 +67,7 @@ Each release is published by this repository's release workflow, which GitHub at
 statement that the `.crate` file was built by that workflow from that commit. With the GitHub CLI:
 
 ```sh
-gh attestation verify qso-graph-trust-0.1.0-beta.1.crate -R qso-graph/qso-graph-trust
+gh attestation verify qso-graph-trust-<version>.crate -R qso-graph/qso-graph-trust
 ```
 
 ## Credits
@@ -103,13 +104,10 @@ from these, and how is QG Trust's own:
   TQSL's, both ARRL's, under ARRL's terms: the TQSL configuration (`config.xml`), from which the LoTW
   tables are generated, and ARRL's root and CA certificates as TQSL embeds them. TQSL 2.8.7, built from
   its own source, is the reference every signature QG Trust makes is tested against, byte for byte.
-- **Other open-source projects:** qso-web, above, and a survey of 126 ham-radio Rust crates on crates.io
-  (qso-graph-devel#112), which found no other LoTW signing crate.
+- **Other open-source projects:** qso-web, above, and a survey of 126 ham-radio Rust crates on crates.io,
+  which found no other LoTW signing crate.
 - **Standards:** [ADIF 3.1.7](https://adif.org/317/ADIF_317.htm); RFC 5280 (X.509 certificates),
   RFC 4055 and RFC 8017 (RSA), RFC 1952 (gzip); W3C XML 1.0.
-
-How QG Trust compares with TQSL, feature by feature, and what it will and won't do:
-[`docs/FEATURE-PARITY.md`](https://github.com/qso-graph/qso-graph-trust/blob/main/docs/FEATURE-PARITY.md).
 
 ## Licence
 

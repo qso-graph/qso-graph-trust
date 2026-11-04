@@ -10,9 +10,10 @@ quickest start for anyone.
 
 1. Open an issue describing the problem or idea, unless it's a small fix.
 2. Make a branch named for the change: `fix-...`, `feat-...` or `docs-...`.
-3. Open a pull request. CI runs formatting, clippy and the tests on Windows, macOS and Linux, the
-   policy checks and an audit of `Cargo.lock`.
-4. KI7MT merges.
+3. Open a pull request. CI runs formatting, clippy and the tests on Windows, macOS and Linux; the
+   policy checks; `cargo vet`, `cargo deny` and `cargo audit`; and packages the published crates as
+   crates.io would receive them.
+4. KI7MT merges. Releases are KI7MT's too: the Release workflow, run by hand (AGENTS.md).
 
 ## Ground rules
 

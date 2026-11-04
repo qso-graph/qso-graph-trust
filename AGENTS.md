@@ -15,7 +15,7 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
 
 ## Rules (each one has a test you can apply)
 
-- **No C or C++ in the library.** Nothing in `qso-graph-trust`'s dependency tree, on the platforms
+- **No C or C++ in the library but its named providers.** Nothing in `qso-graph-trust`'s dependency tree, on the platforms
   QGT ships and with every feature, compiles or ships C, C++ or assembly source, uses a crate that
   builds native code, or links anything but the operating system. Crates that only bind the OS
   (`OS_BINDINGS`), Rust's own `asm!` in a reviewed outside crate, and one cryptographic provider,
@@ -77,12 +77,23 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 cargo xtask policy
 python3 scripts/gen-lotw-tables.py --check
+python3 scripts/package-files.py --check
+python3 scripts/test_release_check.py
 ```
 
 **What CI checks:** formatting, clippy and the tests on Windows, macOS and Linux; the policy checks
 and the canary; `cargo vet`, `cargo deny` and `cargo audit`; and `cargo package` for the binding and the
 library, as crates.io would receive them; on every pull request and weekly. `ci-all-green` is the one result a
 merge waits for.
+
+## Releasing
+
+A release is KI7MT's, never an agent's: **Actions → Release → Run workflow** from main, with the version
+main already says (`X.Y.Z` or `X.Y.Z-beta.N`). It publishes `qso-graph-trust-awslc`, then
+`qso-graph-trust`, on crates.io with Trusted Publishing, attests both packages, and tags the commit
+(`.github/workflows/release.yml`; its decisions are `scripts/release_check.py`'s). To prepare one:
+set the workspace version in `Cargo.toml` and the `=` pins on the internal dependencies, move the
+CHANGELOG's Unreleased section under the version, and merge that by pull request.
 
 ## Where the real documents are
 
