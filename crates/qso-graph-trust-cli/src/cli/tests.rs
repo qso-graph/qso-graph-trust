@@ -676,11 +676,18 @@ fn password_options_are_never_echoed_even_beside_a_parse_error() {
     ] {
         let ran = qg_trust(&args, None);
         assert_eq!(ran.code, Exit::CommandError as u8);
+        // A value consumed by -i is a filename, so missing signing arguments decide this case.
+        let message = if args.first() == Some(&"-i") {
+            "give the log to sign"
+        } else {
+            super::PASSWORD_MESSAGE
+        };
         assert_eq!(
             ran.err,
-            "qg-trust: a password is never given on the command line: \
-            qg-trust asks for the key's password when it needs it; \
-            qg-trust --help says how it is used\nFinal Status: Command Syntax Error(10)\n"
+            format!(
+                "qg-trust: {message}; qg-trust --help says how it is used\n\
+                 Final Status: Command Syntax Error(10)\n"
+            )
         );
         assert!(!ran.out.contains("hunter2") && !ran.err.contains("hunter2"));
         assert!(ran.prompts.is_empty());
@@ -720,19 +727,18 @@ fn round_two_parse_errors_never_echo_arguments() {
 }
 
 #[test]
-fn round_two_help_wins_over_errors_and_refused_options() {
+fn help_does_not_bypass_clap_parse_errors_or_an_earlier_refusal() {
     for args in [
-        vec!["--help", "--upload"],
         vec!["--upload", "--help"],
         vec!["--SECRET", "--help"],
         vec!["-pSECRET", "--help"],
         vec!["--completions", "SECRET", "-h"],
     ] {
         let ran = qg_trust(&args, None);
-        assert_eq!(ran.code, 0, "{args:?}: {}", ran.err);
-        assert!(ran.out.contains("Usage: qg-trust"));
-        assert!(!ran.out.contains("SECRET"));
-        assert!(ran.err.is_empty());
+        assert_eq!(ran.code, Exit::CommandError as u8, "{args:?}: {}", ran.err);
+        assert!(ran.out.is_empty());
+        assert!(!ran.err.contains("SECRET"));
+        assert_eq!(final_status(&ran), "Final Status: Command Syntax Error(10)");
         assert!(ran.prompts.is_empty());
     }
 }
@@ -798,7 +804,8 @@ fn round_two_values_may_start_with_a_hyphen() {
     assert_eq!(options.output.as_deref(), Some(Path::new("-out.tq8")));
     let ran = qg_trust(&["-i", "-file.tbk", "-l", "-home", "log.adi"], None);
     assert_eq!(ran.code, Exit::InputError as u8, "{}", ran.err);
-    assert!(ran.err.contains("-file.tbk"));
+    assert!(ran.err.contains("the certificate file (-i)"));
+    assert!(!ran.err.contains("-file.tbk"));
     for flag in ["-b", "-e"] {
         let ran = qg_trust(&[flag, "-SECRET"], None);
         assert_eq!(ran.code, Exit::CommandError as u8);
@@ -899,7 +906,10 @@ fn round_two_hidden_options_are_refused_after_a_successful_parse() {
                 std::iter::once("qg-trust").chain(args.iter().copied()),
             )
             .expect("hidden options accept an optional hyphen-leading value");
-            assert!(options.rejected.message().is_some());
+            assert_eq!(
+                options.rejected.password.is_some(),
+                matches!(flag, "-p" | "--password")
+            );
             let ran = run_with_color(&args, None, &trust, SystemTime::now(), false);
             assert_eq!(ran.code, Exit::CommandError as u8);
             assert!(ran.out.is_empty());
@@ -954,4 +964,175 @@ fn round_two_date_parser_and_diagnostics_use_only_fixed_text() {
         assert!(!ran.out.contains("SECRET") && !ran.err.contains("SECRET"));
         assert_eq!(final_status(&ran), "Final Status: Command Syntax Error(10)");
     }
+}
+
+#[test]
+fn round_three_control_options_follow_parser_order() {
+    for (args, code, message) in [
+        (
+            vec!["-p", "SECRET", "--version"],
+            10,
+            "a password is never given",
+        ),
+        (vec!["--version", "-p", "SECRET"], 0, "qg-trust "),
+        (vec!["--help", "--upload"], 0, "Usage: qg-trust"),
+        (
+            vec!["--upload", "--help"],
+            10,
+            "--upload is not supported yet",
+        ),
+        (vec!["-b", "--help"], 10, "--begindate needs a date"),
+        (
+            vec!["-i", "--help", "-l", "home", "log.adi"],
+            6,
+            "the certificate file (-i)",
+        ),
+        (vec!["--help"], 0, "Usage: qg-trust"),
+        (vec!["--version", "--help"], 0, "qg-trust "),
+        (vec!["--help", "--version"], 0, "Usage: qg-trust"),
+        (
+            vec!["--upload", "unused", "-p", "SECRET"],
+            10,
+            "--upload is not supported yet",
+        ),
+        (
+            vec!["-w", "unused", "--action", "unused"],
+            10,
+            "-w is not supported yet",
+        ),
+    ] {
+        let ran = qg_trust(&args, None);
+        assert_eq!(ran.code, code, "{args:?}: {}", ran.err);
+        assert!(!ran.out.contains("SECRET") && !ran.err.contains("SECRET"));
+        if code == 0 {
+            assert!(ran.out.contains(message), "{args:?}: {}", ran.out);
+            assert!(ran.err.is_empty());
+        } else {
+            assert!(ran.out.is_empty());
+            assert!(ran.err.contains(message), "{args:?}: {}", ran.err);
+            assert!(final_status(&ran).starts_with("Final Status:"));
+        }
+        assert!(ran.prompts.is_empty());
+    }
+}
+
+#[test]
+fn round_three_runtime_diagnostics_never_echo_command_line_values() {
+    let dir = scratch();
+    let backup = set("standard.tbk");
+    let log = set("adif/KN4YU-CLUB.adi");
+    let bad_backup = dir.join("SECRET.tbk");
+    std::fs::write(&bad_backup, b"not a backup").expect("write");
+    let bad_output = dir.join("SECRET").join("output.tq8");
+    for (args, code, message) in [
+        (
+            vec!["-i--password=SECRET", "-l", "home", "log.adi"],
+            6,
+            "the certificate file (-i)",
+        ),
+        (
+            vec!["-i", "x.tbk", "-l", "--password=SECRET", "log.adi"],
+            6,
+            "the certificate file (-i)",
+        ),
+        (
+            vec!["-i", path(&bad_backup), "-l", "home", "log.adi"],
+            6,
+            "the certificate file (-i)",
+        ),
+        (
+            vec!["-i", path(&backup), "-l", "--password=SECRET", path(&log)],
+            10,
+            "the station location given to -l is not in the certificate file; there are:",
+        ),
+        (
+            vec!["-i", path(&backup), "-l", "KN4YU-CLUB", "SECRET.adi"],
+            6,
+            "the log:",
+        ),
+        (
+            vec![
+                "-i",
+                path(&backup),
+                "-l",
+                "KN4YU-CLUB",
+                "-o",
+                path(&bad_output),
+                path(&log),
+            ],
+            7,
+            "the output file (-o):",
+        ),
+        (vec!["-o", "--password=SECRET"], 10, "give the log to sign"),
+    ] {
+        let ran = qg_trust(&args, None);
+        assert_eq!(ran.code, code, "{args:?}: {}", ran.err);
+        assert!(ran.err.contains(message), "{args:?}: {}", ran.err);
+        assert!(
+            !ran.out.contains("SECRET") && !ran.err.contains("SECRET"),
+            "{}",
+            ran.err
+        );
+        assert!(ran.prompts.is_empty());
+    }
+}
+
+#[test]
+fn round_three_signing_messages_use_only_file_roles_and_certificate_calls() {
+    let dir = scratch();
+    let input = dir.join("SECRET.adi");
+    let output = dir.join("SECRET.tq8");
+    let backup = set("standard.tbk");
+    let mut log = read("adif/KN4YU-CLUB.adi");
+    log.extend_from_slice(
+        b"<CALL:5>M0EHA <QSO_DATE:8>20261103 <TIME_ON:4>0100 <BAND:4>99mm <MODE:2>CW <EOR>\n",
+    );
+    std::fs::write(&input, log).expect("write");
+    for explicit_output in [false, true] {
+        let mut args = vec!["-i", path(&backup), "-l", "KN4YU-CLUB"];
+        if explicit_output {
+            args.extend(["-o", path(&output)]);
+        }
+        args.push(path(&input));
+        let ran = qg_trust(&args, None);
+        assert_eq!(ran.code, Exit::QsosSuppressed as u8, "{}", ran.err);
+        assert!(
+            ran.err.contains("the log's QSO 4: not signed:"),
+            "{}",
+            ran.err
+        );
+        assert!(
+            ran.err.contains("qg-trust: signed 3 QSOs for KN4YU\n"),
+            "{}",
+            ran.err
+        );
+        assert_eq!(
+            ran.err.contains("written beside the log, with .tq8\n"),
+            !explicit_output
+        );
+        assert!(!ran.err.contains("SECRET") && !ran.err.contains("KN4YU-CLUB"));
+        assert_eq!(
+            final_status(&ran),
+            "Final Status: Some QSOs not processed(9)"
+        );
+    }
+    let ran = qg_trust(
+        &[
+            "-i",
+            path(&backup),
+            "-l",
+            "KN4YU-CLUB",
+            "-b",
+            "20990101",
+            path(&input),
+        ],
+        None,
+    );
+    assert_eq!(ran.code, Exit::NoQsos as u8, "{}", ran.err);
+    assert!(
+        ran.err
+            .contains("the log: 3 QSOs were outside the selected date range")
+    );
+    assert!(ran.err.contains("the log: no QSOs to sign"));
+    assert!(!ran.err.contains("SECRET"));
 }

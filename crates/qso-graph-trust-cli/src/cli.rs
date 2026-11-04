@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use anstyle::{AnsiColor, Style};
-use clap::{CommandFactory, Parser, error::ErrorKind};
+use clap::{CommandFactory, FromArgMatches, Parser, error::ErrorKind};
 use clap_complete::Shell;
 use qso_graph_trust::certificate::Trust;
 use qso_graph_trust::qso::{Date, Qso};
@@ -100,8 +100,7 @@ struct Options {
         long = "import",
         value_name = "FILE",
         allow_hyphen_values = true,
-        help_heading = "Signing",
-        required_unless_present = "completions"
+        help_heading = "Signing"
     )]
     backup: Option<PathBuf>,
     /// Your station location, by name.
@@ -111,8 +110,7 @@ struct Options {
         value_name = "NAME",
         allow_hyphen_values = true,
         value_parser = clap::builder::NonEmptyStringValueParser::new(),
-        help_heading = "Signing",
-        required_unless_present = "completions"
+        help_heading = "Signing"
     )]
     location: Option<String>,
     /// Sign only QSOs on or after DATE (YYYY-MM-DD or YYYYMMDD).
@@ -133,7 +131,7 @@ struct Options {
     )]
     output: Option<PathBuf>,
     /// The ADIF log to sign.
-    #[arg(value_name = "LOG.adi", required_unless_present = "completions")]
+    #[arg(value_name = "LOG.adi")]
     input: Option<PathBuf>,
     /// qg-trust always exits when done.
     #[arg(
@@ -157,41 +155,42 @@ struct Options {
     )]
     nodate: bool,
     /// Print the version.
-    #[arg(short = 'v', long, action = clap::ArgAction::Version, help_heading = "Other")]
-    version: Option<bool>,
+    #[arg(short = 'v', long, action = clap::ArgAction::SetTrue, help_heading = "Other")]
+    version: bool,
     /// Write a shell completion script for qg-trust.
     #[arg(long, value_name = "SHELL", help_heading = "Other")]
     completions: Option<Shell>,
     /// Print this help.
-    #[arg(short = 'h', long, action = clap::ArgAction::Help, help_heading = "Other")]
-    help: Option<bool>,
+    #[arg(short = 'h', long, action = clap::ArgAction::SetTrue, help_heading = "Other")]
+    help: bool,
     #[command(flatten)]
     rejected: Rejected,
 }
 
 /// These options are recognized only to explain why qg-trust refuses them. Their values are
 /// never used in a diagnostic, even when another argument prevents a successful parse.
+/// An omitted value gets an empty default so clap records its index for ordering refusals.
 #[derive(Debug, clap::Args)]
 struct Rejected {
-    #[arg(short = 'p', long = "password", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    #[arg(short = 'p', long = "password", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     password: Option<Option<String>>,
-    #[arg(short = 'a', long = "action", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    #[arg(short = 'a', long = "action", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     action: Option<Option<String>>,
-    #[arg(short = 'c', long = "callsign", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    #[arg(short = 'c', long = "callsign", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     callsign: Option<Option<String>>,
-    #[arg(short = 'f', long = "verify", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    #[arg(short = 'f', long = "verify", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     verify: Option<Option<String>>,
-    #[arg(short = 'n', long = "updates", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    #[arg(short = 'n', long = "updates", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     updates: Option<Option<String>>,
-    #[arg(short = 's', long = "editlocation", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    #[arg(short = 's', long = "editlocation", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     editlocation: Option<Option<String>>,
-    #[arg(short = 't', long = "diagnose", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    #[arg(short = 't', long = "diagnose", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     diagnose: Option<Option<String>>,
-    #[arg(short = 'u', long = "upload", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    #[arg(short = 'u', long = "upload", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     upload: Option<Option<String>>,
-    #[arg(short = 'w', long = "wipe", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    #[arg(short = 'w', long = "wipe", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     wipe: Option<Option<String>>,
-    #[arg(short = 'z', long = "test-sign", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    #[arg(short = 'z', long = "test-sign", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     test_sign: Option<Option<String>>,
 }
 
@@ -257,27 +256,6 @@ const REJECTED_MESSAGES: &[(char, &str, &str, &str)] = &[
     ),
 ];
 
-impl Rejected {
-    fn message(&self) -> Option<&'static str> {
-        let present = [
-            self.password.is_some(),
-            self.action.is_some(),
-            self.callsign.is_some(),
-            self.verify.is_some(),
-            self.updates.is_some(),
-            self.editlocation.is_some(),
-            self.diagnose.is_some(),
-            self.upload.is_some(),
-            self.wipe.is_some(),
-            self.test_sign.is_some(),
-        ];
-        present
-            .iter()
-            .zip(REJECTED_MESSAGES)
-            .find_map(|(present, option)| present.then_some(option.2))
-    }
-}
-
 /// Runs `qg-trust` with OS arguments so invalid text cannot panic before the final status line.
 pub(crate) fn run(args: &[OsString], env: &mut Env<'_>) -> u8 {
     let code = match args
@@ -297,51 +275,40 @@ pub(crate) fn run(args: &[OsString], env: &mut Env<'_>) -> u8 {
 
 /// None means informational output, which has no final status line.
 fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
-    // Loggers used to be able to request help even beside an invalid or unsupported option.
-    let help = ["--help"];
-    let parse_args = if args.iter().any(|arg| matches!(*arg, "-h" | "--help")) {
-        help.as_slice()
-    } else {
-        args
-    };
-    match Options::try_parse_from(std::iter::once("qg-trust").chain(parse_args.iter().copied())) {
-        Ok(options) => {
-            if let Some(message) = options.rejected.message() {
-                let message = REJECTED_MESSAGES
-                    .iter()
-                    .find_map(|option| {
-                        (option.2 == message
-                            && args.iter().any(|arg| {
-                                arg.split_once('=').map_or(*arg, |(name, _)| name) == option.1
-                            }))
-                        .then_some(option.3)
-                    })
-                    .unwrap_or(message);
-                return Some(syntax_error(env, message));
-            }
-            if let Some(shell) = options.completions {
-                // Completion scripts are source code, so they never receive styling.
-                // Written whole from a buffer: clap_complete panics on a failed write, and a
-                // reader that stops early (`| head`) is not a failure of qg-trust's.
-                let mut script = Vec::new();
-                clap_complete::generate(shell, &mut Options::command(), "qg-trust", &mut script);
-                let _ = env.out.write_all(&script);
-                return None;
-            }
-            if let (Some(begin), Some(end)) = (options.begin, options.end)
-                && begin > end
-            {
-                Some(syntax_error(env, "the start date is after the end date"))
-            } else {
-                Some(sign(&options, env))
-            }
-        }
+    let mut command = Options::command();
+    let matches = match command
+        .try_get_matches_from_mut(std::iter::once("qg-trust").chain(args.iter().copied()))
+    {
+        Ok(matches) => matches,
         Err(error) => {
-            if matches!(
-                error.kind(),
-                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
-            ) {
-                let rendered = error.render();
+            // Clap's diagnostics, suggestions and parser sources may contain any user value.
+            // Render none of them; even an unrecognized error kind gets only our fixed text.
+            return Some(syntax_error(
+                env,
+                rejected_message(args).unwrap_or_else(|| parse_error_message(&error)),
+            ));
+        }
+    };
+
+    // Clap's indices respect values consumed by an option and letters in a short-option group.
+    // Defaults have indices too, so only command-line occurrences take part in the ordering.
+    let first = command
+        .get_arguments()
+        .filter(|arg| matches!(arg.get_id().as_str(), "help" | "version") || arg.is_hide_set())
+        .filter(|arg| {
+            matches.value_source(arg.get_id().as_str())
+                == Some(clap::parser::ValueSource::CommandLine)
+        })
+        .filter_map(|arg| {
+            matches
+                .index_of(arg.get_id().as_str())
+                .map(|index| (index, arg))
+        })
+        .min_by_key(|(index, _)| *index);
+    if let Some((_, arg)) = first {
+        match arg.get_id().as_str() {
+            "help" => {
+                let rendered = command.render_help();
                 if env.color_out {
                     let _ = write!(env.out, "{}", rendered.ansi());
                 } else {
@@ -349,13 +316,61 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
                 }
                 return None;
             }
-            // Clap's diagnostics, suggestions and parser sources may contain any user value.
-            // Render none of them; even an unrecognized error kind gets only our fixed text.
-            Some(syntax_error(
-                env,
-                rejected_message(args).unwrap_or_else(|| parse_error_message(&error)),
-            ))
+            "version" => {
+                let _ = writeln!(env.out, "qg-trust {VERSION}");
+                return None;
+            }
+            _ => {
+                let message = REJECTED_MESSAGES
+                    .iter()
+                    .find_map(|option| {
+                        (arg.get_short() == Some(option.0)).then(|| {
+                            if args.iter().any(|arg| {
+                                arg.split_once('=').map_or(*arg, |(name, _)| name) == option.1
+                            }) {
+                                option.3
+                            } else {
+                                option.2
+                            }
+                        })
+                    })
+                    .expect("a hidden option has a fixed refusal");
+                return Some(syntax_error(env, message));
+            }
         }
+    }
+    // Keep clap's matches so control options can be ordered before the derive API builds Options.
+    let options = match Options::from_arg_matches(&matches) {
+        Ok(options) => options,
+        Err(error) => return Some(syntax_error(env, parse_error_message(&error))),
+    };
+    if let Some(shell) = options.completions {
+        // Completion scripts are source code, so they never receive styling.
+        // Written whole from a buffer: clap_complete panics on a failed write, and a
+        // reader that stops early (`| head`) is not a failure of qg-trust's.
+        let mut script = Vec::new();
+        clap_complete::generate(shell, &mut Options::command(), "qg-trust", &mut script);
+        let _ = env.out.write_all(&script);
+        return None;
+    }
+    let missing = if options.input.is_none() {
+        Some("give the log to sign")
+    } else if options.backup.is_none() {
+        Some("-i names the file with your certificate")
+    } else if options.location.is_none() {
+        Some("-l names the station location to sign for")
+    } else {
+        None
+    };
+    if let Some(message) = missing {
+        return Some(syntax_error(env, message));
+    }
+    if let (Some(begin), Some(end)) = (options.begin, options.end)
+        && begin > end
+    {
+        Some(syntax_error(env, "the start date is after the end date"))
+    } else {
+        Some(sign(&options, env))
     }
 }
 
@@ -465,12 +480,12 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
         Ok(bytes) => match tbk::read(&bytes, env.trust) {
             Ok(backup) => backup,
             Err(e) => {
-                env.message(Tone::Error, format_args!("{}: {e}", backup_path.display()));
+                env.message(Tone::Error, format_args!("the certificate file (-i): {e}"));
                 return Exit::InputError;
             }
         },
         Err(e) => {
-            env.message(Tone::Error, format_args!("{}: {e}", backup_path.display()));
+            env.message(Tone::Error, format_args!("the certificate file (-i): {e}"));
             return Exit::InputError;
         }
     };
@@ -479,7 +494,7 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
         env.message(
             Tone::Error,
             format_args!(
-                "there is no station location named {name:?}; there are: {}",
+                "the station location given to -l is not in the certificate file; there are: {}",
                 if names.is_empty() {
                     "none".to_string()
                 } else {
@@ -547,7 +562,7 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
     {
         Ok(records) => records,
         Err(e) => {
-            env.message(Tone::Error, format_args!("{}: {e}", input.display()));
+            env.message(Tone::Error, format_args!("the log: {e}"));
             return Exit::InputError;
         }
     };
@@ -571,7 +586,7 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
             Err(e) => {
                 env.message(
                     Tone::Warning,
-                    format_args!("{} QSO {}: not signed: {e}", input.display(), i + 1),
+                    format_args!("the log's QSO {}: not signed: {e}", i + 1),
                 );
                 refused += 1;
             }
@@ -580,18 +595,14 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
     if out_of_range > 0 {
         let _ = writeln!(
             env.err,
-            "{}: {out_of_range} QSOs were outside the selected date range",
-            input.display()
+            "the log: {out_of_range} QSOs were outside the selected date range"
         );
     }
 
     // A QSO the certificate or station cannot sign is left out, said so, and the rest are signed.
     let signed = loop {
         if qsos.is_empty() {
-            env.message(
-                Tone::Error,
-                format_args!("{}: no QSOs to sign", input.display()),
-            );
+            env.message(Tone::Error, format_args!("the log: no QSOs to sign"));
             return Exit::NoQsos;
         }
         match sign_log(certificate, &key, station, &qsos, env.now) {
@@ -600,8 +611,7 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
                 env.message(
                     Tone::Warning,
                     format_args!(
-                        "{} QSO {}: not signed: outside the QSO dates {}'s certificate covers",
-                        input.display(),
+                        "the log's QSO {}: not signed: outside the QSO dates {}'s certificate covers",
                         numbers[index],
                         entry.callsign
                     ),
@@ -618,9 +628,8 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
                 env.message(
                     Tone::Warning,
                     format_args!(
-                        "{} QSO {}: not signed: its {field} is {value:?}, not this station \
+                        "the log's QSO {}: not signed: its {field} is {value:?}, not this station \
                      location's",
-                        input.display(),
                         numbers[index]
                     ),
                 );
@@ -629,7 +638,7 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
                 refused += 1;
             }
             Err(e) => {
-                env.message(Tone::Error, format_args!("{}: {e}", input.display()));
+                env.message(Tone::Error, format_args!("the log: {e}"));
                 return Exit::TqslError;
             }
         }
@@ -640,18 +649,21 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
         .clone()
         .unwrap_or_else(|| input.with_extension("tq8"));
     if let Err(e) = write_whole(&output, &tq8(&signed)) {
-        env.message(Tone::Error, format_args!("{}: {e}", output.display()));
+        env.message(Tone::Error, format_args!("the output file (-o): {e}"));
         return Exit::OutputError;
     }
     env.message(
         Tone::Success,
         format_args!(
-            "signed {} QSO{} for {name} into {}",
+            "signed {} QSO{} for {}",
             qsos.len(),
             if qsos.len() == 1 { "" } else { "s" },
-            output.display()
+            entry.callsign
         ),
     );
+    if options.output.is_none() {
+        let _ = writeln!(env.err, "written beside the log, with .tq8");
+    }
     if refused > 0 || out_of_range > 0 {
         Exit::QsosSuppressed
     } else {
