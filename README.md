@@ -1,11 +1,9 @@
 # QSO Graph Trust
 
-Sign your ADIF logs for ARRL's [Logbook of The World](https://lotw.arrl.org) (LoTW). QSO Graph Trust is
-an alternative to TQSL: it reads the certificates and backups TQSL makes, and the logs it signs carry
-the same signed records TQSL's do, byte for byte.
+Sign your ADIF logs for ARRL's [Logbook of The World](https://lotw.arrl.org) (LoTW) with your LoTW
+certificate. QSO Graph Trust is an alternative to TQSL.
 
-> **This is a beta.** It signs your log with your LoTW certificate, from the command line. Still to
-> come: keeping your key in your computer's own credential store, uploading straight to LoTW,
+> **This is a beta.** Still to come: keeping your key in your computer's own credential store, uploading straight to LoTW,
 > requesting certificates, and signing inside [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop).
 
 ## Sign a log
@@ -37,7 +35,7 @@ Loggers that run `tqsl` will find the same option letters, exit codes and final 
 - Your key is only ever used to sign. It is never printed, logged or sent anywhere.
 - A password is never typed on the command line, and the program wipes the memory it frees, so no
   key or password is left behind in it.
-- A backup's certificates are trusted only if they come from LoTW's own certificate authority.
+- A certificate is trusted only if it comes from LoTW's own certificate authority.
 
 More, and how to report a security problem: [SECURITY.md](SECURITY.md).
 

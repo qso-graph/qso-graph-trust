@@ -10,8 +10,7 @@ versions follow [Semantic Versioning](https://semver.org/).
 ### Added
 
 - `qg-trust`, the command line, on crates.io as `qso-graph-trust-cli`: signs your ADIF log with your
-  LoTW certificate, which it gets, with your station location, from the backup file TQSL saves (`-i`,
-  `-l`), within a date range (`-b`,
+  LoTW certificate (`-i`, the file with it) for your station location (`-l`), within a date range (`-b`,
   `-e`, `YYYY-MM-DD` or `YYYYMMDD`), into the `.tq8` named by `-o` or beside the log. The signed records
   and signatures are tqsllib's, byte for byte, for every location in the standard test set. A QSO
   LoTW would refuse, or the certificate or station cannot sign, is left out and named with the

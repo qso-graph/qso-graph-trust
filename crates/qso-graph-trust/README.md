@@ -37,7 +37,7 @@ static ALLOCATOR: zeroizing_alloc::ZeroAlloc<std::alloc::System> =
     zeroizing_alloc::ZeroAlloc(std::alloc::System);
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // A backup's certificates are trusted only if they chain to LoTW's own root, pinned here.
+    // A certificate is trusted only if it chains to LoTW's own root, pinned here.
     let backup = tbk::read(&std::fs::read("tqslconfig.tbk")?, &Trust::lotw())?;
 
     let entry = backup.certificates.iter().find(|c| c.callsign == "K1ABC").ok_or("no certificate")?;

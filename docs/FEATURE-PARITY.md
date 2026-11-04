@@ -164,7 +164,7 @@ calls TQSL's command line today should get the same meaning, including exit code
 |---|---|---|---|---|
 | `-h`, `-v` | help, version | | Done | #173 |
 | `FILE`, `-o` | the log to sign; the `.tq8` to write | 1.1 | Done | #173 |
-| `-l` | station location | 1.5 | Part done: by its name in a TQSL backup | #173 |
+| `-l` | station location | 1.5 | Part done: by name | #173 |
 | `-b`, `-e` | first and last QSO date | 1.6 | Done | #173 |
 | `-a` | QSOs signed before: abort, all, compliant, ask | 1.6 | 0.7.0 | #173 |
 | `-f` | location details in the log: ignore, report, update | 1.3 | 0.7.0 | #173 |
