@@ -2,7 +2,7 @@
 
 Files QGT's tests read. **Everything here is test data made from test keys.** Nothing is ARRL's, no
 real ham's certificate or key is here, and LoTW would refuse all of it. Never add a real certificate,
-key, backup or log.
+key, `.tbk` file or log.
 
 ## pki
 
@@ -31,7 +31,7 @@ and still catches a real key committed anywhere else.
 ## Made by the tqsllib harness (phase 2, qso-graph-desktop#171)
 
 TQSL's own file formats are made by tqsllib itself, so they are exact: its key files (`keys/<call>`,
-plain and password-protected), `.p12` exports with TQSL's bag attributes, `station_data`, `.tbk` backups, `uploaded.db`, and signed `.tq8` logs.
+plain and password-protected), `.p12` exports with TQSL's bag attributes, `station_data`, `.tbk` files, `uploaded.db`, and signed `.tq8` logs.
 
 ## The test log
 
@@ -76,7 +76,7 @@ The station location is `QG0TEST Home`: Kansas, Sedgwick County, EM17, CQ zone 4
 The standard test set (qso-graph-desktop#172): what a ham's TQSL 2.8.7 holds, made by
 `scripts/make-standard-set.sh` in the harness container with no network. tqsllib makes each key and
 request and loads each certificate; then TQSL's app itself runs in a virtual display and, as it closes,
-writes its own automatic backup, `standard.tbk`. The calls are used with their holder's permission; every
+writes its own `.tbk` file, `standard.tbk`. The calls are used with their holder's permission; every
 key, certificate and password is a test one, from the same kind of test CA ("TEST ONLY", "Not ARRL").
 
 | Call | Certificate | Key password | Locations |
@@ -98,7 +98,7 @@ for one that does not fit). `MANIFEST` says when it was made.
 | `adif/<location>.adi` | A test log of three QSOs for each location, its own (tqsllib signs a QSO once) |
 | `signed/<location>.tq7` | That log, signed by tqsllib at that location |
 | `tqsl/` | tqsllib's own folder: all three keys and certificates, `station_data`, `uploaded.db` |
-| `standard.tbk` | TQSL's backup of all of it: 3 certificates with their keys, 7 locations, the 21 QSOs it has signed, its settings |
+| `standard.tbk` | TQSL's `.tbk` file of all of it: 3 certificates with their keys, 7 locations, the 21 QSOs it has signed, its settings |
 
 W4W's certificate is in force for a month only, so tests sign at a time inside each certificate,
 never at the time they run.

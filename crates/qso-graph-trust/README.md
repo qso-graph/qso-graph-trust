@@ -38,14 +38,14 @@ static ALLOCATOR: zeroizing_alloc::ZeroAlloc<std::alloc::System> =
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // A certificate is trusted only if it chains to LoTW's own root, pinned here.
-    let backup = tbk::read(&std::fs::read("tqslconfig.tbk")?, &Trust::lotw())?;
+    let tbk = tbk::read(&std::fs::read("tqslconfig.tbk")?, &Trust::lotw())?;
 
-    let entry = backup.certificates.iter().find(|c| c.callsign == "K1ABC").ok_or("no certificate")?;
+    let entry = tbk.certificates.iter().find(|c| c.callsign == "K1ABC").ok_or("no certificate")?;
     let certificate = entry.certificate.as_ref().ok_or("no certificate yet")?;
     // Ask for the key's password when the program runs: never on a command line, in a file or in code.
     let password: Zeroizing<Vec<u8>> = ask_for_password()?;
     let key = entry.key.as_ref().ok_or("no key")?.unlock(Some(&password))?;
-    let station = &backup.locations.iter().find(|l| l.name == "Home").ok_or("no location")?.station;
+    let station = &tbk.locations.iter().find(|l| l.name == "Home").ok_or("no location")?.station;
 
     // Every QSO is checked as LoTW checks it; one it would refuse is an error naming the field.
     let qsos = records::parse(&std::fs::read("log.adi")?)?
