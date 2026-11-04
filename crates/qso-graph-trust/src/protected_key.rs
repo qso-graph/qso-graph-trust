@@ -3,7 +3,8 @@
 
 //! Borrowed, fixed-depth RFC 5208/8018 parsing, without enabling RustCrypto ciphers or KDFs.
 //! DER readers check canonical lengths and consume each sequence completely. Parsing allocates
-//! nothing; salt length, iteration count and derived-key length are checked before provider work.
+//! nothing; iteration count and derived-key length are checked before provider work. The caller's
+//! file size bound limits salt length; the .p12 reader also applies its own salt rules.
 
 use pkcs8::ObjectIdentifier;
 use pkcs8::der::{
@@ -20,7 +21,6 @@ const HMAC_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.1135
 const DES_EDE3_CBC: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.3.7");
 const AES128_CBC: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.1.2");
 const AES256_CBC: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.1.42");
-const MAX_SALT_LEN: usize = 64;
 
 pub(crate) struct Envelope<'a> {
     pub algorithm: AlgorithmIdentifierRef<'a>,
@@ -119,9 +119,7 @@ impl<'a> Parameters<'a> {
     }
 
     pub fn accepted(&self) -> bool {
-        !self.salt.is_empty()
-            && self.salt.len() <= MAX_SALT_LEN
-            && (1..=crate::signing::MAX_PBKDF2_ITERATIONS).contains(&self.iteration_count)
+        (1..=crate::signing::MAX_PBKDF2_ITERATIONS).contains(&self.iteration_count)
             && self
                 .key_length
                 .is_none_or(|len| usize::try_from(len) == Ok(self.key_len))
@@ -223,13 +221,13 @@ mod tests {
     }
 
     #[test]
-    fn salt_iteration_and_key_length_limits_are_checked_before_deriving() {
+    fn iteration_and_key_length_limits_are_checked_before_deriving() {
         let iv = [0; 16];
         let limit = MAX_PBKDF2_ITERATIONS.to_der().expect("iterations");
         for (salt, iterations, tail, accepted) in [
-            (&[0; MAX_SALT_LEN][..], limit.clone(), vec![], true),
-            (&[0; MAX_SALT_LEN + 1][..], limit.clone(), vec![], false),
-            (&[][..], limit.clone(), vec![], false),
+            (&[0; 64][..], limit.clone(), vec![], true),
+            (&[0; 65][..], limit.clone(), vec![], true),
+            (&[][..], limit.clone(), vec![], true),
             (b"salt", 0u32.to_der().expect("iterations"), vec![], false),
             (
                 b"salt",

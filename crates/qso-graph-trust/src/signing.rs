@@ -477,6 +477,101 @@ mod tests {
         }
     }
 
+    fn protected_salt_matches_previous_path(salt: &[u8]) {
+        use pkcs8::der::{Encode, pem::LineEnding};
+        use qso_graph_trust_awslc::{
+            ImportCipher, ImportDigest, import_cbc_decrypt, import_pbkdf2,
+        };
+
+        let password = b"test-password";
+        let plain = entry(include_str!("../../../tests/corpus/pki/user-1024.key.pem"));
+        let plaintext = plain.pkcs8_der(None).expect("plain key");
+        let params = pbes2::Parameters {
+            kdf: pbes2::Kdf::Pbkdf2(pbes2::Pbkdf2Params {
+                salt,
+                iteration_count: 2048,
+                key_length: None,
+                prf: pbes2::Pbkdf2Prf::HmacWithSha256,
+            }),
+            encryption: pbes2::EncryptionScheme::Aes256Cbc { iv: &[9; 16] },
+        };
+        let ciphertext = params
+            .encrypt(password, &plaintext)
+            .expect("encrypt fixture");
+        let encoded = EncryptedPrivateKeyInfo {
+            encryption_algorithm: EncryptionScheme::Pbes2(params),
+            encrypted_data: &ciphertext,
+        }
+        .to_der()
+        .expect("envelope");
+
+        // HEAD~1 parsed with pkcs8/pkcs5, then used these parameters with the binding.
+        // Reproduce its SHA256/AES256 branch without the new protected_key parser.
+        let previous = EncryptedPrivateKeyInfo::from_der(&encoded).expect("previous parser");
+        let EncryptionScheme::Pbes2(params) = previous.encryption_algorithm else {
+            panic!("PBES2 fixture");
+        };
+        let pbes2::Kdf::Pbkdf2(kdf) = params.kdf else {
+            panic!("PBKDF2 fixture");
+        };
+        assert_eq!(kdf.salt, salt);
+        assert_eq!(kdf.key_length, None);
+        assert_eq!(kdf.prf, pbes2::Pbkdf2Prf::HmacWithSha256);
+        let pbes2::EncryptionScheme::Aes256Cbc { iv } = params.encryption else {
+            panic!("AES256 fixture");
+        };
+        let derived = import_pbkdf2(
+            ImportDigest::Sha256,
+            password,
+            kdf.salt,
+            std::num::NonZeroU32::new(kdf.iteration_count).expect("iterations"),
+            32,
+        );
+        let previous_der =
+            import_cbc_decrypt(ImportCipher::Aes256, &derived, iv, previous.encrypted_data)
+                .expect("previous decryption");
+        assert_eq!(&*previous_der, &*plaintext);
+
+        let pem = pkcs8::der::pem::encode_string("ENCRYPTED PRIVATE KEY", LineEnding::LF, &encoded)
+            .expect("PEM");
+        let file = Zeroizing::new(format!(
+            "<CALLSIGN:7>QG0TEST\n<PUBLIC_KEY:{}>{}\n<PRIVATE_KEY:{}>{pem}\n<eor>\n",
+            plain.public_key_pem.len(),
+            plain.public_key_pem,
+            pem.len(),
+        ));
+        let protected = KeyEntry::read_key_file(file.as_bytes())
+            .expect("bounded key file")
+            .remove(0);
+        protected.check().expect("accepted protection");
+        assert_eq!(
+            &*protected.pkcs8_der(Some(password)).expect("decrypted key"),
+            &*previous_der
+        );
+        let previous_key =
+            TqslKey::from_pkcs8_der(&previous_der, &plain.public_key_der().expect("SPKI"))
+                .expect("previous key");
+        let data = b"4EM177SEDGWICKKS20MKC4QPQ14.074000FT82026-11-0118:30:00Z";
+        assert_eq!(
+            protected
+                .unlock(Some(password))
+                .expect("unlocks")
+                .sign(data)
+                .expect("signs"),
+            previous_key.sign(data).expect("previous signature")
+        );
+    }
+
+    #[test]
+    fn a_protected_key_with_a_65_byte_salt_matches_previous_path() {
+        protected_salt_matches_previous_path(&[7; 65]);
+    }
+
+    #[test]
+    fn a_protected_key_with_an_empty_salt_matches_previous_path() {
+        protected_salt_matches_previous_path(&[]);
+    }
+
     #[test]
     fn a_key_protected_with_pbkdf2_hmac_sha1_unlocks_and_signs_the_same() {
         // Codex review: accepted, but pkcs8 lacked sha1-insecure, so the right password failed.
