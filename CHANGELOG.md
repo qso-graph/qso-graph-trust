@@ -11,6 +11,12 @@ versions follow [Semantic Versioning](https://semver.org/).
   new-only/sign-again/cancel choices. Selected QSOs are recorded after their `.tq8` is written;
   encrypted store exports carry the record. Store XML version 2 reads version 1 and keeps up to
   100,000 records within the 32 MiB file limit. CLI and Desktop integration remains.
+- Library `.tq6` import with chain validation and atomic pending-request attachment or keyless
+  storage; MAC-authenticated `.p12` import with PBES2/AES and PKCS#12 SHA-1/3DES, bounded parsing and
+  derivation work, and private credential handoff. RC2-40 is explicitly refused, including TQSL's
+  weak export certificate bags. No dependency packages added; the pinned aws-lc-rs enables `legacy-des` for import decryption.
+- Certificate expiry lists from caller-supplied time and threshold, using X.509 validity-end UTC
+  dates and TQSL's strict warning threshold, with dates and already-expired certificates included.
 
 - Library certificate requests: new, signed additional and renewal `.tq5` files, with TQSL 2.8.7's
   CSR subject, attributes, signatures and field order; DXCC, date and bounded text validation.
@@ -22,6 +28,10 @@ versions follow [Semantic Versioning](https://semver.org/).
   and station location before replacing the store; private key bytes stay inside the library.
 
 ### Fixed
+
+- CBC import decryption uses the binding's safe AWS-LC API. The release custody scan caught
+  private-key fragments in RustCrypto CBC's temporary stack blocks; `.p12` imports are now
+  exercised in debug and release, with a planted password leak as a positive control.
 
 - Derive export AES keys directly into wiped heap storage, avoiding moved stack copies. Custody
   scans now search generated export passwords and both successful and failed-open derived keys,

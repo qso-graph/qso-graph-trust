@@ -16,13 +16,11 @@
 use std::fmt;
 
 use base64ct::{Base64, Encoding};
-use pkcs8::pkcs5::EncryptionScheme;
-use pkcs8::pkcs5::pbes2::{self, Kdf, Pbkdf2Prf};
-use pkcs8::{EncryptedPrivateKeyInfo, der::Decode};
+use pkcs8::der::Decode;
 use qso_graph_trust_awslc::RsaKey;
-use sha1::Sha1;
 use zeroize::Zeroizing;
 
+use crate::protected_key::{Envelope, Parameters};
 use crate::records::{self, Record, RecordError};
 
 /// One key from a tqsllib key file, still locked: its call and public key, and the private key as
@@ -116,96 +114,30 @@ const ENCRYPTED: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----";
 /// The largest key file read: one key file holds a key per certificate request, each a few KiB.
 pub const MAX_KEY_FILE_LEN: usize = 1024 * 1024;
 
-/// A protected key's PKCS#8 bytes: PBKDF2 then CBC decryption, done here rather than in pkcs5,
-/// whose derived key sits in a buffer it never wipes (found by Codex review). The derived key, the
-/// cipher's key schedule (the `zeroize` features of cbc, des and aes) and the plaintext are all
-/// wiped when dropped, on success or failure. `accepted` has already bounded the parameters.
-fn decrypt(
-    params: &pbes2::Parameters<'_>,
+/// PBKDF2 and CBC through the binding's AWS-LC API. Parameters are bounded before any
+/// provider work; derived keys, provider key schedules and plaintext are wiped when dropped.
+pub(crate) fn decrypt(
+    params: &Parameters<'_>,
     password: &[u8],
     ciphertext: &[u8],
 ) -> Result<Zeroizing<Vec<u8>>, KeyError> {
-    use cbc::cipher::{BlockDecryptMut, KeyIvInit, block_padding::Pkcs7};
-    let Kdf::Pbkdf2(kdf) = &params.kdf else {
-        return Err(KeyError::UnsupportedProtection);
-    };
-    let key_len = match params.encryption {
-        pbes2::EncryptionScheme::DesEde3Cbc { .. } => 24,
-        pbes2::EncryptionScheme::Aes128Cbc { .. } => 16,
-        pbes2::EncryptionScheme::Aes256Cbc { .. } => 32,
-        _ => return Err(KeyError::UnsupportedProtection),
-    };
-    if kdf.key_length.is_some_and(|l| usize::from(l) != key_len) {
+    if !params.accepted() {
         return Err(KeyError::UnsupportedProtection);
     }
-    let mut key = Zeroizing::new(vec![0u8; key_len]);
-    match kdf.prf {
-        Pbkdf2Prf::HmacWithSha1 => {
-            pbkdf2::pbkdf2_hmac::<Sha1>(password, kdf.salt, kdf.iteration_count, &mut key)
-        }
-        Pbkdf2Prf::HmacWithSha256 => {
-            pbkdf2::pbkdf2_hmac::<sha2::Sha256>(password, kdf.salt, kdf.iteration_count, &mut key)
-        }
-        _ => return Err(KeyError::UnsupportedProtection),
-    }
-    let mut buf = Zeroizing::new(ciphertext.to_vec());
-    let bad = |_| KeyError::WrongPassword;
-    let len = match params.encryption {
-        pbes2::EncryptionScheme::DesEde3Cbc { iv } => {
-            cbc::Decryptor::<des::TdesEde3>::new_from_slices(&key, iv)
-                .map_err(|_| KeyError::UnsupportedProtection)?
-                .decrypt_padded_mut::<Pkcs7>(&mut buf)
-                .map_err(bad)?
-                .len()
-        }
-        pbes2::EncryptionScheme::Aes128Cbc { iv } => {
-            cbc::Decryptor::<aes::Aes128>::new_from_slices(&key, iv)
-                .map_err(|_| KeyError::UnsupportedProtection)?
-                .decrypt_padded_mut::<Pkcs7>(&mut buf)
-                .map_err(bad)?
-                .len()
-        }
-        pbes2::EncryptionScheme::Aes256Cbc { iv } => {
-            cbc::Decryptor::<aes::Aes256>::new_from_slices(&key, iv)
-                .map_err(|_| KeyError::UnsupportedProtection)?
-                .decrypt_padded_mut::<Pkcs7>(&mut buf)
-                .map_err(bad)?
-                .len()
-        }
-        _ => return Err(KeyError::UnsupportedProtection),
-    };
-    buf.truncate(len);
-    Ok(buf)
+    let key = qso_graph_trust_awslc::import_pbkdf2(
+        params.digest,
+        password,
+        params.salt,
+        std::num::NonZeroU32::new(params.iteration_count).ok_or(KeyError::UnsupportedProtection)?,
+        params.key_len,
+    );
+    qso_graph_trust_awslc::import_cbc_decrypt(params.cipher, &key, params.iv, ciphertext)
+        .map_err(|_| KeyError::WrongPassword)
 }
 
 /// The most PBKDF2 iterations accepted. tqsllib 2.8.7 writes 2,048 (OpenSSL's default); a million
 /// takes well under a second, so a crafted file cannot make unlocking take unbounded time.
 pub const MAX_PBKDF2_ITERATIONS: u32 = 1_000_000;
-
-/// Whether a protected key's encryption is one QG Trust accepts, decided before any work is done
-/// with the password: PBES2 with PBKDF2 (never scrypt, whose memory a file could set without bound),
-/// HMAC-SHA1 or HMAC-SHA256, at most [`MAX_PBKDF2_ITERATIONS`], and 3DES or AES-CBC. tqsllib 2.8.7
-/// writes PBES2, PBKDF2, HMAC-SHA256, 2,048 iterations and 3DES-CBC.
-fn accepted(scheme: &EncryptionScheme<'_>) -> bool {
-    let EncryptionScheme::Pbes2(params) = scheme else {
-        return false;
-    };
-    let kdf_ok = match &params.kdf {
-        Kdf::Pbkdf2(p) => {
-            (1..=MAX_PBKDF2_ITERATIONS).contains(&p.iteration_count)
-                && matches!(p.prf, Pbkdf2Prf::HmacWithSha1 | Pbkdf2Prf::HmacWithSha256)
-        }
-        // scrypt, and any kind a later pkcs5 adds: refused.
-        _ => false,
-    };
-    let cipher_ok = matches!(
-        params.encryption,
-        pbes2::EncryptionScheme::DesEde3Cbc { .. }
-            | pbes2::EncryptionScheme::Aes128Cbc { .. }
-            | pbes2::EncryptionScheme::Aes256Cbc { .. }
-    );
-    kdf_ok && cipher_ok
-}
 
 impl KeyEntry {
     /// Every key in a tqsllib key file, in the order written: one per certificate request made.
@@ -304,8 +236,11 @@ impl KeyEntry {
         if label != "ENCRYPTED PRIVATE KEY" {
             return Err(KeyError::NotAKey);
         }
-        let envelope = EncryptedPrivateKeyInfo::from_der(der).map_err(|_| KeyError::NotAKey)?;
-        if !accepted(&envelope.encryption_algorithm) {
+        let envelope = Envelope::from_der(der).map_err(|_| KeyError::NotAKey)?;
+        let params = envelope
+            .parameters()
+            .map_err(|_| KeyError::UnsupportedProtection)?;
+        if !params.accepted() {
             return Err(KeyError::UnsupportedProtection);
         }
         Ok(())
@@ -318,11 +253,13 @@ impl KeyEntry {
 
     /// Unlock the key for signing. A protected key needs its password; a plain one ignores it.
     pub fn unlock(&self, password: Option<&[u8]>) -> Result<TqslKey, KeyError> {
-        let der = self.pkcs8_der(password)?;
-        TqslKey::from_pkcs8_der(
-            &der,
-            &self.public_key_der().ok_or(KeyError::PublicKeyMismatch)?,
-        )
+        crate::memory::scrub_after(|| {
+            let der = self.pkcs8_der_inner(password)?;
+            TqslKey::from_pkcs8_der_inner(
+                &der,
+                &self.public_key_der().ok_or(KeyError::PublicKeyMismatch)?,
+            )
+        })
     }
 
     // Kept inside the crate: only the credential-store handoff may obtain the DER, never a caller.
@@ -330,6 +267,11 @@ impl KeyEntry {
         &self,
         password: Option<&[u8]>,
     ) -> Result<Zeroizing<Vec<u8>>, KeyError> {
+        crate::memory::scrub_after(|| self.pkcs8_der_inner(password))
+    }
+
+    #[inline(never)]
+    fn pkcs8_der_inner(&self, password: Option<&[u8]>) -> Result<Zeroizing<Vec<u8>>, KeyError> {
         if self.is_encrypted() && password.is_none() {
             return Err(KeyError::PasswordNeeded);
         }
@@ -341,14 +283,11 @@ impl KeyEntry {
         match label {
             "ENCRYPTED PRIVATE KEY" => {
                 let password = password.ok_or(KeyError::PasswordNeeded)?;
-                let info = EncryptedPrivateKeyInfo::from_der(der).map_err(|_| KeyError::NotAKey)?;
-                if !accepted(&info.encryption_algorithm) {
-                    return Err(KeyError::UnsupportedProtection);
-                }
-                let EncryptionScheme::Pbes2(params) = &info.encryption_algorithm else {
-                    return Err(KeyError::UnsupportedProtection);
-                };
-                decrypt(params, password, info.encrypted_data)
+                let info = Envelope::from_der(der).map_err(|_| KeyError::NotAKey)?;
+                let params = info
+                    .parameters()
+                    .map_err(|_| KeyError::UnsupportedProtection)?;
+                decrypt(&params, password, info.ciphertext)
             }
             "PRIVATE KEY" => Ok(Zeroizing::new(der.to_vec())),
             _ => Err(KeyError::NotAKey),
@@ -359,6 +298,11 @@ impl KeyEntry {
 impl TqslKey {
     // A stored secret is checked again: the credential backend is not a source of trust.
     pub(crate) fn from_pkcs8_der(der: &[u8], spki: &[u8]) -> Result<Self, KeyError> {
+        crate::memory::scrub_after(|| Self::from_pkcs8_der_inner(der, spki))
+    }
+
+    #[inline(never)]
+    pub(crate) fn from_pkcs8_der_inner(der: &[u8], spki: &[u8]) -> Result<Self, KeyError> {
         let key = RsaKey::from_pkcs8_der(der).map_err(|_| KeyError::NotAKey)?;
         // A key LoTW uses, as tqsllib makes them: 1024 bits, e = 65537 (tqsl_new_rsa_key), two
         // different 512-bit factors, each passing AWS-LC's primality test. Anything else cannot
@@ -379,7 +323,7 @@ impl TqslKey {
 impl TqslKey {
     /// The signature over `data`, as the bytes tqsllib's `tqsl_signDataBlock` returns.
     pub fn sign(&self, data: &[u8]) -> Result<Vec<u8>, KeyError> {
-        self.key.sign_sha1(data).map_err(|_| KeyError::Signing)
+        crate::memory::scrub_after(|| self.key.sign_sha1(data).map_err(|_| KeyError::Signing))
     }
 
     /// Whether `spki_der`, a certificate's SubjectPublicKeyInfo, is this key's public key.
@@ -404,6 +348,10 @@ pub fn tqsl_base64(signature: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pkcs8::{
+        EncryptedPrivateKeyInfo,
+        pkcs5::{EncryptionScheme, pbes2},
+    };
     use rsa::RsaPrivateKey;
     use rsa::pkcs8::DecodePrivateKey;
 
@@ -499,7 +447,13 @@ mod tests {
         // At the limit it is accepted: what is left to fail is only the password.
         let ok = pbes2::Parameters::pbkdf2_sha256_aes256cbc(MAX_PBKDF2_ITERATIONS, &salt, &iv)
             .expect("pbkdf2");
-        assert!(accepted(&EncryptionScheme::Pbes2(ok)));
+        use pkcs8::der::Encode;
+        let encoded = ok.to_der().expect("parameters");
+        assert!(
+            Parameters::from_der(&encoded)
+                .expect("parameters")
+                .accepted()
+        );
     }
 
     /// The test key's public half, as a key file states it.
@@ -521,6 +475,101 @@ mod tests {
             public_key_pem: test_public_key(),
             private_key_pem: Zeroizing::new(pem.into()),
         }
+    }
+
+    fn protected_salt_matches_previous_path(salt: &[u8]) {
+        use pkcs8::der::{Encode, pem::LineEnding};
+        use qso_graph_trust_awslc::{
+            ImportCipher, ImportDigest, import_cbc_decrypt, import_pbkdf2,
+        };
+
+        let password = b"test-password";
+        let plain = entry(include_str!("../../../tests/corpus/pki/user-1024.key.pem"));
+        let plaintext = plain.pkcs8_der(None).expect("plain key");
+        let params = pbes2::Parameters {
+            kdf: pbes2::Kdf::Pbkdf2(pbes2::Pbkdf2Params {
+                salt,
+                iteration_count: 2048,
+                key_length: None,
+                prf: pbes2::Pbkdf2Prf::HmacWithSha256,
+            }),
+            encryption: pbes2::EncryptionScheme::Aes256Cbc { iv: &[9; 16] },
+        };
+        let ciphertext = params
+            .encrypt(password, &plaintext)
+            .expect("encrypt fixture");
+        let encoded = EncryptedPrivateKeyInfo {
+            encryption_algorithm: EncryptionScheme::Pbes2(params),
+            encrypted_data: &ciphertext,
+        }
+        .to_der()
+        .expect("envelope");
+
+        // HEAD~1 parsed with pkcs8/pkcs5, then used these parameters with the binding.
+        // Reproduce its SHA256/AES256 branch without the new protected_key parser.
+        let previous = EncryptedPrivateKeyInfo::from_der(&encoded).expect("previous parser");
+        let EncryptionScheme::Pbes2(params) = previous.encryption_algorithm else {
+            panic!("PBES2 fixture");
+        };
+        let pbes2::Kdf::Pbkdf2(kdf) = params.kdf else {
+            panic!("PBKDF2 fixture");
+        };
+        assert_eq!(kdf.salt, salt);
+        assert_eq!(kdf.key_length, None);
+        assert_eq!(kdf.prf, pbes2::Pbkdf2Prf::HmacWithSha256);
+        let pbes2::EncryptionScheme::Aes256Cbc { iv } = params.encryption else {
+            panic!("AES256 fixture");
+        };
+        let derived = import_pbkdf2(
+            ImportDigest::Sha256,
+            password,
+            kdf.salt,
+            std::num::NonZeroU32::new(kdf.iteration_count).expect("iterations"),
+            32,
+        );
+        let previous_der =
+            import_cbc_decrypt(ImportCipher::Aes256, &derived, iv, previous.encrypted_data)
+                .expect("previous decryption");
+        assert_eq!(&*previous_der, &*plaintext);
+
+        let pem = pkcs8::der::pem::encode_string("ENCRYPTED PRIVATE KEY", LineEnding::LF, &encoded)
+            .expect("PEM");
+        let file = Zeroizing::new(format!(
+            "<CALLSIGN:7>QG0TEST\n<PUBLIC_KEY:{}>{}\n<PRIVATE_KEY:{}>{pem}\n<eor>\n",
+            plain.public_key_pem.len(),
+            plain.public_key_pem,
+            pem.len(),
+        ));
+        let protected = KeyEntry::read_key_file(file.as_bytes())
+            .expect("bounded key file")
+            .remove(0);
+        protected.check().expect("accepted protection");
+        assert_eq!(
+            &*protected.pkcs8_der(Some(password)).expect("decrypted key"),
+            &*previous_der
+        );
+        let previous_key =
+            TqslKey::from_pkcs8_der(&previous_der, &plain.public_key_der().expect("SPKI"))
+                .expect("previous key");
+        let data = b"4EM177SEDGWICKKS20MKC4QPQ14.074000FT82026-11-0118:30:00Z";
+        assert_eq!(
+            protected
+                .unlock(Some(password))
+                .expect("unlocks")
+                .sign(data)
+                .expect("signs"),
+            previous_key.sign(data).expect("previous signature")
+        );
+    }
+
+    #[test]
+    fn a_protected_key_with_a_65_byte_salt_matches_previous_path() {
+        protected_salt_matches_previous_path(&[7; 65]);
+    }
+
+    #[test]
+    fn a_protected_key_with_an_empty_salt_matches_previous_path() {
+        protected_salt_matches_previous_path(&[]);
     }
 
     #[test]
@@ -636,8 +685,8 @@ mod tests {
     fn every_buffer_in_decryption_is_wiped() {
         fn wiped<T: zeroize::ZeroizeOnDrop>() {}
         wiped::<Zeroizing<Vec<u8>>>();
-        wiped::<cbc::Decryptor<des::TdesEde3>>();
-        wiped::<cbc::Decryptor<aes::Aes256>>();
+        // The provider-owned CBC schedules and its temporaries are checked by custody scans,
+        // including AES-protected PKCS#12 imports, in debug and release.
     }
 
     /// A key file as a crafted one would be written, by hand through pkcs1 and pkcs8, from p, q

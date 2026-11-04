@@ -225,12 +225,20 @@ impl CertificateRequest {
         &self,
         authorization: Authorization<'_>,
     ) -> Result<GeneratedRequest, RequestError> {
+        crate::memory::scrub_after(|| self.generate_inner(authorization))
+    }
+
+    #[inline(never)]
+    fn generate_inner(
+        &self,
+        authorization: Authorization<'_>,
+    ) -> Result<GeneratedRequest, RequestError> {
         self.validate()?;
         let created_at = creation_time(std::time::SystemTime::now())?;
         let signer = self.signer(authorization)?;
         let (private, public) = RsaKey::generate_lotw().map_err(|_| RequestError::Crypto)?;
         // Exercise precisely the same shape and public/private match checks as imported keys.
-        TqslKey::from_pkcs8_der(&private, &public).map_err(|_| RequestError::Crypto)?;
+        TqslKey::from_pkcs8_der_inner(&private, &public).map_err(|_| RequestError::Crypto)?;
         let csr = self.csr(&private, &public)?;
         let tq5 = self.frame(&csr, authorization, signer)?;
         Ok(GeneratedRequest {

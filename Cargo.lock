@@ -17,7 +17,6 @@ dependencies = [
  "cfg-if",
  "cipher",
  "cpufeatures",
- "zeroize",
 ]
 
 [[package]]
@@ -158,7 +157,6 @@ checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
 dependencies = [
  "crypto-common",
  "inout",
- "zeroize",
 ]
 
 [[package]]
@@ -594,13 +592,9 @@ dependencies = [
 name = "qso-graph-trust"
 version = "0.1.0-beta.4"
 dependencies = [
- "aes",
  "base64ct",
- "cbc",
- "des",
  "miniz_oxide",
  "num-bigint-dig",
- "pbkdf2",
  "pkcs8",
  "qso-graph-trust-awslc",
  "rand_core",

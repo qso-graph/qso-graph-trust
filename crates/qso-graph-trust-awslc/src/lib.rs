@@ -20,7 +20,11 @@ use aws_lc_sys as sys;
 use zeroize::Zeroizing;
 
 mod encryption;
-pub use encryption::{EncryptionError, aes256_gcm_open, aes256_gcm_seal, pbkdf2_sha256};
+pub use encryption::{
+    EncryptionError, ImportCipher, ImportDigest, aes256_gcm_open, aes256_gcm_seal,
+    import_cbc_decrypt, import_digest, import_hmac, import_hmac_verify, import_pbkdf2,
+    pbkdf2_sha256,
+};
 
 /// An RSA private key held by AWS-LC. It cannot be read back out.
 pub struct RsaKey {

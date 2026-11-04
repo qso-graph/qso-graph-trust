@@ -10,6 +10,7 @@
 //! Callers select a [`KeyBackend`]; raw credential access stays inside the library.
 
 mod format;
+mod import;
 mod keys;
 mod part;
 mod signed;
@@ -20,6 +21,7 @@ pub use signed::{
     duplicate_key,
 };
 
+pub use import::ExpiringCertificate;
 pub use part::{PartError, RestoreReport};
 
 pub use keys::{KeyStoreError, MAX_KEYS, SERVICE, TEST_SERVICE};

@@ -29,7 +29,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | List | Features | Done | Part done | To do |
 |---|---|---|---|---|
-| Needed for 0.7.0 | 43 | 16 | 11 | 16 |
+| Needed for 0.7.0 | 43 | 19 | 11 | 13 |
 | Nice to have | 15 |  |  | 15 |
 | Won't add | 15 | | | |
 
@@ -72,11 +72,11 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
 | Check a certificate leads to LoTW's root | on load | A file's own root certificates count for nothing | Done | #172 |
-| Load a certificate from ARRL (`.tq6`) | Load Callsign Certificate | Reads its fields; loading not yet | 0.7.0 | #172 |
-| Load a certificate and key (`.p12`) | Load Callsign Certificate | | 0.7.0 | #172 |
+| Load a certificate from ARRL (`.tq6`) | Load Callsign Certificate | Library validates the whole response and attaches matching requests; reports keyless imports | Done | #172 |
+| Load a certificate and key (`.p12`) | Load Callsign Certificate | Library authenticates and imports PBES2/AES or SHA-1/3DES; RC2-40 refused | Done | #172 |
 | Certificate details: call, DXCC, QSO dates, valid dates, serial | Display Properties | Read | Done | #172 |
 | Delete a certificate | Delete Callsign Certificate | | 0.7.0 | #172 |
-| Warn before a certificate expires | at startup, 60 days | | 0.7.0 | #172 |
+| Warn before a certificate expires | at startup, 60 days | Library lists validity-end dates within the caller’s interval, plus expired certificates | Done | #172 |
 
 ### 1.5 Station locations
 

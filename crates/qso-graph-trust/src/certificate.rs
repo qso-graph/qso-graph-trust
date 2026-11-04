@@ -368,54 +368,75 @@ impl Certificate {
     /// root or CA past its dates still counts, as in TQSL; this certificate's own dates are checked
     /// when it signs.
     pub fn verify(&self, trust: &Trust, intermediates: &[Vec<u8>]) -> Result<(), CertificateError> {
-        let cert = X509::from_der(&self.der).map_err(|_| CertificateError::NotACertificate)?;
-        let others: Vec<X509> = intermediates
-            .iter()
-            .filter_map(|d| X509::from_der(d).ok())
-            .collect();
-        // A CA here is one that says it is, may sign certificates, and has no limit this check does
-        // not read (found by Codex review: key usage and critical extensions were not read).
-        let cas: Vec<&X509> = trust
-            .authorities
-            .iter()
-            .chain(others.iter())
-            .filter(|c| {
-                extensions_well_formed(c)
-                    && is_ca(c)
-                    && allows(c, KeyUsages::KeyCertSign)
-                    && criticals_understood(c)
-            })
-            .collect();
-        let untrusted = |c: &X509| CertificateError::Untrusted {
-            issuer: c.tbs_certificate.issuer.to_string(),
-        };
-        // The callsign certificate itself: not a CA, allowed to sign data, limits all read.
-        if !extensions_well_formed(&cert)
-            || is_ca(&cert)
-            || !allows(&cert, KeyUsages::DigitalSignature)
-            || !criticals_understood(&cert)
-        {
-            return Err(untrusted(&cert));
-        }
-        let mut current = cert;
-        // The CA certificates passed so far lie below the one looked for next: a CA's path length is
-        // the most it may have under it (RFC 5280 section 4.2.1.9; found by Codex review).
-        for below in 0..MAX_CHAIN {
-            if trust.roots.iter().any(|root| signed_by(&current, root)) {
-                return Ok(());
-            }
-            let fits = |ca: &&&X509| {
-                basic_constraints(ca)
-                    .and_then(|b| b.path_len_constraint)
-                    .is_none_or(|limit| usize::from(limit) >= below)
-            };
-            let Some(next) = cas.iter().filter(fits).find(|ca| signed_by(&current, ca)) else {
-                return Err(untrusted(&current));
-            };
-            current = (*next).clone();
-        }
-        Err(untrusted(&current))
+        verify_imported(&self.der, trust, intermediates, false)
     }
+}
+
+// Importers check every supplied authority too, including unused roots. A supplied root is
+// accepted only if it is already trusted or chains to caller trust, never for being in the file.
+pub(crate) fn verify_imported(
+    der: &[u8],
+    trust: &Trust,
+    intermediates: &[Vec<u8>],
+    authority: bool,
+) -> Result<(), CertificateError> {
+    let cert = X509::from_der(der).map_err(|_| CertificateError::NotACertificate)?;
+    let others: Vec<X509> = intermediates
+        .iter()
+        .filter_map(|d| X509::from_der(d).ok())
+        .collect();
+    // A CA here is one that says it is, may sign certificates, and has no limit this check does
+    // not read (found by Codex review: key usage and critical extensions were not read).
+    let cas: Vec<&X509> = trust
+        .authorities
+        .iter()
+        .chain(others.iter())
+        .filter(|c| {
+            extensions_well_formed(c)
+                && is_ca(c)
+                && allows(c, KeyUsages::KeyCertSign)
+                && criticals_understood(c)
+        })
+        .collect();
+    let untrusted = |c: &X509| CertificateError::Untrusted {
+        issuer: c.tbs_certificate.issuer.to_string(),
+    };
+    // Require the declared role and its key usage, with every critical limit understood.
+    if !extensions_well_formed(&cert)
+        || is_ca(&cert) != authority
+        || !allows(
+            &cert,
+            if authority {
+                KeyUsages::KeyCertSign
+            } else {
+                KeyUsages::DigitalSignature
+            },
+        )
+        || !criticals_understood(&cert)
+    {
+        return Err(untrusted(&cert));
+    }
+    let mut current = cert;
+    // The CA certificates passed so far lie below the one looked for next: a CA's path length is
+    // the most it may have under it (RFC 5280 section 4.2.1.9; found by Codex review).
+    if authority && trust.roots.iter().any(|root| root == &current) {
+        return Ok(());
+    }
+    for below in usize::from(authority)..MAX_CHAIN {
+        if trust.roots.iter().any(|root| signed_by(&current, root)) {
+            return Ok(());
+        }
+        let fits = |ca: &&&X509| {
+            basic_constraints(ca)
+                .and_then(|b| b.path_len_constraint)
+                .is_none_or(|limit| usize::from(limit) >= below)
+        };
+        let Some(next) = cas.iter().filter(fits).find(|ca| signed_by(&current, ca)) else {
+            return Err(untrusted(&current));
+        };
+        current = (*next).clone();
+    }
+    Err(untrusted(&current))
 }
 
 /// The text of a UTF8String, PrintableString or IA5String value, as a callsign is written.

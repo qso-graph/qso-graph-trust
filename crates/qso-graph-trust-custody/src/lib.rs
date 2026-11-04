@@ -4,7 +4,7 @@
 //! What the custody test's programs do: sign the corpus log as a QG Trust program would, from
 //! reading the key file to writing the `.tq8`, then wait while the test reads their memory.
 //!
-//! `qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE SECRETS_FILE live|done|export-passwords|export-keys`
+//! `qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE P12_PASSWORD_FILE SECRETS_FILE live|done|export-passwords|export-keys|import-secrets`
 //!
 //! - `live`: wait with the key unlocked, so the test can prove it finds a key that is there.
 //! - `done`: sign, drop everything, then wait: no key data may be left.
@@ -39,18 +39,19 @@ pub fn run() -> ExitCode {
         cert_file,
         adif_file,
         password_file,
+        import_password_file,
         secrets_file,
         mode,
     ] = &args[..]
     else {
         eprintln!(
-            "usage: qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE SECRETS_FILE live|done|export-passwords|export-keys"
+            "usage: qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE P12_PASSWORD_FILE SECRETS_FILE live|done|export-passwords|export-keys|import-secrets"
         );
         return ExitCode::from(2);
     };
     if !matches!(
         mode.as_str(),
-        "live" | "done" | "export-passwords" | "export-keys"
+        "live" | "done" | "export-passwords" | "export-keys" | "import-secrets"
     ) {
         return ExitCode::from(2);
     }
@@ -59,6 +60,7 @@ pub fn run() -> ExitCode {
         cert_file,
         adif_file,
         password_file,
+        import_password_file,
         secrets_file,
         mode,
     ) {
@@ -75,6 +77,7 @@ fn sign(
     cert_file: &str,
     adif_file: &str,
     password_file: &str,
+    import_password_file: &str,
     secrets_file: &str,
     mode: &str,
 ) -> Result<(), String> {
@@ -117,6 +120,7 @@ fn sign(
         key_file,
         cert_file,
         password,
+        import_password_file,
         secrets_file,
         mode == "export-passwords",
     )?;
@@ -131,10 +135,20 @@ fn sign(
         drop((entry, signer, log, gz, password_bytes));
         drop(key_bytes);
         wait()?;
-        if mode == "export-keys" {
+        if mode == "export-keys" || mode == "import-secrets" {
             // Test-only planted leaks: the parent derives these from the recorded passwords and
             // salt after the first scan, then sends them over stdin, never on a command line.
-            let mut keys = Zeroizing::new(vec![0; 64]);
+            let len = if mode == "import-secrets" {
+                let mut len = [0; 4];
+                std::io::stdin()
+                    .lock()
+                    .read_exact(&mut len)
+                    .map_err(|e| e.to_string())?;
+                u32::from_be_bytes(len) as usize
+            } else {
+                64
+            };
+            let mut keys = Zeroizing::new(vec![0; len]);
             std::io::stdin()
                 .lock()
                 .read_exact(&mut keys)
@@ -158,6 +172,7 @@ fn exercise_export(
     key_file: &str,
     cert_file: &str,
     password: Option<&[u8]>,
+    import_password_file: &str,
     secrets_file: &str,
     leak_passwords: bool,
 ) -> Result<Vec<Zeroizing<Vec<u8>>>, String> {
@@ -195,8 +210,33 @@ fn exercise_export(
     store
         .restore_part(&part, &export_password, &trust)
         .map_err(|e| e.to_string())?;
-    // Wrong-password authentication failure must wipe its provider and temporary buffers as well.
+    // Import PKCS#12 through the same private store path. Both success and failed authentication
+    // must release every plaintext, BMP-password, KDF and cipher buffer before the memory scan.
+    let case = std::path::Path::new(key_file)
+        .ancestors()
+        .nth(3)
+        .ok_or("corpus path")?;
+    let import_password = Zeroizing::new(read(std::path::Path::new(import_password_file))?);
+    let import_trust = Trust::with_roots(&[&read(&issuer.with_file_name("root.pem"))?])
+        .map_err(|e| e.to_string())?;
+    let (imports, _) =
+        Store::open(folder.0.join("imports"), KeyBackend::Memory).map_err(|e| e.to_string())?;
+    let p12 = Zeroizing::new(read(&case.join("QG0TEST.p12"))?);
+    let imported = imports
+        .import_pkcs12(&p12, &import_password, &import_trust)
+        .map_err(|e| e.to_string())?;
+    imports
+        .with_key(&imported.id, |key| key.sign(b"custody"))
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
     let wrong = Password::generate().map_err(|e| e.to_string())?;
+    if imports
+        .import_pkcs12(&p12, wrong.expose_secret().as_bytes(), &import_trust)
+        .is_ok()
+    {
+        return Err("wrong import password accepted".into());
+    }
+    // Wrong-password authentication failure must wipe its provider and temporary buffers as well.
     if store.restore_part(&part, &wrong, &trust).is_ok() {
         return Err("wrong password accepted".into());
     }
@@ -214,6 +254,7 @@ fn exercise_export(
         .map_err(|e| e.to_string())?;
     if leak_passwords {
         Ok(vec![
+            import_password.clone(),
             Zeroizing::new(export_password.expose_secret().as_bytes().to_vec()),
             Zeroizing::new(wrong.expose_secret().as_bytes().to_vec()),
         ])
