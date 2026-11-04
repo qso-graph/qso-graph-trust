@@ -292,19 +292,26 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
 
     // Clap's indices respect values consumed by an option and letters in a short-option group.
     // Defaults have indices too, so only command-line occurrences take part in the ordering.
-    let first = command
-        .get_arguments()
-        .filter(|arg| matches!(arg.get_id().as_str(), "help" | "version") || arg.is_hide_set())
-        .filter(|arg| {
-            matches.value_source(arg.get_id().as_str())
-                == Some(clap::parser::ValueSource::CommandLine)
-        })
-        .filter_map(|arg| {
-            matches
-                .index_of(arg.get_id().as_str())
-                .map(|index| (index, arg))
-        })
-        .min_by_key(|(index, _)| *index);
+    // A refused option anywhere on the line is refused before help or the version is shown: a
+    // repeated option keeps only its last occurrence's index, so an order-based rule would let
+    // `-p SECRET --version -p SECRET2` print the version (found by Astra's review).
+    let given = |arg: &&clap::Arg| {
+        matches.value_source(arg.get_id().as_str()) == Some(clap::parser::ValueSource::CommandLine)
+    };
+    let earliest = |wanted: &dyn Fn(&clap::Arg) -> bool| {
+        command
+            .get_arguments()
+            .filter(|arg| wanted(arg))
+            .filter(given)
+            .filter_map(|arg| {
+                matches
+                    .index_of(arg.get_id().as_str())
+                    .map(|index| (index, arg))
+            })
+            .min_by_key(|(index, _)| *index)
+    };
+    let first = earliest(&|arg| arg.is_hide_set())
+        .or_else(|| earliest(&|arg| matches!(arg.get_id().as_str(), "help" | "version")));
     if let Some((_, arg)) = first {
         match arg.get_id().as_str() {
             "help" => {

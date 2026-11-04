@@ -967,6 +967,8 @@ fn round_two_date_parser_and_diagnostics_use_only_fixed_text() {
 }
 
 #[test]
+/// A refused option anywhere on the line is refused, before help or the version; help and the
+/// version otherwise follow the order they are given in.
 fn round_three_control_options_follow_parser_order() {
     for (args, code, message) in [
         (
@@ -974,8 +976,21 @@ fn round_three_control_options_follow_parser_order() {
             10,
             "a password is never given",
         ),
-        (vec!["--version", "-p", "SECRET"], 0, "qg-trust "),
-        (vec!["--help", "--upload"], 0, "Usage: qg-trust"),
+        (
+            vec!["--version", "-p", "SECRET"],
+            10,
+            "a password is never given",
+        ),
+        (
+            vec!["-p", "SECRET", "--version", "-p", "SECRET2"],
+            10,
+            "a password is never given",
+        ),
+        (
+            vec!["--help", "--upload"],
+            10,
+            "--upload is not supported yet",
+        ),
         (
             vec!["--upload", "--help"],
             10,
