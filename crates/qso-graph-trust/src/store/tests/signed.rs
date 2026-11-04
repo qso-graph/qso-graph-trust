@@ -630,15 +630,80 @@ fn output_parent_symlink_to_store_is_refused_before_creation() {
     let output_folder = Folder::new();
     let alias = output_folder.0.join("store-alias");
     std::os::unix::fs::symlink(&folder.0, &alias).expect("directory alias");
-    let output = alias.join("STORE.XML.PARTIAL");
+    let before = fs::read(folder.0.join("store.xml")).expect("before");
+    let output = alias.join("log.tq8");
     assert!(matches!(
         log.write_to(&store, &output),
         Err(StoreError::Invalid(_))
     ));
     assert!(!output.exists());
     assert!(store.signed_qsos().expect("nothing recorded").is_empty());
+    assert_eq!(
+        fs::read(folder.0.join("store.xml")).expect("unchanged"),
+        before
+    );
     fs::remove_file(alias).expect("remove alias");
-    log.write_to(&store, &output_folder.0.join("STORE.XML.PARTIAL"))
+    log.write_to(&store, &output_folder.0.join("log.tq8"))
         .expect("same name outside store is safe");
     assert_eq!(store.signed_qsos().expect("recorded").len(), 3);
+}
+
+#[test]
+fn output_reserved_names_are_refused_even_outside_store() {
+    let folder = Folder::new();
+    let store = store(&folder);
+    let log = signed(&store, &qsos(), DuplicateChoice::SignAgain);
+    let before = fs::read(folder.0.join("store.xml")).expect("before");
+    let output_folder = Folder::new();
+    for name in [
+        "store.xml",
+        "STORE.XML",
+        "store.xml.partial",
+        "StOrE.XmL.PaRtIaL",
+        "store.lock",
+        "Store.Lock",
+    ] {
+        let output = output_folder.0.join(name);
+        assert!(matches!(
+            log.write_to(&store, &output),
+            Err(StoreError::Invalid(_))
+        ));
+        assert!(!output.exists());
+        assert!(store.signed_qsos().expect("nothing recorded").is_empty());
+        assert_eq!(
+            fs::read(folder.0.join("store.xml")).expect("unchanged"),
+            before
+        );
+    }
+    log.write_to(&store, &output_folder.0.join("log.tq8"))
+        .expect("ordinary output outside store is safe");
+    assert_eq!(store.signed_qsos().expect("recorded").len(), 3);
+}
+
+#[test]
+fn output_case_varied_parent_is_refused_on_case_insensitive_filesystems() {
+    let folder = Folder::new();
+    let store_dir = folder.0.join("MixedCaseStore");
+    fs::create_dir(&store_dir).expect("store directory");
+    let alias = folder.0.join("mixedcasestore");
+    if !alias.try_exists().expect("probe case sensitivity") {
+        // This filesystem is case-sensitive; the alias does not name the store.
+        return;
+    }
+    let store = Store::open(&store_dir, KeyBackend::Memory)
+        .expect("store")
+        .0;
+    let log = signed(&store, &qsos(), DuplicateChoice::SignAgain);
+    let before = fs::read(store_dir.join("store.xml")).expect("before");
+    let output = alias.join("log.tq8");
+    assert!(matches!(
+        log.write_to(&store, &output),
+        Err(StoreError::Invalid(_))
+    ));
+    assert!(!output.exists());
+    assert!(store.signed_qsos().expect("nothing recorded").is_empty());
+    assert_eq!(
+        fs::read(store_dir.join("store.xml")).expect("unchanged"),
+        before
+    );
 }

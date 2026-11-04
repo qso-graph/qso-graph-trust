@@ -85,8 +85,11 @@ it changes no store state. Applications can use `Store::with_key` to sign withou
 
 `SignedLog::write_to` locks and reloads the store, preflights the merged XML and all limits, creates a
 new output file, writes and syncs it, syncs its parent on Unix, then atomically replaces the record.
-It refuses existing output and every output path whose canonical parent is the store directory,
-so case differences and filesystem aliases cannot make output collide with store-owned files.
+It refuses existing output and every output path whose parent identifies the store directory:
+Unix compares device and inode, including bind mounts and case-insensitive aliases; Windows compares
+canonical paths, resolved to the final path via a handle, including junctions and case differences
+(the stable standard library exposes no Windows file ID). It also reserves `store.xml`,
+`store.xml.partial` and `store.lock`, ignoring ASCII case, in every output directory.
 A contact counts as signed **after successful output writing**, without waiting for upload: tqsllib inserts during conversion (`tqslconvert.cpp:1956`)
 and exposes explicit commit/rollback (`2080–2108`). The reference corpus driver closes successful output
 before committing (`tests/tqsllib/qgt-tqsllib.cpp:230–241`), with no upload involved.

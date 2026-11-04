@@ -144,18 +144,42 @@ impl SignedLog {
     /// output write records nothing. If store replacement fails after output was written, the
     /// output remains; report the error and retain it for recovery. Existing output and any output
     /// in the store directory are refused, including filesystem aliases of that directory.
+    /// Store-owned filenames are reserved in every directory, ignoring ASCII case.
     ///
     /// TQSL stages entries during conversion (tqslconvert.cpp:1956) and commits explicitly
     /// (2097–2108), not on upload. The corpus driver commits after closing successful output
     /// (tests/tqsllib/qgt-tqsllib.cpp:230–241). Here the write is synced before record replacement.
     pub fn write_to(&self, store: &Store, path: &Path) -> Result<(), StoreError> {
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                ["store.xml", "store.xml.partial", "store.lock"]
+                    .iter()
+                    .any(|reserved| name.eq_ignore_ascii_case(reserved))
+            })
+        {
+            return Err(StoreError::Invalid("reserved store filename"));
+        }
         let parent = path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
-        // The output need not exist yet. Compare its existing parent, so case differences,
-        // symlinks and platform filename aliases cannot turn output into a store-owned file.
-        if parent.canonicalize()? == store.dir.canonicalize()? {
+        // The output need not exist yet. Compare its existing parent with the store directory.
+        #[cfg(unix)]
+        let in_store = {
+            use std::os::unix::fs::MetadataExt;
+
+            // Path spelling cannot identify bind mounts or case-insensitive directory aliases.
+            let output_dir = std::fs::metadata(parent)?;
+            let store_dir = std::fs::metadata(&store.dir)?;
+            (output_dir.dev(), output_dir.ino()) == (store_dir.dev(), store_dir.ino())
+        };
+        #[cfg(not(unix))]
+        // On Windows canonicalize obtains the final path via a handle, resolving junctions
+        // and case differences. The stable standard library exposes no Windows file ID.
+        let in_store = parent.canonicalize()? == store.dir.canonicalize()?;
+        if in_store {
             return Err(StoreError::Invalid("output in store directory"));
         }
         let _lock = store.lock()?;
