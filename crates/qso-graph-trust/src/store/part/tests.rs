@@ -46,6 +46,7 @@ fn populate(store: &Store) {
         &Trust::with_roots(&[&corpus("pki/root.pem")]).expect("test root"),
     )
     .expect("backup");
+    store.import_signed_qsos(&backup).expect("record");
     for cert in &backup.certificates {
         let password = Zeroizing::new(corpus(&format!("keys/{}.password", cert.callsign)));
         store
@@ -104,6 +105,11 @@ fn complete_roundtrip_replaces_existing_content_and_preserves_signatures() {
         source.certificates().expect("certs").len()
     );
     assert_eq!(report.keys + 1, report.certificates);
+    assert_eq!(report.signed_qsos, 21);
+    assert_eq!(
+        target.signed_qsos().expect("record"),
+        source.signed_qsos().expect("record")
+    );
     assert_eq!(
         report.locations,
         source.locations().expect("locations").len()
@@ -263,10 +269,7 @@ fn every_certificate_key_and_location_is_validated_before_mutating() {
             "<field name=\"DXCC\">291</field>",
             "<field name=\"DXCC\">999</field>",
         ),
-        (
-            "<signed-qsos version=\"1\"/>",
-            "<signed-qsos version=\"2\"/>",
-        ),
+        ("<signed-qsos version=\"1\">", "<signed-qsos version=\"2\">"),
     ] {
         let text = std::str::from_utf8(xml).expect("XML");
         let index = text.find(good).expect("fixture field");
@@ -420,6 +423,7 @@ fn empty_store_roundtrips_and_missing_keys_cannot_export() {
             .restore_part(&bytes, &password, &trust())
             .expect("empty restore"),
         RestoreReport {
+            signed_qsos: 0,
             certificates: 0,
             keys: 0,
             locations: 0
@@ -437,4 +441,56 @@ fn empty_store_roundtrips_and_missing_keys_cannot_export() {
         store.export_part(&typed),
         Err(PartError::Export(ExportError::Password))
     ));
+}
+
+#[test]
+fn authenticated_invalid_or_oversized_signed_records_cannot_replace_destination() {
+    let folder = Folder::new();
+    let store = folder.store();
+    existing(&store);
+    let before = snapshot(&store);
+    let password = Password::generate().expect("password");
+    let empty = format::write(&Data::default()).expect("XML");
+    let station = "<s id=\"0\">GRIDSQUARE: FM02</s>";
+    let qso = "<q k=\"contact\" s=\"0\"/>";
+    let contents = [
+        qso.to_string(),
+        format!("{station}{}", qso.replace("contact", "")),
+        format!("{station}{}", qso.repeat(super::super::MAX_SIGNED_QSOS + 1)),
+    ];
+    for contents in contents {
+        let xml = empty.replace(
+            "<signed-qsos version=\"1\"/>",
+            &format!("<signed-qsos version=\"1\">{contents}</signed-qsos>"),
+        );
+        let mut plaintext = Zeroizing::new(Vec::with_capacity(MAGIC.len() + 4 + xml.len()));
+        plaintext.extend_from_slice(MAGIC);
+        plaintext.extend_from_slice(&(xml.len() as u32).to_be_bytes());
+        plaintext.extend_from_slice(xml.as_bytes());
+        let bytes = export::seal(LOTW_PART, &plaintext, &password).expect("authenticated plant");
+        assert!(matches!(
+            store.restore_part(&bytes, &password, &trust()),
+            Err(PartError::Invalid)
+        ));
+        assert_unchanged(&store, &before);
+    }
+    // The same authenticated format without planted contents is accepted.
+    let source = Folder::new();
+    let source = source.store();
+    source
+        .add_signed_qsos(&[crate::store::SignedQso {
+            key: "contact".into(),
+            station: "GRIDSQUARE: FM02".into(),
+            signed_at: Some(123),
+        }])
+        .expect("valid record");
+    let bytes = source.export_part(&password).expect("export");
+    let report = store
+        .restore_part(&bytes, &password, &trust())
+        .expect("valid restore");
+    assert_eq!(report.signed_qsos, 1);
+    assert_eq!(
+        store.signed_qsos().expect("restored"),
+        source.signed_qsos().expect("source")
+    );
 }

@@ -41,9 +41,10 @@ opening returns the same fixed error as a wrong password. Plaintext is bounded t
 ## Plaintext and replacement
 
 The private plaintext format is `QGT-STORE` (9 ASCII bytes), a version byte (`2`), then a u32 length
-and the complete versioned store XML. It includes the store's signed-QSO section (currently version
-1 and empty, as the store itself requires). Following that are u32-length-prefixed PKCS#8 DER keys,
-one per certificate whose XML record names a key, in certificate order, followed by one per pending
+and the complete versioned store XML. It includes the store's signed-QSO section (version 1; store
+root version 2 carries the bounded records defined in decision 0010). Following that are
+u32-length-prefixed PKCS#8 DER keys, one per certificate whose XML record names a key, in certificate
+order, followed by one per pending
 certificate request in request order. The XML includes each pending request's identity, SPKI and
 creation time. Version 2 adds these pending keys; version 1 plaintext is refused rather than silently
 losing pending requests. The outer authenticated encryption envelope remains version 1. No extra

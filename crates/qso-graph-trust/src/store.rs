@@ -12,6 +12,13 @@
 mod format;
 mod keys;
 mod part;
+mod signed;
+
+pub use signed::{
+    DuplicateChoice, MAX_SIGNED_KEY_LEN, MAX_SIGNED_QSOS, MAX_SIGNED_STATION_LEN,
+    MAX_SIGNED_STATIONS, PreviouslySigned, SignedLog, SignedQso, SigningPlan, SigningSelection,
+    duplicate_key,
+};
 
 pub use part::{PartError, RestoreReport};
 
@@ -31,7 +38,7 @@ use crate::station::StationLocation;
 use crate::tbk::BackedUpCertificate;
 
 /// The newest store format this build reads and writes.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 /// The largest store file accepted, before parsing or allocating its contents.
 pub const MAX_FILE_LEN: usize = 32 * 1024 * 1024;
 /// The most certificates in a store.
@@ -191,6 +198,7 @@ impl From<KeyError> for StoreError {
 
 #[derive(Default)]
 struct Data {
+    signed_qsos: std::collections::BTreeMap<String, SignedQso>,
     certificates: Vec<StoredCertificate>,
     locations: Vec<StoredLocation>,
     pending_requests: Vec<PendingRequest>,

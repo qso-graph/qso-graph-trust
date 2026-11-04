@@ -54,7 +54,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 |---|---|---|---|---|
 | Keys kept in the OS credential store | a file | | 0.7.0 | #172 |
 | Certificates and locations saved, in one format the command line and Desktop share | files | | 0.7.0 | #172 |
-| Record of QSOs already signed (the duplicate check) | `uploaded.db` | | 0.7.0 | #172 |
+| Record of QSOs already signed (the duplicate check) | `uploaded.db` | Library: bounded record in store.xml, exact TQSL keys, add/look up/list/wipe; CLI and Desktop integration remains | Part done | #172 |
 
 ### 1.3 Moving from TQSL
 
@@ -63,7 +63,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Export certificates, keys and the signed-QSO record to one file | File menu | A part of QSO Graph Desktop's one export file, beside Callsigns and Locations and Settings; all ticked exports everything. This part alone is encrypted, under a password QG Trust makes up. To move only some calls, delete the others first | 0.7.0 | #172, #174 |
 | Import it on any computer (macOS, Windows, Linux), keys into that computer's credential store | File: Restore | Part by part, onto a clean slate: what this computer holds is removed first, nothing merged | 0.7.0 | #172, #174 |
 | Read TQSL's `.tbk` file: certificates, keys, locations | File menu | Reads and checks it; saving what it holds waits on 1.2 | Part done | #172 |
-| Restore TQSL's record of QSOs already signed | File: Restore | Read; saving waits on 1.2 | Part done | #172 |
+| Restore TQSL's record of QSOs already signed | File: Restore | Library: merge a backup's signed QSOs without overwriting existing records; CLI and Desktop integration remains | Part done | #172 |
 | Use TQSL's settings that change what's signed: custom mode mappings, ignore seconds, ignore callsigns in the log, non-amateur calls, location details in the log | Preferences | Read from the `.tbk` file; not yet used when signing | Part done | #172 |
 | Say which of TQSL's settings were not taken | | Listed | Done | #172 |
 
@@ -96,8 +96,8 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 |---|---|---|---|---|
 | Sign only QSOs in a date range | dialog | `qg-trust -b`, `-e` | Done | #173 |
 | Confirm the station location before signing | dialog | | 0.7.0 | #174 |
-| QSOs signed before: new only, sign again, or cancel | dialog | Needs 1.2's record | 0.7.0 | #172 |
-| Show which QSOs were signed before | dialog | | 0.7.0 | #172 |
+| QSOs signed before: new only, sign again, or cancel | dialog | Library: inspect, select, sign and record after writing; CLI and Desktop integration remains | Part done | #172 |
+| Show which QSOs were signed before | dialog | Library: input indices, previous station and signing time when known; interface remains | Part done | #172 |
 | Report what was signed and what was refused | Status Log | `qg-trust` gives the count and names every QSO left out, with the reason; Desktop's view to come | Part done | #173, #174 |
 
 ### 1.7 New certificates
@@ -134,7 +134,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Rebuild the record of signed QSOs from LoTW | Help: Synchronize | Needs upload first | Later |
 | Ask LoTW whether a certificate is still good (by serial) | | Calls ARRL; needs a decision first | Later |
 | Take a new ARRL configuration (`config.xml`) without a new release | automatic | A release with new tables works meanwhile | Later |
-| Wipe the record of signed QSOs | `-w` | Rarely needed | Later |
+| Wipe the record of signed QSOs | `-w` | Library: `Store::wipe_signed_qsos`; CLI integration remains | Part done |
 | Create a new ADIF file (QSO entry) | Create New ADIF file | A logger's job | Later |
 | Edit an ADIF file | Edit existing ADIF file | A logger's job | Later |
 

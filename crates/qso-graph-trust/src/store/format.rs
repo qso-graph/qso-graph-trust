@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use base64ct::{Base64, Encoding};
 use x509_cert::der::Decode;
@@ -13,7 +13,9 @@ use crate::xml::{self, Element};
 
 use super::{
     Data, MAX_CERTIFICATES, MAX_FILE_LEN, MAX_LOCATIONS, MAX_NAME_LEN, MAX_PENDING_REQUESTS,
-    PendingRequest, StoreError, StoredCertificate, StoredLocation, VERSION, keys,
+    MAX_SIGNED_KEY_LEN, MAX_SIGNED_QSOS, MAX_SIGNED_STATION_LEN, MAX_SIGNED_STATIONS,
+    PendingRequest, SignedQso, StoreError, StoredCertificate, StoredLocation, VERSION, keys,
+    signed,
 };
 
 pub(super) fn read(text: &str) -> Result<Data, StoreError> {
@@ -37,11 +39,16 @@ pub(super) fn read(text: &str) -> Result<Data, StoreError> {
     // Version readers are separate: a future reader must not change what version 1 meant.
     match version {
         1 => read_v1(&root),
+        2 => read_sections(&root, false),
         _ => Err(StoreError::Invalid("unsupported version")),
     }
 }
 
 fn read_v1(root: &Element<'_>) -> Result<Data, StoreError> {
+    read_sections(root, true)
+}
+
+fn read_sections(root: &Element<'_>, legacy: bool) -> Result<Data, StoreError> {
     container(root, &["version"])?;
     if root.children.iter().any(|c| {
         ![
@@ -60,7 +67,7 @@ fn read_v1(root: &Element<'_>) -> Result<Data, StoreError> {
     container(certificates, &[])?;
     container(locations, &[])?;
     container(signed, &["version"])?;
-    if attribute(signed, "version", 10)? != "1" || !signed.children.is_empty() {
+    if attribute(signed, "version", 10)? != "1" || (legacy && !signed.children.is_empty()) {
         return Err(StoreError::Invalid(
             "signed-QSO section version or contents",
         ));
@@ -71,7 +78,10 @@ fn read_v1(root: &Element<'_>) -> Result<Data, StoreError> {
     if locations.children.len() > MAX_LOCATIONS {
         return Err(StoreError::Limit("locations"));
     }
-    let mut data = Data::default();
+    let mut data = Data {
+        signed_qsos: read_signed(signed)?,
+        ..Data::default()
+    };
     let mut ids = BTreeSet::new();
     let mut key_names = BTreeSet::new();
     let mut ders = BTreeSet::new();
@@ -281,8 +291,9 @@ fn escape(out: &mut String, value: &str) -> Result<(), StoreError> {
 }
 
 pub(super) fn write(data: &Data) -> Result<String, StoreError> {
+    signed::validate(&data.signed_qsos)?;
     let mut out = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<qgt-store version=\"1\">\n  <certificates>\n",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<qgt-store version=\"2\">\n  <certificates>\n",
     );
     for c in &data.certificates {
         out.push_str("    <certificate id=\"");
@@ -309,7 +320,8 @@ pub(super) fn write(data: &Data) -> Result<String, StoreError> {
         }
         out.push_str("    </location>\n");
     }
-    out.push_str("  </locations>\n  <signed-qsos version=\"1\"/>\n");
+    out.push_str("  </locations>\n");
+    write_signed(&mut out, &data.signed_qsos)?;
     if !data.pending_requests.is_empty() {
         out.push_str("  <pending-requests>\n");
         for r in &data.pending_requests {
@@ -338,4 +350,126 @@ pub(super) fn write(data: &Data) -> Result<String, StoreError> {
         return Err(StoreError::Limit("file bytes"));
     }
     Ok(out)
+}
+
+// Dictionary encoding avoids repeating station descriptions for every contact. IDs are local to
+// this file; records retain their description when a named station is renamed or deleted.
+fn read_signed(section: &Element<'_>) -> Result<BTreeMap<String, SignedQso>, StoreError> {
+    if section.children.len() > MAX_SIGNED_QSOS + MAX_SIGNED_STATIONS {
+        return Err(StoreError::Limit("signed QSO elements"));
+    }
+    if section.children.iter().filter(|e| e.name == "q").count() > MAX_SIGNED_QSOS {
+        return Err(StoreError::Limit("signed QSOs"));
+    }
+    if section.children.iter().filter(|e| e.name == "s").count() > MAX_SIGNED_STATIONS {
+        return Err(StoreError::Limit("signed stations"));
+    }
+    let mut stations = BTreeMap::new();
+    let mut descriptions = BTreeSet::new();
+    for entry in &section.children {
+        if entry.name == "s" {
+            attributes(entry, &["id"])?;
+            if !entry.children.is_empty() {
+                return Err(StoreError::Invalid("signed station element"));
+            }
+            let id = station_id(entry, "id")?;
+            let value = entry.text();
+            if value.len() > MAX_SIGNED_STATION_LEN {
+                return Err(StoreError::Limit("signed station bytes"));
+            }
+            if stations.insert(id, value.to_string()).is_some()
+                || !descriptions.insert(value.to_string())
+            {
+                return Err(StoreError::Invalid("duplicate signed station"));
+            }
+            if stations.len() > MAX_SIGNED_STATIONS {
+                return Err(StoreError::Limit("signed stations"));
+            }
+        } else if entry.name != "q" {
+            return Err(StoreError::Invalid("signed QSO element"));
+        }
+    }
+    let mut records = BTreeMap::new();
+    for entry in section.children.iter().filter(|e| e.name == "q") {
+        container(entry, &["k", "s", "t"])?;
+        if !entry.children.is_empty() {
+            return Err(StoreError::Invalid("signed QSO children"));
+        }
+        let key = attribute(entry, "k", MAX_SIGNED_KEY_LEN)?;
+        let station = stations
+            .get(&station_id(entry, "s")?)
+            .ok_or(StoreError::Invalid("signed station reference"))?
+            .clone();
+        let signed_at = if entry.attribute("t").is_some() {
+            let value = attribute(entry, "t", 20)?;
+            if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+                return Err(StoreError::Invalid("signed QSO time"));
+            }
+            Some(
+                value
+                    .parse()
+                    .map_err(|_| StoreError::Invalid("signed QSO time"))?,
+            )
+        } else {
+            None
+        };
+        let record = SignedQso {
+            key: key.clone(),
+            station,
+            signed_at,
+        };
+        signed::check_record(&record)?;
+        if records.insert(key, record).is_some() {
+            return Err(StoreError::Invalid("duplicate signed QSO"));
+        }
+        if records.len() > MAX_SIGNED_QSOS {
+            return Err(StoreError::Limit("signed QSOs"));
+        }
+    }
+    Ok(records)
+}
+
+fn station_id(entry: &Element<'_>, name: &str) -> Result<usize, StoreError> {
+    let value = attribute(entry, name, 4)?;
+    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(StoreError::Invalid("signed station identifier"));
+    }
+    value
+        .parse::<usize>()
+        .ok()
+        .filter(|&id| id < MAX_SIGNED_STATIONS)
+        .ok_or(StoreError::Invalid("signed station identifier"))
+}
+
+fn write_signed(out: &mut String, records: &BTreeMap<String, SignedQso>) -> Result<(), StoreError> {
+    if records.is_empty() {
+        out.push_str("  <signed-qsos version=\"1\"/>\n");
+        return Ok(());
+    }
+    out.push_str("  <signed-qsos version=\"1\">\n");
+    let stations: BTreeSet<&str> = records.values().map(|q| q.station.as_str()).collect();
+    let stations: BTreeMap<&str, usize> = stations
+        .into_iter()
+        .enumerate()
+        .map(|(i, s)| (s, i))
+        .collect();
+    for (station, id) in &stations {
+        out.push_str(&format!("    <s id=\"{id}\">"));
+        escape(out, station)?;
+        out.push_str("</s>\n");
+    }
+    for record in records.values() {
+        out.push_str("    <q k=\"");
+        escape(out, &record.key)?;
+        out.push_str(&format!("\" s=\"{}\"", stations[record.station.as_str()]));
+        if let Some(at) = record.signed_at {
+            out.push_str(&format!(" t=\"{at}\""));
+        }
+        out.push_str("/>\n");
+        if out.len() > MAX_FILE_LEN {
+            return Err(StoreError::Limit("file bytes"));
+        }
+    }
+    out.push_str("  </signed-qsos>\n");
+    Ok(())
 }

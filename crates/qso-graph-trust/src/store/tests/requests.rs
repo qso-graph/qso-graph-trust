@@ -82,7 +82,7 @@ fn pending_metadata_and_custody_survive_request_drop_and_reopen() {
     assert_eq!(p.public_key_der, request.public_key_der());
     assert!(keys::valid_name(&p.key_name, "key:"));
     let xml = fs::read_to_string(folder.0.join("store.xml")).expect("file");
-    assert!(xml.contains("<qgt-store version=\"1\">"));
+    assert!(xml.contains("<qgt-store version=\"2\">"));
     assert!(xml.contains(&Base64::encode_string(request.public_key_der())));
     assert!(!xml.contains(&Base64::encode_string(&request.private)));
     assert!(!xml.contains("PRIVATE KEY"));

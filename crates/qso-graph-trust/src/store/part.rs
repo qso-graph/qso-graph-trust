@@ -19,6 +19,8 @@ const MAGIC: &[u8] = b"QGT-STORE\x02";
 /// A restore result, containing counts only, never credentials.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RestoreReport {
+    /// Signed-QSO records installed.
+    pub signed_qsos: usize,
     /// Certificates installed, including public-only ones.
     pub certificates: usize,
     /// Private keys installed, including pending-request keys.
@@ -127,6 +129,7 @@ impl Store {
         let opened = export::open(LOTW_PART, bytes, password)?;
         let (mut data, secrets) = decode(&opened, trust)?;
         let report = RestoreReport {
+            signed_qsos: data.signed_qsos.len(),
             certificates: data.certificates.len(),
             keys: secrets.len(),
             locations: data.locations.len(),

@@ -80,7 +80,10 @@ orphans. Response attachment matches SPKI, call and DXCC, checks the private key
 replaces the pending record with a certificate under one lock and one file replacement. Abandonment
 follows deletion's file-first ordering. Applications verify response issuer trust before attachment.
 
-An empty store is valid (a folder without `store.xml` is also empty until the first mutation):
+Decision [0010](0010-signed-qso-record.md) extends the root to version 2 for nonempty signed-QSO
+records. Version 1 below remains readable with its original empty-section rule.
+
+An empty version-1 store is valid (a folder without `store.xml` is also empty until the first mutation):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>

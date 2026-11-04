@@ -7,6 +7,11 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Library signed-QSO records with exact TQSL keys, backup merging, duplicate inspection and the
+  new-only/sign-again/cancel choices. Selected QSOs are recorded after their `.tq8` is written;
+  encrypted store exports carry the record. Store XML version 2 reads version 1 and keeps up to
+  100,000 records within the 32 MiB file limit. CLI and Desktop integration remains.
+
 - Library certificate requests: new, signed additional and renewal `.tq5` files, with TQSL 2.8.7's
   CSR subject, attributes, signatures and field order; DXCC, date and bounded text validation.
   New RSA-1024 keys pass through an opaque request into the library-owned store, with pending
