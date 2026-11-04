@@ -1052,7 +1052,12 @@ pub fn no_network(meta: &Value) -> Vec<String> {
                 found.extend(source_tokens_in(dir, &skip, network_tokens));
                 let allowed = format!(
                     "{} uses Secret Service transport API",
-                    dir.join("src/store/keys/os.rs").display()
+                    // One component at a time, so the path prints as the scan reports it on Windows.
+                    dir.join("src")
+                        .join("store")
+                        .join("keys")
+                        .join("os.rs")
+                        .display()
                 );
                 found.extend(
                     source_tokens_in(dir, &skip, secret_service_tokens)
