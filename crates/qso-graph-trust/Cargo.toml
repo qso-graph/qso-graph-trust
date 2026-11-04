@@ -47,3 +47,16 @@ zeroizing-alloc = { version = "=0.1.1", default-features = false }
 
 [lints]
 workspace = true
+
+# The OS credential store: the same crate and version as QSO Graph Desktop's credential core
+# (packages/callsign-core), so both use one implementation of the same store.
+[dependencies.keyring]
+version = "=4.2.0"
+
+# Metadata-only presence and enumeration, using Desktop's platform APIs. Secrets still go
+# through keyring's default backends; these are already in its locked dependency tree.
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "=3.7.0"
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+secret-service = { version = "=5.2.0", features = ["crypto-rust"] }

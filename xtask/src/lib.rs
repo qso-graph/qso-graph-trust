@@ -52,6 +52,24 @@ pub const SHIPPED: &[&str] = &[
 /// everything they depend on still is.
 pub const CRYPTO_PROVIDERS: &[&str] = &["aws-lc-sys", "aws-lc-rs"];
 
+/// A separate pure-Rust provider exception, NOT a native-code exemption: Secret Service's
+/// Desktop-default crypto-rust session transport only (DH, HKDF/SHA-256, AES-CBC).
+/// Its sources remain scanned. No signing, certificate, TLS or other use is permitted.
+pub const SECRET_SERVICE_PROVIDER: (&str, &str) = ("secret-service", "5.2.0");
+
+/// Exact incoming edges for that provider's algorithms and DH arithmetic. These versions cannot
+/// be used directly by a signer, certificate handler, TLS stack or another shipped crate.
+const SECRET_SERVICE_CRYPTO_EDGES: &[(&str, &str, &str, &str)] = &[
+    ("secret-service", "5.2.0", "aes", "0.9.4"),
+    ("secret-service", "5.2.0", "cbc", "0.2.1"),
+    ("secret-service", "5.2.0", "hkdf", "0.13.0"),
+    ("secret-service", "5.2.0", "sha2", "0.11.1"),
+    ("secret-service", "5.2.0", "num", "0.4.3"),
+    ("hkdf", "0.13.0", "hmac", "0.13.0"),
+    ("num", "0.4.3", "num-bigint", "0.4.8"),
+    ("num-rational", "0.4.2", "num-bigint", "0.4.8"),
+];
+
 /// The one workspace crate allowed unsafe code, and the only one that may depend on a
 /// [`CRYPTO_PROVIDERS`] crate: QG Trust's binding to AWS-LC. Instead of the workspace's lints it must
 /// carry exactly [`BINDING_LINTS`] (docs/decisions/0006).
@@ -191,6 +209,16 @@ fn unreviewed_reviewing(
         let name = pkg.and_then(|p| p["name"].as_str()).unwrap_or(id);
         let version = pkg.and_then(|p| p["version"].as_str()).unwrap_or("?");
         let is_reviewed = list.iter().any(|(n, v, _)| *n == name && *v == version);
+        if name == SECRET_SERVICE_PROVIDER.0 {
+            let features = nodes.get(id).and_then(|n| n["features"].as_array());
+            if version != SECRET_SERVICE_PROVIDER.1
+                || !features.is_some_and(|f| f.len() == 1 && f[0] == "crypto-rust")
+            {
+                problems.push(format!(
+                    "{name} {version}: only 5.2.0 crypto-rust session transport is allowed"
+                ));
+            }
+        }
         // What a consumer of the published crate builds, not only what this
         // workspace builds: a dependency naming both a path and a version builds
         // the path here but the registry's crate of that name once published, and
@@ -252,6 +280,42 @@ fn unreviewed_reviewing(
                 .iter()
                 .any(|k| k["kind"].is_null() || k["kind"] == "build");
             if shipped_kind && let Some(d) = dep["pkg"].as_str() {
+                if let Some(child) = packages.get(d) {
+                    let child_name = child["name"].as_str().unwrap_or("?");
+                    let child_version = child["version"].as_str().unwrap_or("?");
+                    if child_name == SECRET_SERVICE_PROVIDER.0 {
+                        let approved_caller = name == "qso-graph-trust"
+                            || (name == "zbus-secret-service-keyring-store" && version == "1.0.1");
+                        if !approved_caller {
+                            problems.push(format!("{name} {version} uses Secret Service outside the credential backend"));
+                        }
+                        if workspace.contains(id)
+                            && pkg.is_some_and(|p| {
+                                p["dependencies"].as_array().into_iter().flatten().any(|d| {
+                                    d["name"] == "secret-service" && !d["rename"].is_null()
+                                })
+                            })
+                        {
+                            problems.push(format!(
+                                "{name} renames secret-service outside the checked transport API"
+                            ));
+                        }
+                    }
+                    let restricted = SECRET_SERVICE_CRYPTO_EDGES.iter().any(|(n, v, cn, cv)| {
+                        (*n == name && *v == version && *cn == child_name)
+                            || (*cn == child_name && *cv == child_version)
+                    });
+                    if restricted
+                        && !SECRET_SERVICE_CRYPTO_EDGES.contains(&(
+                            name,
+                            version,
+                            child_name,
+                            child_version,
+                        ))
+                    {
+                        problems.push(format!("{name} {version} uses {child_name} {child_version} outside Secret Service session transport"));
+                    }
+                }
                 queue.push_back(d);
             }
         }
@@ -280,9 +344,14 @@ const NATIVE_BUILD: &[&str] = &[
 /// and ship no C, C++ or assembly. A named category: allowed, and reviewed by exact version
 /// through cargo-vet like every outside crate (docs/decisions/0002).
 pub const OS_BINDINGS: &[&str] = &[
+    "core-foundation",
     "core-foundation-sys",
+    "errno",
     "getrandom",
     "libc",
+    "linux-raw-sys",
+    "rustix",
+    "security-framework",
     "security-framework-sys",
     "windows-link",
     "windows-sys",
@@ -296,6 +365,38 @@ pub const OS_BINDINGS: &[&str] = &[
     "windows_x86_64_gnullvm",
     "windows_x86_64_msvc",
 ];
+
+/// Foreign declarations read individually in crates that are not OS bindings. Only this
+/// finding in this file at this exact version is allowed; native links and source still fail.
+/// These crates remain subject to cargo-vet, like every outside crate.
+pub const FOREIGN_DECLARATIONS: &[(&str, &str, &str, &str)] = &[
+    (
+        "zbus",
+        "5.19.0",
+        "src/fdo/peer.rs",
+        "macOS gethostuuid, from the OS, supplies the D-Bus machine identifier",
+    ),
+    (
+        "uuid",
+        "1.29.0",
+        "src/rng.rs",
+        "wasm-bindgen imports JavaScript crypto.getRandomValues; not built on shipping targets",
+    ),
+    (
+        "uuid",
+        "1.29.0",
+        "src/timestamp.rs",
+        "wasm-bindgen imports JavaScript Date.now; not built on shipping targets",
+    ),
+];
+
+fn reviewed_foreign_declaration(name: &str, version: &str, finding: &str) -> bool {
+    FOREIGN_DECLARATIONS.iter().any(|(n, v, file, _)| {
+        name == *n
+            && version == *v
+            && finding.strip_suffix(" declares foreign functions") == Some(*file)
+    })
+}
 
 /// The platforms QGT ships for. The no-C check reads each one's dependency tree,
 /// and no other: code for platforms QGT never builds is not shipped.
@@ -477,6 +578,9 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
             };
             for found in scanned {
                 if outside && found.ends_with(" holds assembly") {
+                    continue;
+                }
+                if outside && reviewed_foreign_declaration(&name, &version, &found) {
                     continue;
                 }
                 problems.push(format!("{name} {version}: {found}"));
@@ -946,6 +1050,15 @@ pub fn no_network(meta: &Value) -> Vec<String> {
         {
             Some(dir) => {
                 found.extend(source_tokens_in(dir, &skip, network_tokens));
+                let allowed = format!(
+                    "{} uses Secret Service transport API",
+                    dir.join("src/store/keys/os.rs").display()
+                );
+                found.extend(
+                    source_tokens_in(dir, &skip, secret_service_tokens)
+                        .into_iter()
+                        .filter(|finding| !(name == "qso-graph-trust" && *finding == allowed)),
+                );
                 if name == UNSAFE_BINDING {
                     found.extend(source_tokens_in(dir, &skip, binding_tokens));
                 }
@@ -954,6 +1067,64 @@ pub fn no_network(meta: &Value) -> Vec<String> {
         }
     }
     found.sort();
+    found
+}
+
+/// Only the credential backend may use Secret Service, and only its connection, encryption-mode
+/// and error types. Public session encrypt/decrypt functions, globs and namespace aliases cannot
+/// turn the transport exception into a signing/certificate primitive. Scan cfg-disabled code too.
+pub fn secret_service_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
+    use proc_macro2::TokenTree;
+    fn approved(tree: &syn::UseTree, prefix: &str) -> bool {
+        match tree {
+            syn::UseTree::Path(p) => approved(
+                &p.tree,
+                &format!("{prefix}{}::", p.ident.to_string().trim_start_matches("r#")),
+            ),
+            syn::UseTree::Group(g) => g.items.iter().all(|t| approved(t, prefix)),
+            syn::UseTree::Name(n) => ["Error", "EncryptionType", "blocking::SecretService"]
+                .contains(
+                    &format!("{prefix}{}", n.ident.to_string().trim_start_matches("r#")).as_str(),
+                ),
+            syn::UseTree::Rename(n) => ["Error", "EncryptionType", "blocking::SecretService"]
+                .contains(
+                    &format!("{prefix}{}", n.ident.to_string().trim_start_matches("r#")).as_str(),
+                ),
+            _ => false,
+        }
+    }
+    let trees: Vec<_> = tokens.into_iter().collect();
+    let ident = |i: usize, name: &str| matches!(trees.get(i), Some(TokenTree::Ident(id)) if id.to_string().trim_start_matches("r#") == name);
+    let colon = |i: usize| matches!(trees.get(i), Some(TokenTree::Punct(p)) if p.as_char() == ':');
+    let mut found = Vec::new();
+    for (i, tree) in trees.iter().enumerate() {
+        if ident(i, "secret_service") {
+            found.push("uses Secret Service transport API");
+            let permitted = colon(i + 1)
+                && colon(i + 2)
+                && match trees.get(i + 3) {
+                    Some(TokenTree::Group(g)) => {
+                        syn::parse2::<syn::UseTree>(TokenTree::Group(g.clone()).into())
+                            .is_ok_and(|t| approved(&t, ""))
+                    }
+                    Some(TokenTree::Ident(_)) => {
+                        ident(i + 3, "Error")
+                            || ident(i + 3, "EncryptionType")
+                            || (ident(i + 3, "blocking")
+                                && colon(i + 4)
+                                && colon(i + 5)
+                                && ident(i + 6, "SecretService"))
+                    }
+                    _ => false,
+                };
+            if !permitted {
+                found.push("uses Secret Service outside the permitted transport API");
+            }
+        }
+        if let TokenTree::Group(g) = tree {
+            found.extend(secret_service_tokens(g.stream()));
+        }
+    }
     found
 }
 
@@ -2469,6 +2640,170 @@ mod tests {
             no_c(&g, PROTECTED),
             vec!["not-an-os-binding links the native library c"]
         );
+    }
+
+    #[test]
+    fn secret_service_crypto_is_limited_to_the_reviewed_session_edges() {
+        let mut g = graph(json!(null));
+        g["packages"][1]["name"] = json!("secret-service");
+        g["packages"][1]["version"] = json!("5.2.0");
+        g["packages"][2]["name"] = json!("aes");
+        g["packages"][2]["version"] = json!("0.9.4");
+        g["resolve"]["nodes"][1]["features"] = json!(["crypto-rust"]);
+        assert!(unreviewed_in(&g, PROTECTED).is_empty());
+        // PLANTED: the transport exception grants no native-link privilege.
+        g["packages"][1]["links"] = json!("planted_native");
+        assert!(
+            no_c(&g, PROTECTED)
+                .iter()
+                .any(|p| p.contains("links the native library planted_native"))
+        );
+        g["packages"][1]["links"] = Value::Null;
+        assert!(no_c(&g, PROTECTED).is_empty());
+        // PLANTED: a signer/certificate handler cannot borrow the algorithm exception.
+        g["packages"][1]["name"] = json!("certificate-handler");
+        assert!(
+            unreviewed_in(&g, PROTECTED)
+                .iter()
+                .any(|p| p.contains("outside Secret Service session transport"))
+        );
+        g["packages"][1]["name"] = json!("secret-service");
+        assert!(unreviewed_in(&g, PROTECTED).is_empty());
+        // PLANTED: direct use, including from the CLI/TLS path, remains forbidden.
+        let edge = json!({"pkg": "cc", "dep_kinds": [{"kind": null}]});
+        g["resolve"]["nodes"][0]["deps"]
+            .as_array_mut()
+            .expect("deps")
+            .push(edge);
+        assert!(
+            unreviewed_in(&g, PROTECTED)
+                .iter()
+                .any(|p| p.contains("qso-graph-trust 0.1.0 uses aes"))
+        );
+        g["packages"][0]["name"] = json!("qso-graph-trust-cli");
+        assert!(
+            unreviewed_in(&g, &["qso-graph-trust-cli"])
+                .iter()
+                .any(|p| p.contains("outside Secret Service session transport"))
+        );
+        g["packages"][0]["name"] = json!("qso-graph-trust");
+        g["resolve"]["nodes"][0]["deps"]
+            .as_array_mut()
+            .expect("deps")
+            .pop();
+        assert!(unreviewed_in(&g, PROTECTED).is_empty());
+        // PLANTED: transport/algorithm upgrades and another crypto feature need new review.
+        for (package, version) in [(1, "5.3.0"), (2, "0.9.5")] {
+            let original = g["packages"][package]["version"].clone();
+            g["packages"][package]["version"] = json!(version);
+            assert!(!unreviewed_in(&g, PROTECTED).is_empty());
+            g["packages"][package]["version"] = original;
+            assert!(unreviewed_in(&g, PROTECTED).is_empty());
+        }
+        g["resolve"]["nodes"][1]["features"] = json!(["crypto-rust", "crypto-openssl"]);
+        assert!(!unreviewed_in(&g, PROTECTED).is_empty());
+        g["resolve"]["nodes"][1]["features"] = json!(["crypto-rust"]);
+        assert!(unreviewed_in(&g, PROTECTED).is_empty());
+    }
+
+    #[test]
+    fn secret_service_api_is_only_available_to_the_credential_backend() {
+        let dir = fresh_temp_dir("qgt-session-transport-policy").expect("temporary directory");
+        let backend = dir.join("src/store/keys/os.rs");
+        std::fs::create_dir_all(backend.parent().expect("parent")).expect("mkdir");
+        let approved = "use secret_service::{EncryptionType, blocking::SecretService};";
+        std::fs::write(&backend, approved).expect("approved transport import");
+        let mut g = graph(json!("dev"));
+        g["packages"][0]["manifest_path"] = json!(dir.join("Cargo.toml"));
+        assert!(no_network(&g).is_empty());
+        // PLANTED: even the connection API cannot be used from signing/certificate code.
+        let signer = dir.join("src/signing.rs");
+        std::fs::write(&signer, approved).expect("plant another use");
+        assert!(
+            no_network(&g)
+                .iter()
+                .any(|p| p.contains("signing.rs uses Secret Service"))
+        );
+        std::fs::remove_file(signer).expect("remove plant");
+        assert!(no_network(&g).is_empty());
+        for planted in [
+            "use secret_service::session::encrypt;",
+            "#[cfg(any())] fn sign() { secret_service::session::decrypt(); }",
+            "use secret_service as crypto;",
+            "use secret_service::*;",
+            "use secret_service::{blocking as b};",
+            "extern crate secret_service as transport;",
+        ] {
+            std::fs::write(&backend, planted).expect("plant crypto API");
+            assert!(
+                no_network(&g)
+                    .iter()
+                    .any(|p| p.contains("outside the permitted transport API")),
+                "missed {planted}"
+            );
+            std::fs::write(&backend, approved).expect("remove plant");
+            assert!(no_network(&g).is_empty());
+        }
+        std::fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn foreign_declaration_exceptions_require_the_exact_crate_version_and_file() {
+        for (name, version, file, _) in FOREIGN_DECLARATIONS {
+            assert!(!OS_BINDINGS.contains(name));
+            let dir = fresh_temp_dir("qgt-foreign-declaration").expect("fresh directory");
+            let path = dir.join(file);
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+            std::fs::write(&path, "extern \"C\" { fn planted(); }").expect("plant");
+            let mut g = graph(json!("dev"));
+            g["packages"][1]["name"] = json!(name);
+            g["packages"][1]["version"] = json!(version);
+            g["packages"][1]["manifest_path"] = json!(dir.join("Cargo.toml"));
+            assert!(no_c(&g, PROTECTED).is_empty());
+
+            // PLANTED: the same file in another version or crate must fail, and passes again
+            // only when the reviewed identity is restored.
+            for (field, value, restore) in [
+                ("version", "99.0.0", *version),
+                ("name", "planted-unreviewed", *name),
+            ] {
+                g["packages"][1][field] = json!(value);
+                assert_eq!(no_c(&g, PROTECTED).len(), 1);
+                g["packages"][1][field] = json!(restore);
+                assert!(no_c(&g, PROTECTED).is_empty());
+            }
+
+            // PLANTED: a new file in the allowed crate and version is still scanned.
+            let extra = dir.join("src/planted.rs");
+            std::fs::copy(&path, &extra).expect("plant another file");
+            assert_eq!(
+                no_c(&g, PROTECTED),
+                [format!(
+                    "{name} {version}: src/planted.rs declares foreign functions"
+                )]
+            );
+            std::fs::remove_file(extra).expect("remove plant");
+            assert!(no_c(&g, PROTECTED).is_empty());
+
+            // PLANTED: even in the reviewed file a new native link is refused.
+            std::fs::write(
+                &path,
+                "#[link(name = \"planted\")] extern \"C\" { fn planted(); }",
+            )
+            .expect("plant link");
+            assert_eq!(
+                no_c(&g, PROTECTED),
+                [format!("{name} {version}: {file} has a #[link] attribute")]
+            );
+            std::fs::write(&path, "extern \"C\" { fn planted(); }").expect("remove link");
+            assert!(no_c(&g, PROTECTED).is_empty());
+            let native = dir.join("src/planted.c");
+            std::fs::write(&native, "void planted(void) {}").expect("plant native source");
+            assert_eq!(no_c(&g, PROTECTED).len(), 1);
+            std::fs::remove_file(native).expect("remove native source");
+            assert!(no_c(&g, PROTECTED).is_empty());
+            std::fs::remove_dir_all(dir).expect("cleanup");
+        }
     }
 
     /// The probe compiles beside whatever a valid library declares, so only the

@@ -26,6 +26,8 @@ removed (ARRL's [certificate security](https://lotw.arrl.org/lotw-help/certifica
   `aws-lc-rs` (QSO Graph Desktop's) for TLS and every operation it offers, certificate signature
   checks included, and AWS-LC, through QG Trust's one binding, for LoTW's RSA-SHA-1 signature, which
   aws-lc-rs does not sign (decision 0006); in QG Trust both are reached only through the binding;
+  RustCrypto is allowed only inside `secret-service`'s Desktop-default `crypto-rust` D-Bus session
+  transport (DH, HKDF/SHA-256 and AES-CBC), never for signing, certificates, TLS or other uses;
   RustCrypto's `rsa` is a test tool only, never shipped. The library never signs for a remote
   caller (decision 0002, amended 2026-11-03). *Test: `cargo xtask policy` and `cargo deny`.*
 - **Every outside crate a shipped crate uses is reviewed, or listed as not reviewed yet,** by exact

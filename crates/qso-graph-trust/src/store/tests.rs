@@ -16,6 +16,9 @@ use crate::tbk;
 // Only crate-internal tests retain backend handles, to observe ordering and plant lost keys.
 // Public callers select a backend kind and cannot keep an object that reads its secrets.
 impl<K: KeyStore> KeyStore for Arc<K> {
+    fn orphan_detection(&self) -> OrphanDetection {
+        self.as_ref().orphan_detection()
+    }
     fn put(&self, name: &str, der: &[u8]) -> Result<(), KeyStoreError> {
         self.as_ref().put(name, der)
     }
@@ -620,6 +623,7 @@ fn open_reports_missing_and_orphaned_keys_without_reading_or_removing_secrets() 
     assert_eq!(
         report,
         OpenReport {
+            orphan_detection: OrphanDetection::Available,
             missing_request_keys: Vec::new(),
             missing_keys: vec![id.clone()],
             orphaned_keys: vec![orphan.clone()]
@@ -940,4 +944,5 @@ fn platform_default_folder_uses_the_shared_service_path() {
 mod requests;
 
 mod import;
+mod os;
 mod signed;
