@@ -9,6 +9,9 @@ has, so every feature is placed in one of three lists, in priority order:
 2. **Nice to have:** worth doing later, not needed for that choice.
 3. **Won't add:** left out on purpose, with the reason.
 
+**Published:** `0.1.0-beta.4` on crates.io: the library (`qso-graph-trust`), its binding
+(`qso-graph-trust-awslc`) and the command line (`qso-graph-trust-cli`, the `qg-trust` command).
+
 This is the library's list. The command line (`qg-trust`) and QSO Graph Desktop are built on the
 library, so their lists follow from it: the command line is at the end, and Desktop's screens are
 in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
@@ -26,8 +29,8 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | List | Features | Done | Part done | To do |
 |---|---|---|---|---|
-| Needed for 0.7.0 | 43 | 15 | 4 | 24 |
-| Nice to have | 15 | | | 15 |
+| Needed for 0.7.0 | 43 | 16 | 5 | 22 |
+| Nice to have | 15 |  |  | 15 |
 | Won't add | 15 | | | |
 
 ## 1. Needed for 0.7.0
@@ -91,11 +94,11 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| Sign only QSOs in a date range | dialog | | 0.7.0 | #172 |
+| Sign only QSOs in a date range | dialog | `qg-trust -b`, `-e` | Done | #173 |
 | Confirm the station location before signing | dialog | | 0.7.0 | #174 |
 | QSOs signed before: new only, sign again, or cancel | dialog | Needs 1.2's record | 0.7.0 | #172 |
 | Show which QSOs were signed before | dialog | | 0.7.0 | #172 |
-| Report what was signed and what was refused | Status Log | | 0.7.0 | #172 |
+| Report what was signed and what was refused | Status Log | `qg-trust` gives the count and names every QSO left out, with the reason; Desktop's view to come | Part done | #173, #174 |
 
 ### 1.7 New certificates
 
