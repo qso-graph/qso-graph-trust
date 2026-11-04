@@ -29,10 +29,13 @@ pub const MAX_TOTAL_FIELDS: usize = 20 * MAX_RECORDS;
 /// One field: its name as written, its type letter if it has one, and its value's bytes, wiped
 /// when dropped.
 #[derive(Clone, PartialEq, Eq)]
-pub struct Field {
-    pub name: String,
-    pub kind: Option<String>,
-    pub value: Zeroizing<Vec<u8>>,
+pub(crate) struct Field {
+    /// The field's name, as written.
+    pub(crate) name: String,
+    /// The field's type letter, if it has one.
+    pub(crate) kind: Option<String>,
+    /// The value's bytes, wiped when dropped.
+    pub(crate) value: Zeroizing<Vec<u8>>,
 }
 
 impl fmt::Debug for Field {
@@ -49,11 +52,13 @@ impl fmt::Debug for Field {
 /// One record: its fields in the order written.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Record {
-    pub fields: Vec<Field>,
+    /// The fields, in the order written.
+    pub(crate) fields: Vec<Field>,
 }
 
 impl Record {
     /// The first field with this name, compared without regard to case, as tqsllib compares them.
+    /// The value is returned as the input gave it: parse logs with this, never key material.
     pub fn get(&self, name: &str) -> Option<&[u8]> {
         self.fields
             .iter()
@@ -71,16 +76,31 @@ impl Record {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RecordError {
     /// A `<` that does not open a well-formed field, at this byte offset.
-    BadField { offset: usize },
+    BadField {
+        /// Where, in bytes from the start.
+        offset: usize,
+    },
     /// A field whose stated length runs past the end of the input.
-    Truncated { offset: usize },
+    Truncated {
+        /// Where, in bytes from the start.
+        offset: usize,
+    },
     /// A value longer than [`MAX_VALUE_LEN`].
-    TooLong { offset: usize },
+    TooLong {
+        /// Where, in bytes from the start.
+        offset: usize,
+    },
     /// A record with more than [`MAX_FIELDS`] fields, or input with more than
     /// [`MAX_TOTAL_FIELDS`] in all.
-    TooManyFields { offset: usize },
+    TooManyFields {
+        /// Where, in bytes from the start.
+        offset: usize,
+    },
     /// More than [`MAX_RECORDS`] records.
-    TooManyRecords { offset: usize },
+    TooManyRecords {
+        /// Where, in bytes from the start.
+        offset: usize,
+    },
     /// Fields after the last `<eor>`: a record that never ended.
     Unterminated,
 }

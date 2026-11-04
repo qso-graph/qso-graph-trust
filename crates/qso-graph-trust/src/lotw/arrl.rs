@@ -6,6 +6,9 @@
 //!
 //! Both are ARRL's public certificates as TQSL 2.8.7 embeds them (`src/location.cpp`, `rootcertpem`
 //! and `cacertpem`, at commit d9e01726e54887f8241e86e789c5b91f02043ebd), the same anchor TQSL loads.
+//! TrustedQSL is Copyright (C) 2001-2015 American Radio Relay League, Inc., portions (C) 2003-2026 The
+//! TrustedQSL Developers; what is copied here is redistributed under ARRL's terms in LICENSE-ARRL.md
+//! at this crate's root, whose notice and disclaimer this file carries by reference.
 //! Their dates have passed (the root's on 2025-06-06, the CA's on 2023-06-19) and TQSL accepts an
 //! expired root or CA in a chain, so QG Trust does too; the callsign certificate itself must be in
 //! force when it signs. If ARRL issues under a root not here, importing such a certificate is refused

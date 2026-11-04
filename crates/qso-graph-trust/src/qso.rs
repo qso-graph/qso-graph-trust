@@ -61,14 +61,17 @@ impl Date {
         (year >= 1900 && (1..=days).contains(&day)).then_some(Self { year, month, day })
     }
 
+    /// The year, from 1900.
     pub fn year(&self) -> u16 {
         self.year
     }
 
+    /// The month, 1 to 12.
     pub fn month(&self) -> u8 {
         self.month
     }
 
+    /// The day of the month, from 1.
     pub fn day(&self) -> u8 {
         self.day
     }
@@ -154,7 +157,12 @@ pub enum QsoError {
     /// A record with more fields than any record read from a file may have.
     TooManyFields,
     /// A field's value is not one LoTW accepts.
-    Invalid { field: &'static str, value: String },
+    Invalid {
+        /// The ADIF field.
+        field: &'static str,
+        /// The value the log gives it.
+        value: String,
+    },
     /// PROP_MODE is SAT with no SAT_NAME.
     SatelliteNotNamed,
     /// SAT_NAME is given and PROP_MODE is not SAT.
@@ -319,42 +327,52 @@ impl Qso {
         })
     }
 
+    /// The call worked, uppercased.
     pub fn call(&self) -> &str {
         &self.call
     }
 
+    /// The band, as LoTW names it (`20M`, `2M`, `70CM`).
     pub fn band(&self) -> &'static str {
         self.band
     }
 
+    /// The mode, as LoTW names it, from the log's MODE and SUBMODE through ARRL's mode map.
     pub fn mode(&self) -> &'static str {
         self.mode
     }
 
+    /// The frequency in MHz, as the log gives it, if it does.
     pub fn freq(&self) -> Option<&str> {
         self.freq.as_deref()
     }
 
+    /// The receive band, for a split or satellite QSO, if the log gives one.
     pub fn band_rx(&self) -> Option<&'static str> {
         self.band_rx
     }
 
+    /// The receive frequency in MHz, if the log gives one.
     pub fn freq_rx(&self) -> Option<&str> {
         self.freq_rx.as_deref()
     }
 
+    /// The propagation mode, as LoTW names it (`SAT`, `EME`), if the log gives one.
     pub fn prop_mode(&self) -> Option<&str> {
         self.prop_mode.as_deref()
     }
 
+    /// The satellite, as LoTW names it, for a satellite QSO.
     pub fn sat_name(&self) -> Option<&str> {
         self.sat_name.as_deref()
     }
 
+    /// The QSO's date, UTC.
     pub fn date(&self) -> Date {
         self.date
     }
 
+    /// The QSO's time, UTC.
     pub fn time(&self) -> Time {
         self.time
     }

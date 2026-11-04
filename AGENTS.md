@@ -80,7 +80,8 @@ python3 scripts/gen-lotw-tables.py --check
 ```
 
 **What CI checks:** formatting, clippy and the tests on Windows, macOS and Linux; the policy checks
-and the canary; `cargo vet`, `cargo deny` and `cargo audit`, on every pull request and weekly. `ci-all-green` is the one result a
+and the canary; `cargo vet`, `cargo deny` and `cargo audit`; and `cargo package` for the binding and the
+library, as crates.io would receive them; on every pull request and weekly. `ci-all-green` is the one result a
 merge waits for.
 
 ## Where the real documents are

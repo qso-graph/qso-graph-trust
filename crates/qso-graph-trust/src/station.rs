@@ -35,7 +35,12 @@ pub enum StationError {
     /// A field that is not a location field for this DXCC entity.
     NotAField(String),
     /// A field whose value is not one LoTW accepts.
-    Invalid { field: &'static str, value: String },
+    Invalid {
+        /// The field.
+        field: &'static str,
+        /// The value given.
+        value: String,
+    },
 }
 
 impl fmt::Display for StationError {

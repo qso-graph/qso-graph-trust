@@ -7,7 +7,7 @@
 //!
 //! [`Certificate::from_pem_or_der`] reads the certificate's fields; [`Certificate::verify`] checks
 //! that it was issued, signature by signature, under a root QG Trust trusts ([`Trust`]): LoTW's own,
-//! pinned in [`crate::lotw::arrl`], never a root a file brings with it.
+//! pinned in this library, never a root a file brings with it.
 
 use std::fmt;
 use std::time::SystemTime;
@@ -69,7 +69,10 @@ pub enum CertificateError {
     NotLotw,
     /// A certificate that does not chain, signature by signature, to a trusted root. Names the
     /// issuer it could not trust, as the certificate gives it.
-    Untrusted { issuer: String },
+    Untrusted {
+        /// The issuer, as the certificate names it.
+        issuer: String,
+    },
 }
 
 impl fmt::Display for CertificateError {
@@ -172,10 +175,12 @@ impl Certificate {
         i64::try_from(n).ok()
     }
 
+    /// The call the certificate is for, as LoTW issued it.
     pub fn callsign(&self) -> &str {
         &self.callsign
     }
 
+    /// The DXCC entity the certificate is for, by ARRL's number.
     pub fn dxcc(&self) -> u32 {
         self.dxcc
     }
@@ -226,7 +231,7 @@ impl fmt::Debug for Trust {
 }
 
 impl Trust {
-    /// LoTW's: ARRL's root, and its production CA, as TQSL embeds them ([`crate::lotw::arrl`]).
+    /// LoTW's: ARRL's root, and its production CA, as TQSL embeds them, pinned in this library.
     pub fn lotw() -> Trust {
         let pem = |p: &str| X509::from_pem(p.as_bytes()).expect("LoTW's pinned certificates parse");
         Trust {

@@ -1,12 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-only
 [package]
 name = "qso-graph-trust-awslc"
-description = "QSO Graph Trust's one binding: LoTW's RSA signature from AWS-LC, the library QSO Graph Desktop already ships"
+description = "QSO Graph Trust's one binding to AWS-LC: LoTW's RSA-SHA-1 signature and certificate checks"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "README.md"
+keywords = ["lotw", "arrl", "ham-radio", "aws-lc"]
+categories = ["cryptography"]
+include = ["src/**/*.rs", "README.md", "LICENSE.md", "NOTICE.md", "AUTHORS.md"]
 
 # The only crate in QSO Graph Trust allowed unsafe code, and only to call AWS-LC's C functions for the
 # key (docs/decisions/0006). aws-lc-rs's safe API does not sign RSA with SHA-1,
