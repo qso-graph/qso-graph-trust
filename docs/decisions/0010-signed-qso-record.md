@@ -56,7 +56,9 @@ before mutation, preventing silent record loss. The section keeps version 1:
 ```
 
 Station descriptions are a dictionary, stored once each; IDs are file-local integers, not location
-names. Keys are exact, case-sensitive ASCII text, up to 1024 bytes to preserve older backup formats.
+names. XML parsing enforces entry counts and decoded value lengths before retaining them; bounded
+decoding reserves only the decoded size and refuses oversized values before allocation. Keys are exact,
+case-sensitive ASCII text, up to 1024 bytes to preserve older backup formats.
 Station descriptions are bounded to 2048 UTF-8 bytes and valid XML characters. `t`, omitted for TQSL
 imports, is unsigned Unix seconds when QGT signed the contact. Records sort by key. Unknown fields,
 invalid references, duplicate keys/IDs/descriptions, invalid timestamps and exceeded limits are refused.
@@ -83,8 +85,9 @@ it changes no store state. Applications can use `Store::with_key` to sign withou
 
 `SignedLog::write_to` locks and reloads the store, preflights the merged XML and all limits, creates a
 new output file, writes and syncs it, syncs its parent on Unix, then atomically replaces the record.
-It refuses existing output and reserved store filenames. A contact counts as signed **after successful
-output writing**, without waiting for upload: tqsllib inserts during conversion (`tqslconvert.cpp:1956`)
+It refuses existing output and every output path whose canonical parent is the store directory,
+so case differences and filesystem aliases cannot make output collide with store-owned files.
+A contact counts as signed **after successful output writing**, without waiting for upload: tqsllib inserts during conversion (`tqslconvert.cpp:1956`)
 and exposes explicit commit/rollback (`2080–2108`). The reference corpus driver closes successful output
 before committing (`tests/tqsllib/qgt-tqsllib.cpp:230–241`), with no upload involved.
 

@@ -19,7 +19,8 @@ use super::{
 };
 
 pub(super) fn read(text: &str) -> Result<Data, StoreError> {
-    let root = xml::parse(text).map_err(|_| StoreError::Invalid("XML"))?;
+    let root =
+        xml::parse_with_limits(text, &xml_limits()).map_err(|_| StoreError::Invalid("XML"))?;
     if root.name != "qgt-store" {
         return Err(StoreError::Invalid("root element"));
     }
@@ -41,6 +42,52 @@ pub(super) fn read(text: &str) -> Result<Data, StoreError> {
         1 => read_v1(&root),
         2 => read_sections(&root, false),
         _ => Err(StoreError::Invalid("unsupported version")),
+    }
+}
+
+// Bound the borrowed XML tree as it is built, before the version/section readers allocate records.
+// Counts are document-wide, so moving entries into an unexpected section cannot bypass a limit.
+fn xml_limits() -> xml::Limits<'static> {
+    xml::Limits {
+        elements: 5
+            + MAX_CERTIFICATES
+            + MAX_LOCATIONS * (1 + MAX_FIELDS)
+            + MAX_PENDING_REQUESTS
+            + MAX_SIGNED_QSOS
+            + MAX_SIGNED_STATIONS,
+        elements_named: &[
+            ("qgt-store", 1),
+            ("certificates", 1),
+            ("locations", 1),
+            ("signed-qsos", 1),
+            ("pending-requests", 1),
+            ("certificate", MAX_CERTIFICATES),
+            ("location", MAX_LOCATIONS),
+            ("field", MAX_LOCATIONS * MAX_FIELDS),
+            ("request", MAX_PENDING_REQUESTS),
+            ("q", MAX_SIGNED_QSOS),
+            ("s", MAX_SIGNED_STATIONS),
+        ],
+        attribute_len: |element, name| match (element, name) {
+            (_, "version" | "dxcc") => 10,
+            ("q", "k") => MAX_SIGNED_KEY_LEN,
+            ("q", "s") | ("s", "id") => 4,
+            ("q", "t") | ("request", "call" | "created") => 20,
+            ("certificate", "id") => 41,
+            ("request", "id") => 44,
+            (_, "key") => 40,
+            ("location", "name") => MAX_NAME_LEN,
+            ("field", "name") => MAX_LEN,
+            _ => MAX_SIGNED_KEY_LEN,
+        },
+        text_len: |element| match element {
+            "certificate" => MAX_CERTIFICATE_LEN.div_ceil(3) * 4,
+            "request" => 512,
+            "field" => MAX_LEN,
+            "s" => MAX_SIGNED_STATION_LEN,
+            // Container whitespace can span the file (e.g. one newline per signed QSO).
+            _ => MAX_FILE_LEN,
+        },
     }
 }
 
@@ -94,7 +141,7 @@ fn read_sections(root: &Element<'_>, legacy: bool) -> Result<Data, StoreError> {
         if !keys::valid_name(&id, "cert:") || !ids.insert(id.clone()) {
             return Err(StoreError::Invalid("certificate identifier"));
         }
-        let key_name = if c.attribute("key").is_some() {
+        let key_name = if c.attribute_names().any(|n| n == "key") {
             let name = attribute(c, "key", 40)?;
             if !keys::valid_name(&name, "key:") || !key_names.insert(name.clone()) {
                 return Err(StoreError::Invalid("key name"));
@@ -103,10 +150,7 @@ fn read_sections(root: &Element<'_>, legacy: bool) -> Result<Data, StoreError> {
         } else {
             None
         };
-        let encoded = c.text();
-        if encoded.len() > MAX_CERTIFICATE_LEN.div_ceil(3) * 4 {
-            return Err(StoreError::Limit("certificate bytes"));
-        }
+        let encoded = text(c, MAX_CERTIFICATE_LEN.div_ceil(3) * 4)?;
         let der =
             Base64::decode_vec(&encoded).map_err(|_| StoreError::Invalid("certificate base64"))?;
         if der.len() > MAX_CERTIFICATE_LEN {
@@ -147,10 +191,7 @@ fn read_sections(root: &Element<'_>, legacy: bool) -> Result<Data, StoreError> {
             }
             attributes(f, &["name"])?;
             let name = attribute(f, "name", MAX_LEN)?;
-            let value = f.text();
-            if value.len() > MAX_LEN {
-                return Err(StoreError::Limit("station field bytes"));
-            }
+            let value = text(f, MAX_LEN)?;
             fields.push((name, value));
         }
         let borrowed: Vec<(&str, &str)> = fields
@@ -196,12 +237,9 @@ fn read_sections(root: &Element<'_>, legacy: bool) -> Result<Data, StoreError> {
             let created_at = attribute(r, "created", 20)?
                 .parse()
                 .map_err(|_| StoreError::Invalid("request creation time"))?;
-            let encoded = r.text();
             // A generated RSA-1024 SPKI is 162 bytes. Allow bounded DER overhead, without
             // allocating arbitrarily large public keys from an edited store file.
-            if encoded.len() > 512 {
-                return Err(StoreError::Limit("request SPKI bytes"));
-            }
+            let encoded = text(r, 512)?;
             let public_key_der = Base64::decode_vec(&encoded)
                 .map_err(|_| StoreError::Invalid("request SPKI base64"))?;
             let spki = SubjectPublicKeyInfoRef::from_der(&public_key_der)
@@ -235,7 +273,7 @@ fn section<'a, 'b>(root: &'a Element<'b>, name: &str) -> Result<&'a Element<'b>,
 }
 
 fn attributes(e: &Element<'_>, allowed: &[&str]) -> Result<(), StoreError> {
-    if e.attributes().any(|(name, _)| !allowed.contains(&name)) {
+    if e.attribute_names().any(|name| !allowed.contains(&name)) {
         return Err(StoreError::Invalid("unknown attribute"));
     }
     Ok(())
@@ -243,7 +281,7 @@ fn attributes(e: &Element<'_>, allowed: &[&str]) -> Result<(), StoreError> {
 
 fn container(e: &Element<'_>, allowed: &[&str]) -> Result<(), StoreError> {
     attributes(e, allowed)?;
-    if !e.text().trim().is_empty() {
+    if !text(e, MAX_FILE_LEN)?.trim().is_empty() {
         return Err(StoreError::Invalid("unexpected text"));
     }
     Ok(())
@@ -251,12 +289,15 @@ fn container(e: &Element<'_>, allowed: &[&str]) -> Result<(), StoreError> {
 
 fn attribute(e: &Element<'_>, name: &str, max: usize) -> Result<String, StoreError> {
     let value = e
-        .attribute(name)
+        .attribute_bounded(name, max)
+        .map_err(|_| StoreError::Limit("attribute bytes"))?
         .ok_or(StoreError::Invalid("missing attribute"))?;
-    if value.len() > max {
-        return Err(StoreError::Limit("attribute bytes"));
-    }
     Ok(value.to_string())
+}
+
+fn text(e: &Element<'_>, max: usize) -> Result<zeroize::Zeroizing<String>, StoreError> {
+    e.text_bounded(max)
+        .map_err(|_| StoreError::Limit("text bytes"))
 }
 
 pub(super) fn check_name(name: &str) -> Result<(), StoreError> {
@@ -373,10 +414,7 @@ fn read_signed(section: &Element<'_>) -> Result<BTreeMap<String, SignedQso>, Sto
                 return Err(StoreError::Invalid("signed station element"));
             }
             let id = station_id(entry, "id")?;
-            let value = entry.text();
-            if value.len() > MAX_SIGNED_STATION_LEN {
-                return Err(StoreError::Limit("signed station bytes"));
-            }
+            let value = text(entry, MAX_SIGNED_STATION_LEN)?;
             if stations.insert(id, value.to_string()).is_some()
                 || !descriptions.insert(value.to_string())
             {
@@ -400,7 +438,7 @@ fn read_signed(section: &Element<'_>) -> Result<BTreeMap<String, SignedQso>, Sto
             .get(&station_id(entry, "s")?)
             .ok_or(StoreError::Invalid("signed station reference"))?
             .clone();
-        let signed_at = if entry.attribute("t").is_some() {
+        let signed_at = if entry.attribute_names().any(|n| n == "t") {
             let value = attribute(entry, "t", 20)?;
             if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
                 return Err(StoreError::Invalid("signed QSO time"));
@@ -472,4 +510,56 @@ fn write_signed(out: &mut String, records: &BTreeMap<String, SignedQso>) -> Resu
     }
     out.push_str("  </signed-qsos>\n");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn signed_record_counts_stop_the_xml_reader_before_the_remaining_entries() {
+        for (name, max) in [("q", MAX_SIGNED_QSOS), ("s", MAX_SIGNED_STATIONS)] {
+            let prefix = format!(
+                "<qgt-store><signed-qsos>{}",
+                format!("<{name}/>").repeat(max)
+            );
+            let boundary = format!("{prefix}</signed-qsos></qgt-store>");
+            assert!(xml::parse_with_limits(&boundary, &xml_limits()).is_ok());
+            // The first excess start tag has deliberately malformed attributes. Count refusal
+            // takes place before reading those, or building any of the many entries after it.
+            let oversized = format!("{prefix}<{name} invalid{}", "<q/>".repeat(10_000));
+            let error = xml::parse_with_limits(&oversized, &xml_limits()).expect_err("count cap");
+            assert_eq!(error.problem, "too many named elements");
+            assert_eq!(error.column, prefix.len() + name.len() + 2);
+            assert!(matches!(read(&oversized), Err(StoreError::Invalid("XML"))));
+        }
+    }
+
+    #[test]
+    fn signed_key_and_station_caps_apply_during_xml_parsing() {
+        let key = "&#65;".repeat(MAX_SIGNED_KEY_LEN);
+        let exact = format!("<q k=\"{key}\"/>");
+        let doc = xml::parse_with_limits(&exact, &xml_limits()).expect("exact key cap");
+        assert_eq!(
+            attribute(&doc, "k", MAX_SIGNED_KEY_LEN).expect("key").len(),
+            MAX_SIGNED_KEY_LEN
+        );
+        let oversized = format!("<q k=\"{key}&#65;&unknown;\"/>");
+        assert_eq!(
+            xml::parse_with_limits(&oversized, &xml_limits())
+                .expect_err("key cap")
+                .problem,
+            "attribute value too long"
+        );
+        let station = "&#233;".repeat(MAX_SIGNED_STATION_LEN / 2);
+        let exact = format!("<s>{station}</s>");
+        assert!(xml::parse_with_limits(&exact, &xml_limits()).is_ok());
+        let oversized = format!("<s>{station}<!-- split -->x&unknown;</s>");
+        assert_eq!(
+            xml::parse_with_limits(&oversized, &xml_limits())
+                .expect_err("station cap")
+                .problem,
+            "text too long"
+        );
+    }
 }

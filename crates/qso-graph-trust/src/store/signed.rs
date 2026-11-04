@@ -142,20 +142,21 @@ impl SignedLog {
     /// Create and sync a new output file, then atomically merge the record under the store lock.
     /// Preflight validates the resulting record and file size before creating output. A failed
     /// output write records nothing. If store replacement fails after output was written, the
-    /// output remains; report the error and retain it for recovery. Existing output and reserved
-    /// store filenames (`store.xml`, `store.xml.partial`, `store.lock`) are refused.
+    /// output remains; report the error and retain it for recovery. Existing output and any output
+    /// in the store directory are refused, including filesystem aliases of that directory.
     ///
     /// TQSL stages entries during conversion (tqslconvert.cpp:1956) and commits explicitly
     /// (2097–2108), not on upload. The corpus driver commits after closing successful output
     /// (tests/tqsllib/qgt-tqsllib.cpp:230–241). Here the write is synced before record replacement.
     pub fn write_to(&self, store: &Store, path: &Path) -> Result<(), StoreError> {
-        if path.file_name().is_some_and(|name| {
-            matches!(
-                name.to_str(),
-                Some("store.xml" | "store.xml.partial" | "store.lock")
-            )
-        }) {
-            return Err(StoreError::Invalid("reserved output name"));
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        // The output need not exist yet. Compare its existing parent, so case differences,
+        // symlinks and platform filename aliases cannot turn output into a store-owned file.
+        if parent.canonicalize()? == store.dir.canonicalize()? {
+            return Err(StoreError::Invalid("output in store directory"));
         }
         let _lock = store.lock()?;
         let mut data = store.read()?;
@@ -165,10 +166,6 @@ impl SignedLog {
         output.write_all(&self.bytes)?;
         output.sync_all()?;
         drop(output);
-        let parent = path
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."));
         sync_directory(parent)?;
         store.replace(&xml)
     }

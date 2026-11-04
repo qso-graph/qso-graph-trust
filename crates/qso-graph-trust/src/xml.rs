@@ -24,6 +24,15 @@ pub const MAX_ELEMENTS: usize = 2_000_000;
 /// The most attributes on one element.
 pub const MAX_ATTRIBUTES: usize = 64;
 
+/// Additional limits for a document format. Named counts apply across the whole document;
+/// value limits count decoded UTF-8 bytes, including text split by comments.
+pub struct Limits<'a> {
+    pub elements: usize,
+    pub elements_named: &'a [(&'a str, usize)],
+    pub attribute_len: fn(element: &str, attribute: &str) -> usize,
+    pub text_len: fn(element: &str) -> usize,
+}
+
 /// Why XML could not be read: where, as a line and column from 1, and what kind of problem.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct XmlError {
@@ -51,6 +60,8 @@ pub struct Element<'a> {
     pub name: &'a str,
     attributes: Vec<(&'a str, &'a str)>,
     text: Vec<&'a str>,
+    text_len: usize,
+    text_after_cr: bool,
     pub children: Vec<Element<'a>>,
 }
 
@@ -61,6 +72,24 @@ impl<'a> Element<'a> {
             .iter()
             .find(|(n, _)| *n == name)
             .map(|(_, v)| decode([*v].into_iter(), true))
+    }
+
+    /// Decode only if the value fits, without allocating an oversized buffer.
+    pub fn attribute_bounded(
+        &self,
+        name: &str,
+        max: usize,
+    ) -> Result<Option<Zeroizing<String>>, &'static str> {
+        self.attributes
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, v)| decode_bounded([*v].into_iter(), true, max))
+            .transpose()
+    }
+
+    /// Attribute names without decoding or allocating their values.
+    pub fn attribute_names(&self) -> impl Iterator<Item = &'a str> + '_ {
+        self.attributes.iter().map(|(n, _)| *n)
     }
 
     /// The attributes' names and decoded values, in the order written.
@@ -75,6 +104,11 @@ impl<'a> Element<'a> {
         decode(self.text.iter().copied(), false)
     }
 
+    /// Decode only if all text pieces together fit the cap.
+    pub fn text_bounded(&self, max: usize) -> Result<Zeroizing<String>, &'static str> {
+        decode_bounded(self.text.iter().copied(), false, max)
+    }
+
     /// The child elements with this name.
     pub fn children_named<'s>(&'s self, name: &'s str) -> impl Iterator<Item = &'s Element<'a>> {
         self.children.iter().filter(move |c| c.name == name)
@@ -84,33 +118,71 @@ impl<'a> Element<'a> {
 /// Decodes text already checked by the reader, as XML 1.0 does (sections 2.11 and 3.3.3): a line end
 /// (`\r\n` or a lone `\r`) becomes `\n`, and in an attribute each literal tab or line end becomes a
 /// space; then XML's five entities and character references, whose characters are kept as they are
-/// (found by Codex review: `HOME<tab>A` and `HOME A` were two names). Decoding only shortens, so the
-/// one buffer is made at the input's length.
+/// (found by Codex review: `HOME<tab>A` and `HOME A` were two names).
 fn decode<'a>(pieces: impl Iterator<Item = &'a str> + Clone, attribute: bool) -> Zeroizing<String> {
-    let len = pieces.clone().map(str::len).sum();
+    decode_bounded(pieces, attribute, usize::MAX).expect("reader checked the values")
+}
+
+fn decode_bounded<'a>(
+    pieces: impl Iterator<Item = &'a str> + Clone,
+    attribute: bool,
+    max: usize,
+) -> Result<Zeroizing<String>, &'static str> {
+    let len = decoded_len(pieces.clone(), attribute, max, &mut false)?;
+    // Count before allocating, and reserve decoded bytes rather than the potentially much larger
+    // entity-encoded input. The second pass cannot grow this buffer.
     let mut out = Zeroizing::new(String::with_capacity(len));
-    let mut after_cr = false;
+    walk_decoded(pieces, attribute, &mut false, |c| {
+        out.push(c);
+        Ok(())
+    })?;
+    Ok(out)
+}
+
+fn decoded_len<'a>(
+    pieces: impl Iterator<Item = &'a str>,
+    attribute: bool,
+    max: usize,
+    after_cr: &mut bool,
+) -> Result<usize, &'static str> {
+    let mut len = 0usize;
+    walk_decoded(pieces, attribute, after_cr, |c| {
+        if c.len_utf8() > max - len {
+            return Err("value too long");
+        }
+        len += c.len_utf8();
+        Ok(())
+    })?;
+    Ok(len)
+}
+
+fn walk_decoded<'a>(
+    pieces: impl Iterator<Item = &'a str>,
+    attribute: bool,
+    after_cr: &mut bool,
+    mut emit: impl FnMut(char) -> Result<(), &'static str>,
+) -> Result<(), &'static str> {
     for piece in pieces {
         let mut chars = piece.char_indices();
         while let Some((i, c)) = chars.next() {
-            let was_cr = std::mem::replace(&mut after_cr, c == '\r');
+            let was_cr = std::mem::replace(after_cr, c == '\r');
             match c {
                 '\n' if was_cr => {}
-                '\r' | '\n' => out.push(if attribute { ' ' } else { '\n' }),
-                '\t' if attribute => out.push(' '),
+                '\r' | '\n' => emit(if attribute { ' ' } else { '\n' })?,
+                '\t' if attribute => emit(' ')?,
                 '&' => {
                     let rest = &piece[i + 1..];
-                    let semi = rest.find(';').unwrap_or(rest.len());
-                    out.push(entity(&rest[..semi]).unwrap_or('\u{fffd}'));
+                    let semi = rest.find(';').ok_or("unknown entity")?;
+                    emit(entity(&rest[..semi]).ok_or("unknown entity")?)?;
                     for _ in 0..semi + 1 {
                         chars.next();
                     }
                 }
-                c => out.push(c),
+                c => emit(c)?,
             }
         }
     }
-    out
+    Ok(())
 }
 
 /// The character an entity names: XML's five, or a character reference (`&#` decimal digits, or
@@ -141,21 +213,6 @@ fn entity(name: &str) -> Option<char> {
 /// but U+FFFE and U+FFFF (a `char` cannot be a surrogate).
 fn is_xml_char(c: char) -> bool {
     matches!(c, '\t' | '\n' | '\r') || (c >= ' ' && c != '\u{fffe}' && c != '\u{ffff}')
-}
-
-/// Whether text holds only entities this reader decodes, each ended by `;`.
-fn entities_known(text: &str) -> bool {
-    let mut rest = text;
-    while let Some(amp) = rest.find('&') {
-        let Some(semi) = rest[amp..].find(';') else {
-            return false;
-        };
-        if entity(&rest[amp + 1..amp + semi]).is_none() {
-            return false;
-        }
-        rest = &rest[amp + semi + 1..];
-    }
-    true
 }
 
 fn is_name_start(c: char) -> bool {
@@ -213,6 +270,20 @@ impl<'a> Reader<'a> {
 
 /// The root element of an XML document.
 pub fn parse(input: &str) -> Result<Element<'_>, XmlError> {
+    parse_with_limits(
+        input,
+        &Limits {
+            elements: MAX_ELEMENTS,
+            elements_named: &[],
+            attribute_len: |_, _| usize::MAX,
+            text_len: |_| usize::MAX,
+        },
+    )
+}
+
+/// Read with format-specific limits, refusing an element or value before retaining it. The
+/// existing depth, attribute-count and element-count ceilings still apply.
+pub fn parse_with_limits<'a>(input: &'a str, limits: &Limits<'_>) -> Result<Element<'a>, XmlError> {
     let mut r = Reader { input, at: 0 };
     // Every character first: XML forbids control characters but tab and line ends (found by Codex
     // review: NUL and U+0001 were read).
@@ -230,6 +301,7 @@ pub fn parse(input: &str) -> Result<Element<'_>, XmlError> {
     let mut open: Vec<Element> = Vec::new();
     let mut root: Option<Element> = None;
     let mut elements = 0usize;
+    let mut named_counts = vec![0usize; limits.elements_named.len()];
     loop {
         // Text up to the next tag: kept only inside an element.
         let text_end = r.rest().find('<').unwrap_or(r.rest().len());
@@ -237,9 +309,21 @@ pub fn parse(input: &str) -> Result<Element<'_>, XmlError> {
         if !text.is_empty() {
             match open.last_mut() {
                 Some(parent) => {
-                    if !entities_known(text) {
-                        return Err(r.error("an unknown entity or a bare &"));
-                    }
+                    let remaining = (limits.text_len)(parent.name) - parent.text_len;
+                    let len = decoded_len(
+                        [text].into_iter(),
+                        false,
+                        remaining,
+                        &mut parent.text_after_cr,
+                    )
+                    .map_err(|problem| {
+                        r.error(if problem == "value too long" {
+                            "text too long"
+                        } else {
+                            "an unknown entity or a bare &"
+                        })
+                    })?;
+                    parent.text_len += len;
                     parent.text.push(text);
                 }
                 None if text.trim_matches([' ', '\t', '\r', '\n']).is_empty() => {}
@@ -282,7 +366,7 @@ pub fn parse(input: &str) -> Result<Element<'_>, XmlError> {
                 return Err(r.error("a second root element"));
             }
             elements += 1;
-            if elements > MAX_ELEMENTS {
+            if elements > limits.elements.min(MAX_ELEMENTS) {
                 return Err(r.error("too many elements"));
             }
             if open.len() == MAX_DEPTH {
@@ -292,6 +376,14 @@ pub fn parse(input: &str) -> Result<Element<'_>, XmlError> {
                 name: r.name()?,
                 ..Element::default()
             };
+            for ((name, max), count) in limits.elements_named.iter().zip(&mut named_counts) {
+                if element.name == *name {
+                    if *count == *max {
+                        return Err(r.error("too many named elements"));
+                    }
+                    *count += 1;
+                }
+            }
             loop {
                 let before = r.at;
                 r.skip_space();
@@ -321,9 +413,22 @@ pub fn parse(input: &str) -> Result<Element<'_>, XmlError> {
                     if quote == '"' { "\"" } else { "'" },
                     "an attribute value does not end",
                 )?;
-                if value.contains('<') || !entities_known(value) {
+                if value.contains('<') {
                     return Err(r.error("an attribute value with < or an unknown entity"));
                 }
+                decoded_len(
+                    [value].into_iter(),
+                    true,
+                    (limits.attribute_len)(element.name, name),
+                    &mut false,
+                )
+                .map_err(|problem| {
+                    r.error(if problem == "value too long" {
+                        "attribute value too long"
+                    } else {
+                        "an attribute value with < or an unknown entity"
+                    })
+                })?;
                 if element.attributes.iter().any(|(n, _)| *n == name) {
                     return Err(r.error("an attribute given twice"));
                 }
@@ -477,5 +582,63 @@ mod tests {
         let text = doc.text();
         wiped(&text);
         assert!(text.capacity() >= text.len() && text.capacity() <= "abc&amp;def".len());
+    }
+
+    #[test]
+    fn bounded_values_stop_before_decoding_an_oversized_value_whole() {
+        let limits = Limits {
+            elements: 3,
+            elements_named: &[("b", 1)],
+            attribute_len: |_, _| 4,
+            text_len: |_| 4,
+        };
+        // The invalid entity after the overflow must never be decoded. Both the parser and the
+        // allocating decoder stop at the fifth byte; entity encoding does not inflate capacity.
+        let oversized = "&#65;".repeat(5) + "&unknown;";
+        assert_eq!(
+            parse_with_limits(&format!("<a k=\"{oversized}\"/>"), &limits)
+                .expect_err("attribute cap")
+                .problem,
+            "attribute value too long"
+        );
+        assert_eq!(
+            decode_bounded([oversized.as_str()].into_iter(), true, 4),
+            Err("value too long")
+        );
+        assert_eq!(
+            parse_with_limits("<a>ab<!-- split -->éx&unknown;</a>", &limits)
+                .expect_err("cumulative UTF-8 text cap")
+                .problem,
+            "text too long"
+        );
+        let doc = parse_with_limits("<a k=\"&#65;&#66;&#67;&#68;\">ab<!-- -->é</a>", &limits)
+            .expect("exact limits fit");
+        let value = doc.attribute_bounded("k", 4).expect("fits").expect("k");
+        assert_eq!(value.as_str(), "ABCD");
+        assert_eq!(value.capacity(), 4);
+        assert_eq!(doc.text_bounded(4).expect("fits").as_str(), "abé");
+        assert!(doc.attribute_bounded("k", 3).is_err());
+        assert!(doc.text_bounded(3).is_err());
+        // CRLF normalization still spans a comment boundary.
+        assert_eq!(
+            parse_with_limits("<a>ab\r<!-- -->\nc</a>", &limits)
+                .expect("normalized text fits")
+                .text()
+                .as_str(),
+            "ab\nc"
+        );
+        assert_eq!(
+            parse_with_limits("<a><b/><b invalid", &limits)
+                .expect_err("named count before attributes")
+                .problem,
+            "too many named elements"
+        );
+        assert_eq!(
+            parse_with_limits("<a><b/><c/><d invalid", &limits)
+                .expect_err("total count before element")
+                .problem,
+            "too many elements"
+        );
+        assert!(parse_with_limits("<a><b/><c/></a>", &limits).is_ok());
     }
 }

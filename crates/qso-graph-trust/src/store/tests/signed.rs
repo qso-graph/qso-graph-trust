@@ -140,7 +140,8 @@ fn choices_write_only_the_selected_qsos_and_record_only_after_success() {
     let bad_path = folder.0.join("missing").join("out.tq8");
     assert!(log.write_to(&store, &bad_path).is_err());
     assert_eq!(store.signed_qsos().expect("failed write"), before);
-    let path = folder.0.join("out.tq8");
+    let output_folder = Folder::new();
+    let path = output_folder.0.join("out.tq8");
     log.write_to(&store, &path).expect("write and record");
     assert_eq!(fs::read(&path).expect("output"), log.tq8());
     let tq7 = crate::gzip::decompress(log.tq8(), 1024 * 1024).expect("tq8");
@@ -204,7 +205,8 @@ fn sign_again_preserves_sign_log_bytes_and_replaces_previous_metadata() {
         .expect("key")
         .expect("sign");
     assert_eq!(log.tq8(), crate::signed_log::tq8(&expected));
-    log.write_to(&store, &folder.0.join("all.tq8"))
+    let output_folder = Folder::new();
+    log.write_to(&store, &output_folder.0.join("all.tq8"))
         .expect("write");
     assert_eq!(store.signed_qsos().expect("records").len(), 21);
     assert_eq!(
@@ -495,12 +497,20 @@ fn malformed_xml_records_are_refused_on_open_and_on_mutation() {
 }
 
 #[test]
-fn output_cannot_use_store_filenames_and_store_failures_keep_successful_output() {
+fn output_cannot_use_store_directory_and_store_failures_keep_successful_output() {
     let folder = Folder::new();
     let store = store(&folder);
     let log = signed(&store, &qsos(), DuplicateChoice::SignAgain);
     let before = fs::read(folder.0.join("store.xml")).expect("before");
-    for name in ["store.xml", "store.xml.partial", "store.lock"] {
+    for name in [
+        "store.xml",
+        "store.xml.partial",
+        "store.lock",
+        "STORE.XML.PARTIAL",
+        "Store.Lock",
+        "plain.tq8",
+    ] {
+        let existed = folder.0.join(name).exists();
         assert!(matches!(
             log.write_to(&store, &folder.0.join(name)),
             Err(StoreError::Invalid(_))
@@ -509,8 +519,19 @@ fn output_cannot_use_store_filenames_and_store_failures_keep_successful_output()
             fs::read(folder.0.join("store.xml")).expect("unchanged"),
             before
         );
+        assert!(store.signed_qsos().expect("nothing recorded").is_empty());
+        assert_eq!(folder.0.join(name).exists(), existed);
     }
-    let output = folder.0.join("log.tq8");
+    fs::create_dir(folder.0.join("child")).expect("child for parent alias");
+    let alias = folder.0.join("child/../alias.tq8");
+    assert!(matches!(
+        log.write_to(&store, &alias),
+        Err(StoreError::Invalid(_))
+    ));
+    assert!(!alias.exists());
+    assert!(store.signed_qsos().expect("nothing recorded").is_empty());
+    let output_folder = Folder::new();
+    let output = output_folder.0.join("log.tq8");
     fs::create_dir(folder.0.join("store.xml.partial")).expect("plant replacement failure");
     assert!(log.write_to(&store, &output).is_err());
     assert_eq!(
@@ -519,7 +540,7 @@ fn output_cannot_use_store_filenames_and_store_failures_keep_successful_output()
     );
     assert!(store.signed_qsos().expect("not recorded").is_empty());
     fs::remove_dir(folder.0.join("store.xml.partial")).expect("remove plant");
-    log.write_to(&store, &folder.0.join("retry.tq8"))
+    log.write_to(&store, &output_folder.0.join("retry.tq8"))
         .expect("retry");
     assert_eq!(store.signed_qsos().expect("recorded").len(), 3);
 }
@@ -533,7 +554,8 @@ fn signing_write_preflights_record_capacity_before_creating_output() {
         .map(|i| entry(&format!("test{i}")))
         .collect();
     store.add_signed_qsos(&entries).expect("fill record");
-    let output = folder.0.join("log.tq8");
+    let output_folder = Folder::new();
+    let output = output_folder.0.join("log.tq8");
     assert!(matches!(
         log.write_to(&store, &output),
         Err(StoreError::Limit(_))
@@ -597,4 +619,26 @@ fn encoded_record_must_fit_the_whole_file_limit() {
             .expect("remove excess entries"),
         10
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn output_parent_symlink_to_store_is_refused_before_creation() {
+    let folder = Folder::new();
+    let store = store(&folder);
+    let log = signed(&store, &qsos(), DuplicateChoice::SignAgain);
+    let output_folder = Folder::new();
+    let alias = output_folder.0.join("store-alias");
+    std::os::unix::fs::symlink(&folder.0, &alias).expect("directory alias");
+    let output = alias.join("STORE.XML.PARTIAL");
+    assert!(matches!(
+        log.write_to(&store, &output),
+        Err(StoreError::Invalid(_))
+    ));
+    assert!(!output.exists());
+    assert!(store.signed_qsos().expect("nothing recorded").is_empty());
+    fs::remove_file(alias).expect("remove alias");
+    log.write_to(&store, &output_folder.0.join("STORE.XML.PARTIAL"))
+        .expect("same name outside store is safe");
+    assert_eq!(store.signed_qsos().expect("recorded").len(), 3);
 }
