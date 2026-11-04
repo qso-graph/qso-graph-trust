@@ -12,6 +12,9 @@ versions follow [Semantic Versioning](https://semver.org/).
   New RSA-1024 keys pass through an opaque request into the library-owned store, with pending
   metadata in store.xml, response matching and abandonment. Requests identify QG Trust.
   Desktop and CLI integration remains.
+- Library-side encrypted LoTW store exports: a generated 20-character password, AES-256-GCM and
+  PBKDF2-HMAC-SHA-256 at 600,000 iterations. Restore authenticates and checks every certificate, key
+  and station location before replacing the store; private key bytes stay inside the library.
 
 ## [0.1.0-beta.4] - 2026-11-04
 

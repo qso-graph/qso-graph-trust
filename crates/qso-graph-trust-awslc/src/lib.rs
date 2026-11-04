@@ -19,6 +19,9 @@ use std::ptr::NonNull;
 use aws_lc_sys as sys;
 use zeroize::Zeroizing;
 
+mod encryption;
+pub use encryption::{EncryptionError, aes256_gcm_open, aes256_gcm_seal, pbkdf2_sha256};
+
 /// An RSA private key held by AWS-LC. It cannot be read back out.
 pub struct RsaKey {
     rsa: NonNull<sys::RSA>,

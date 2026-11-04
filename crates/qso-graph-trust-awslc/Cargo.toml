@@ -21,6 +21,7 @@ aws-lc-sys = { version = "=0.45.0", default-features = false, features = ["all-b
 # signature checks on certificates, which it offers; only LoTW's SHA-1 signing, which it does not,
 # goes through aws-lc-sys here.
 aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["aws-lc-sys"] }
+zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
 
 # Already used throughout the workspace; generated PKCS#8 is always wiped.
 zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }

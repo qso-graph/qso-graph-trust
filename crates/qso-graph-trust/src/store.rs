@@ -11,6 +11,9 @@
 
 mod format;
 mod keys;
+mod part;
+
+pub use part::{PartError, RestoreReport};
 
 pub use keys::{KeyStoreError, MAX_KEYS, SERVICE, TEST_SERVICE};
 
