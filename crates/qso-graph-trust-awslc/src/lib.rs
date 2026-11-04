@@ -35,6 +35,8 @@ pub enum Error {
     NotRsa,
     /// AWS-LC could not make the signature.
     Signing,
+    /// The operating system could not supply random bytes.
+    Random,
 }
 
 impl fmt::Display for Error {
@@ -42,11 +44,17 @@ impl fmt::Display for Error {
         f.write_str(match self {
             Self::NotRsa => "not an RSA key AWS-LC can read",
             Self::Signing => "AWS-LC could not sign",
+            Self::Random => "AWS-LC could not supply random bytes",
         })
     }
 }
 
 impl std::error::Error for Error {}
+
+/// Fill a buffer with cryptographically secure random bytes from AWS-LC's safe API.
+pub fn random(bytes: &mut [u8]) -> Result<(), Error> {
+    aws_lc_rs::rand::fill(bytes).map_err(|_| Error::Random)
+}
 
 /// An AWS-LC key read from DER, `parse` being EVP_parse_private_key or EVP_parse_public_key, as the
 /// RSA it holds. The EVP wrapper is freed here; the RSA is the caller's to free.

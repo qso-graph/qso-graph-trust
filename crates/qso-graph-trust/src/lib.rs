@@ -16,6 +16,7 @@ pub mod records;
 pub mod signed_log;
 pub mod signing;
 pub mod station;
+pub mod store;
 pub mod tbk;
 mod xml;
 
