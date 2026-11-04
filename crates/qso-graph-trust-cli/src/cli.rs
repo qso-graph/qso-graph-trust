@@ -78,15 +78,15 @@ Usage: qg-trust -i CERTIFICATE.tbk -l LOCATION [-b DATE] [-e DATE] [-o OUTPUT.tq
   -b, --begindate DATE   sign only QSOs on or after DATE (YYYY-MM-DD or YYYYMMDD)
   -e, --enddate DATE     sign only QSOs on or before DATE
   -o, --output FILE      where to write the signed log (default: LOG with .tq8)
-  -x, --batch            accepted, as TQSL's; qg-trust always exits when done
+  -x, --batch            accepted for loggers that pass it; qg-trust always exits when done
   -q, --quiet            the same as -x
-  -d, --nodate           accepted, as TQSL's; qg-trust shows no date dialog
+  -d, --nodate           accepted for loggers that pass it
   -h, --help             this help
   -v, --version          the version
 
-The key's password is asked for when it is needed, never given on the command line: at the
-terminal with what is typed hidden, or as one line on standard input when there is no terminal.
-Exit codes and the last line, \"Final Status: <name>(<code>)\" on standard error, are TQSL's.";
+The key's password is asked for when it is needed, with what you type hidden, or read as one line
+from standard input when a logger runs qg-trust. The last line on standard error is
+\"Final Status: <name>(<code>)\", as loggers expect.";
 
 /// The parsed command line.
 #[derive(Debug, Default)]
@@ -162,7 +162,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
             "-a" | "--action" | "-c" | "--callsign" | "-f" | "--verify" | "-n" | "--updates"
             | "-s" | "--editlocation" | "-t" | "--diagnose" | "-u" | "--upload" | "-w"
             | "--wipe" | "-z" | "--test-sign" => {
-                return Err(format!("{flag} is TQSL's, and qg-trust does not do it yet"));
+                return Err(format!("{flag} is not supported yet"));
             }
             _ if flag.starts_with('-') && flag.len() > 1 => {
                 return Err(format!("{flag} is not an option qg-trust knows"));

@@ -17,20 +17,18 @@ writes the `.tq8` file LoTW accepts. Uploading it, and looking after your certif
 
 ## How it's different
 
-- **Your key lives in your computer's own credential store**: the macOS Keychain, Windows Credential
-  Manager, or the Linux Secret Service. It is never a file on disk, and it leaves the store only to
-  sign. *(To come.)*
-- **It's a library first**, so LoTW signing can be part of the program you already use: QSO Graph
-  Desktop, another logger, a script, or a Python, .NET or Node program *(those bindings to come)*,
-  rather than a separate application to switch to.
-- **It's built for safety from the ground up**: memory-safe Rust, the key never printed or logged,
-  every block of memory wiped when it is freed, a certificate trusted only if it comes from LoTW's own
-  certificate authority, and every behaviour proved by tests. More, and how to report a security
-  problem: [SECURITY.md](SECURITY.md).
-- **It fits into QSO Graph Desktop**, so your certificates, station locations, signing and upload sit
-  beside the rest of your station. *(To come.)*
+- **Your key stays locked away.** It will live in your computer's own password safe (the macOS
+  Keychain, Windows Credential Manager, or the Linux keyring), never as a file someone could copy.
+  *(Coming soon.)*
+- **It works inside the program you already use.** QSO Graph Desktop, another logger or a script can
+  sign for LoTW directly, with no separate program to switch to.
+- **It's built to be safe.** Your key is only ever used to sign: it is never shown, saved to a log or
+  sent anywhere, and the program clears it from memory when it's done. Every part is tested. More, and
+  how to report a security problem: [SECURITY.md](SECURITY.md).
+- **It's part of QSO Graph Desktop.** Your certificates, station locations, signing and upload sit
+  alongside the rest of your station. *(Coming soon.)*
 
-> **This is a beta.** Signing works today, from the command line and the library.
+> **This is a beta.** Signing works today.
 
 ## Sign a log
 

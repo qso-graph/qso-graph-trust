@@ -22,7 +22,7 @@ include = ["src/**/*.rs", "README.md", "LICENSE.md", "LICENSE-ARRL.md", "NOTICE.
 [dependencies]
 # LoTW's signature, RSA PKCS#1 v1.5 with SHA-1, from AWS-LC through QG Trust's
 # one binding (decision 0006).
-qso-graph-trust-awslc = { path = "../qso-graph-trust-awslc", version = "=0.1.0-beta.3" }
+qso-graph-trust-awslc = { path = "../qso-graph-trust-awslc", version = "=0.1.0-beta.4" }
 sha1 = { version = "=0.10.6", default-features = false, features = ["oid"] }
 # tqsllib's keys: PKCS#8 PEM, plain, or encrypted (PBES2 with 3DES) when the
 # ham set a password. sha1-insecure: PBKDF2 with HMAC-SHA1, which older OpenSSL
