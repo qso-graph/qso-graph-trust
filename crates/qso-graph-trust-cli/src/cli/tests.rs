@@ -452,7 +452,7 @@ fn help_and_version_print_and_exit_zero() {
     assert_eq!(ran.code, 0);
     assert!(
         ran.out
-            .contains("Usage: qg-trust -i BACKUP.tbk -l LOCATION")
+            .contains("Usage: qg-trust -i CERTIFICATE.tbk -l LOCATION")
     );
     assert!(ran.err.is_empty());
 }
