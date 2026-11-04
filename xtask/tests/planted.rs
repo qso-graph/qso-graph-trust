@@ -236,7 +236,7 @@ fn network_policy_scans_library_and_binding_but_allows_cli() {
     // An unreferenced file in a nested directory is scanned even if no current
     // build would compile it. Each plant is removed before the next one.
     for name in names {
-        let dir = root.join(name).join("src/disabled");
+        let dir = root.join(name).join("src").join("disabled");
         std::fs::create_dir(&dir).expect("mkdir");
         let path = dir.join("payload.rs");
         for planted in [
