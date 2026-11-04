@@ -5,13 +5,15 @@ build and check. When a rule here and your task disagree, stop and ask.
 
 ## What this is
 
-**QSO Graph Trust (QGT) signs logs for ARRL's Logbook of The World (LoTW) with the operator's key held by
-the OS credential store.** One Rust library, shared by QSO Graph Desktop (QG Trust's interface, as an
+**QSO Graph Trust (QGT) signs logs for ARRL's Logbook of The World (LoTW), and is built to keep the
+operator's key in the OS credential store.** One Rust library, shared by QSO Graph Desktop (QG Trust's interface, as an
 extension), the `qg-trust` command line and other people's tools. It is an alternative to TQSL: described
 as an alternative, never as replacing or fixing TQSL, and TQSL's behaviour is stated as facts with their source, never as faults.
 
 The core requirement: **the ham's key stays theirs, and only the QSOs they mean to sign get signed,
-exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if their key is compromised.
+exactly as LoTW accepts them.** A compromised key signs QSOs in the ham's name: ARRL revokes its
+certificate, and the QSOs submitted with it, and the confirmations and credit they earned, can be
+removed (ARRL's [certificate security](https://lotw.arrl.org/lotw-help/certificatesecurity/)).
 
 ## Rules (each one has a test you can apply)
 
@@ -26,8 +28,10 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
   aws-lc-rs does not sign (decision 0006); in QG Trust both are reached only through the binding;
   RustCrypto's `rsa` is a test tool only, never shipped. The library never signs for a remote
   caller (decision 0002, amended 2026-11-03). *Test: `cargo xtask policy` and `cargo deny`.*
-- **Every outside crate a shipped crate uses is reviewed,** by exact name and version, through
-  cargo-vet: an imported audit, a trusted publisher, or our own (`supply-chain/`, decision 0004).
+- **Every outside crate a shipped crate uses is reviewed, or listed as not reviewed yet,** by exact
+  name and version, through cargo-vet: an imported audit, a trusted publisher, our own, or an
+  exemption, which cargo-vet means as "not audited yet", listed in the open in
+  `supply-chain/config.toml` (decision 0004).
   It comes from crates.io only. *Test: `cargo vet` and `cargo deny`.* The no-C rule is the
   library's alone; the command line carries the TLS stack, which is C.
 - **No unsafe code, but in one named binding.** `qso-graph-trust-awslc`, which calls AWS-LC to sign
@@ -45,8 +49,11 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
   program without it, and the custody test (`crates/qso-graph-trust-custody`, Linux, debug and
   release) reads a signing program's whole memory, as a crash dump holds it, and finds no key data
   or password.*
-- **The OS credential store holds the key at rest,** and it leaves the store only to sign, as a
-  signature, or as a backup QGT encrypts itself; while it signs, it is in memory, as in every signer. No API returns it, and it is never in a file, log, trace, error, IPC message or crash dump.
+- **The OS credential store holds the key at rest,** once QGT keeps keys (the store is still to
+  come; until then the library holds no key at rest), and it leaves the store only to sign, as a
+  signature, or as a backup QGT encrypts itself. While it signs, it is in memory, as in every signer,
+  so a crash dump taken then can hold it; freed memory never does. No API returns it, and nothing QGT
+  writes, logs, traces, reports in an error or sends over IPC holds it.
 - **LoTW's tables are ARRL's, never typed in.** Bands, modes, the ADIF mode map, satellites, DXCC
   entities, station-location fields and the signature specification come from ARRL's TQSL
   configuration (`data/tqsl-config/config.xml`, under ARRL's licence beside it), generated into

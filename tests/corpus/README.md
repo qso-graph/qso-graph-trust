@@ -21,14 +21,14 @@ script is run again only to change them.
 | `user-*-aes.p12` | PKCS#12 made by OpenSSL with TQSL's default encryption (AES-256, PBES2), holding the key and the chain to the root |
 | `user-*-legacy.p12` | The same with TQSL's weak-crypto option (RC2-40 and 3DES, SHA-1 MAC) |
 
-The `.p12` files test reading the encryptions TQSL uses. They are not TQSL's own backups: TQSL also
-adds bag attributes (callsign, QSO dates, DXCC), so those come from tqsllib in phase 2.
+The `.p12` files are for testing a `.p12` reader, which is still to come: they hold the encryptions
+TQSL uses. They are not TQSL's own exports: TQSL also adds bag attributes (callsign, QSO dates, DXCC).
 
 The `.p12` password is `qgt-test`: a test password for test keys. The key and `.p12` files are
 named one by one in `.github/secret_scanning.yml`, so GitHub's secret scanning passes over these
 and still catches a real key committed anywhere else.
 
-## Coming with the tqsllib harness (phase 2, qso-graph-desktop#171)
+## Made by the tqsllib harness (phase 2, qso-graph-desktop#171)
 
 TQSL's own file formats are made by tqsllib itself, so they are exact: its key files (`keys/<call>`,
 plain and password-protected), `.p12` exports with TQSL's bag attributes, `station_data`, `.tbk` backups, `uploaded.db`, and signed `.tq8` logs.

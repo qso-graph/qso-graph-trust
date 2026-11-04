@@ -5,14 +5,14 @@ computer's own credential store (macOS Keychain, Windows Credential Manager, the
 rather than in a file, and the logs you sign uploaded to LoTW.
 
 QGT is an alternative to TQSL, built on enterprise engineering practice: a memory-safe
-implementation, keys held by the OS, and every behaviour proved by tests against TQSL itself. It reads
+implementation, keys to be held by the OS, and every behaviour proved by tests against TQSL itself. It reads
 the certificates and files TQSL uses, and its command line is to take the options loggers give `tqsl`
 today.
 
 > **Status: beta.** The library is on crates.io as
 > [`qso-graph-trust`](https://crates.io/crates/qso-graph-trust). It signs an ADIF log into the `.tq8`
-> LoTW accepts, identical byte for byte to TQSL's, with the certificate and key read from a TQSL
-> backup (`.tbk`). Keeping keys in the credential store, uploading, requesting certificates, the
+> LoTW accepts, with the certificate and key read from a TQSL backup (`.tbk`): the signed records and
+> their signatures are TQSL's, byte for byte; only the line naming the program differs. Keeping keys in the credential store, uploading, requesting certificates, the
 > command line and QSO Graph Desktop's extension are still to come, for QSO Graph Desktop 0.7.0; the
 > work and its gates are tracked in
 > [qso-graph-desktop#169](https://github.com/qso-graph/qso-graph-desktop/issues/169).
@@ -42,8 +42,11 @@ What is done, planned and left out, feature by feature against TQSL:
 ## Using the library
 
 ```sh
-cargo add qso-graph-trust@0.1.0-beta.2
+cargo add qso-graph-trust@0.1.0-beta.2 zeroize zeroizing-alloc@=0.1.1
 ```
+
+`zeroize` and `zeroizing-alloc` are for your program: every program that signs installs the wiping
+allocator, as the example does.
 
 The library's [README](crates/qso-graph-trust/README.md) shows reading a TQSL backup and signing a log.
 
@@ -53,7 +56,7 @@ With Rust installed ([rustup](https://rustup.rs) installs the version `rust-tool
 
 ```sh
 cargo test --workspace
-cargo xtask policy      # no C in the library, no unsafe code
+cargo xtask policy      # no C but AWS-LC, no unsafe code outside the binding
 cargo run -p qso-graph-trust-cli -- --version
 ```
 
@@ -69,8 +72,8 @@ operating systems, library changes and new modes, as volunteers. Thank you.
 
 **ARRL**, for LoTW itself and for documenting it for developers.
 
-**rfrht's [qso-web](https://github.com/rfrht/qso-web)**, which showed, with a shell script and OpenSSL, that
-a `.tq8` built without TQSL is one LoTW accepts.
+**rfrht's [qso-web](https://github.com/rfrht/qso-web)**, a shell script that builds and signs a `.tq8` with
+OpenSSL, without TQSL, and uploads it to LoTW, showing that LoTW accepts a log signed by another program.
 
 ## Sources
 
@@ -90,7 +93,8 @@ from these, and how is QG Trust's own:
   [TQSL's change log](https://lotw.arrl.org/lotw-help/tqslchangelog/). QG Trust carries two things of
   TQSL's, both ARRL's, under ARRL's terms: the TQSL configuration (`config.xml`), from which the LoTW
   tables are generated, and ARRL's root and CA certificates as TQSL embeds them. TQSL 2.8.7, built from
-  its own source, is the reference every signature QG Trust makes is tested against, byte for byte.
+  its own source, is the reference QG Trust's signed records and signatures are tested against, byte
+  for byte.
 - **Other open-source projects:** qso-web, above, and a survey of 126 ham-radio Rust crates on crates.io,
   which found no other LoTW signing crate.
 - **Standards:** [ADIF 3.1.7](https://adif.org/317/ADIF_317.htm); RFC 5280 (X.509 certificates),

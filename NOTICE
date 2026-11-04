@@ -1,4 +1,4 @@
-QSO Graph Trust (QGT): sign and upload logs for ARRL's Logbook of The World
+QSO Graph Trust (QGT): sign logs for ARRL's Logbook of The World
 Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS)
 
 QGT is free software: you can redistribute it and/or modify it under the terms of the GNU General

@@ -21,6 +21,15 @@ Documentation only: no change to what the library does or signs.
 - `AGENTS.md` and `CONTRIBUTING.md` list every CI check and say how a release is made; the decisions
   index names what each superseded decision became.
 - The Sources no longer link a private repository.
+- Claims brought into line with the code: the signed records and signatures match TQSL's byte for
+  byte, and only the identification line differs; the OS credential store and upload are planned,
+  not present (README, `AGENTS.md`, `NOTICE`); a backup's certificates are checked to LoTW's root,
+  and a certificate a program reads itself is checked only when it calls `verify`; the custody test
+  says what it proves; cargo-vet's exemptions are named as not yet audited; what ARRL does when a key
+  is compromised, from its own page.
+- Adding the library names the two crates the example also needs; the feature-parity list frames QG
+  Trust as an alternative; decision 0007 records how releases are actually published; the test
+  corpus's README is current.
 
 ## [0.1.0-beta.1] - 2026-11-04
 

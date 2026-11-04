@@ -71,3 +71,10 @@ The first draft claimed more than the code shows, and Codex's review found it:
 - A grant marked as needing the operator does not ask the operator each time, so the core confirms each
   act itself (`QGD-LTW-0003`).
 - Requests from an extension that is off were not refused; `QGD-APP-0024` closes that for every extension.
+
+## Amended 2026-11-04: how a release is published
+
+What was built differs from the release lines above in two details. The release workflow publishes
+two crates, the binding and the library, from main's commit, and tags that commit once both are on
+crates.io, so a tag means published. The command line is to be published once it signs, planned for 0.1.0-beta.3.
+How to release: AGENTS.md, Releasing.

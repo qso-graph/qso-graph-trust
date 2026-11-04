@@ -1,8 +1,9 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 # qso-graph-trust
 
-Sign logs for ARRL's [Logbook of The World](https://lotw.arrl.org) (LoTW). The signed log is the same,
-byte for byte, as the one TQSL makes from the same key, station location and QSOs.
+Sign ADIF logs for ARRL's [Logbook of The World](https://lotw.arrl.org) (LoTW). From the same key,
+station location and QSOs, the signed records and their signatures are TQSL's, byte for byte; only the line naming the program
+that made the file differs.
 
 QSO Graph Trust is the library behind LoTW signing in [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop)
 and the `qg-trust` command line, both still to come, and it is for other people's programs too. Its parsers are safe Rust, and the library
@@ -16,7 +17,8 @@ TQSL: [`docs/FEATURE-PARITY.md`](https://github.com/qso-graph/qso-graph-trust/bl
 
 ## Example
 
-Read a TQSL backup, then sign an ADIF log for one of its station locations:
+Read a TQSL backup, then sign an ADIF log for one of its station locations. Beside this crate, the
+example uses `zeroize` and `zeroizing-alloc` (`cargo add zeroize zeroizing-alloc@=0.1.1`):
 
 ```rust,no_run
 use std::time::SystemTime;
@@ -82,8 +84,8 @@ operating systems, library changes and new modes, as volunteers. Thank you.
 
 **ARRL**, for LoTW itself and for documenting it for developers.
 
-**rfrht's [qso-web](https://github.com/rfrht/qso-web)**, which showed, with a shell script and OpenSSL, that
-a `.tq8` built without TQSL is one LoTW accepts.
+**rfrht's [qso-web](https://github.com/rfrht/qso-web)**, a shell script that builds and signs a `.tq8` with
+OpenSSL, without TQSL, and uploads it to LoTW, showing that LoTW accepts a log signed by another program.
 
 ## Sources
 
@@ -103,7 +105,8 @@ from these, and how is QG Trust's own:
   [TQSL's change log](https://lotw.arrl.org/lotw-help/tqslchangelog/). QG Trust carries two things of
   TQSL's, both ARRL's, under ARRL's terms: the TQSL configuration (`config.xml`), from which the LoTW
   tables are generated, and ARRL's root and CA certificates as TQSL embeds them. TQSL 2.8.7, built from
-  its own source, is the reference every signature QG Trust makes is tested against, byte for byte.
+  its own source, is the reference QG Trust's signed records and signatures are tested against, byte
+  for byte.
 - **Other open-source projects:** qso-web, above, and a survey of 126 ham-radio Rust crates on crates.io,
   which found no other LoTW signing crate.
 - **Standards:** [ADIF 3.1.7](https://adif.org/317/ADIF_317.htm); RFC 5280 (X.509 certificates),
