@@ -97,11 +97,13 @@ jobs:
               others=$(otool -L "$dir/qg-trust" | tail -n +2 | awk '{print $1}' | grep -vE '^/(usr/lib|System/Library)/' || true)
               [ -z "$others" ] || { echo "::error::qg-trust loads libraries macOS does not have: $others"; exit 1; } ;;
             Windows)
-              dumpbin=$("/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' -find '**/Hostx64/x64/dumpbin.exe' | head -1)
+              # vswhere answers in Windows line endings: the \r is taken off, or the path names nothing.
+              dumpbin=$("/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' -find '**/Hostx64/x64/dumpbin.exe' | tr -d '\r' | head -1)
+              [ -n "$dumpbin" ] || { echo "::error::dumpbin was not found"; exit 1; }
               deps=$("$dumpbin" -nologo -dependents "$dir/qg-trust.exe" | tr -d '\r' | grep -iE '^\s+[a-z0-9_.-]+\.dll$' | tr -d ' ')
               echo "$deps"
               # Windows' own DLLs only: no Visual C++ runtime (vcruntime, msvcp, ucrtbase as a DLL to ship).
-              bad=$(echo "$deps" | grep -ivE '^(kernel32|advapi32|bcrypt|ntdll|ws2_32|userenv|user32|crypt32|secur32|ole32|oleaut32|shell32|api-ms-win-[a-z0-9-]+)\.dll$' || true)
+              bad=$(echo "$deps" | grep -ivE '^(kernel32|advapi32|bcrypt|bcryptprimitives|ntdll|ws2_32|userenv|user32|crypt32|secur32|ole32|oleaut32|shell32|api-ms-win-[a-z0-9-]+)\.dll$' || true)
               [ -z "$bad" ] || { echo "::error::qg-trust.exe needs DLLs Windows does not have: $bad"; exit 1; } ;;
           esac
           "$dir/qg-trust" --version
@@ -120,6 +122,20 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          umask 077
+          keychain="$RUNNER_TEMP/qgt-signing.keychain-db"
+          p12="$RUNNER_TEMP/qgt-signing.p12"
+          key="$RUNNER_TEMP/notary-key.p8"
+          searched=$(security list-keychains -d user | tr -d '"')
+          # Whatever happens, the signing key leaves with this step: the keychain deleted, the search
+          # list put back, and the certificate and notary key files removed.
+          cleanup() {
+            # shellcheck disable=SC2086
+            security list-keychains -d user -s $searched >/dev/null 2>&1 || true
+            security delete-keychain "$keychain" >/dev/null 2>&1 || true
+            rm -f "$p12" "$key"
+          }
+          trap cleanup EXIT
           for name in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_TEAM_ID; do
             [ -n "${!name}" ] || { echo "::error::The macos-signing Environment has no $name."; exit 1; }
           done
@@ -130,10 +146,8 @@ jobs:
           [[ "$APPLE_API_KEY_P8" == *"-----BEGIN PRIVATE KEY-----"*"-----END PRIVATE KEY-----"* ]] || { echo "::error::APPLE_API_KEY_P8 should be the whole .p8 file."; exit 1; }
           # A keychain of this run's own, with a random password that dies with the runner. Apple's
           # Developer ID G2 intermediate goes in beside the certificate so the identity is valid.
-          keychain="$RUNNER_TEMP/qgt-signing.keychain-db"
           keychain_password=$(openssl rand -base64 32)
           echo "::add-mask::$keychain_password"
-          p12="$RUNNER_TEMP/qgt-signing.p12"
           printf '%s' "$CSC_LINK" | tr -d ' \r\n' | base64 --decode > "$p12"
           unset CSC_LINK
           curl --proto '=https' --tlsv1.2 -fsSL -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
@@ -145,23 +159,20 @@ jobs:
           unset CSC_KEY_PASSWORD
           rm -f "$p12"
           security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
-          # The user's keychains, one word each, after this run's own.
-          # shellcheck disable=SC2046
-          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          # This run's keychain first, then the user's own, one word each.
+          # shellcheck disable=SC2086
+          security list-keychains -d user -s "$keychain" $searched
           program="target/$TARGET/release/qg-trust"
           codesign --force --options runtime --timestamp --keychain "$keychain" \
             --identifier org.qso-graph.qg-trust \
             --sign "Developer ID Application: Greg Beam (${APPLE_TEAM_ID})" "$program"
           codesign --verify --strict --verbose=2 "$program"
           codesign -dv --verbose=2 "$program" 2>&1 | grep -E '^(Authority|TeamIdentifier|Runtime|Identifier)'
-          key="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
           printf '%s\n' "$APPLE_API_KEY_P8" > "$key"
-          chmod 600 "$key"
           unset APPLE_API_KEY_P8
           ditto -c -k "$program" "$RUNNER_TEMP/qg-trust-notarize.zip"
           xcrun notarytool submit "$RUNNER_TEMP/qg-trust-notarize.zip" --key "$key" --key-id "$APPLE_API_KEY_ID" \
             --issuer "$APPLE_API_ISSUER" --wait --timeout 80m --output-format json > "$RUNNER_TEMP/notary.json"
-          rm -f "$key"
           cat "$RUNNER_TEMP/notary.json"
           [ "$(jq -r .status "$RUNNER_TEMP/notary.json")" = Accepted ] || { echo "::error::Apple did not accept qg-trust for notarization."; exit 1; }
           "$program" --version

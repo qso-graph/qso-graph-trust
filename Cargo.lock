@@ -618,6 +618,7 @@ version = "0.1.0-beta.4"
 dependencies = [
  "aws-lc-rs",
  "aws-lc-sys",
+ "zeroize",
 ]
 
 [[package]]

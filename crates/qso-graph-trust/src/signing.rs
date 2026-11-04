@@ -318,6 +318,18 @@ impl KeyEntry {
 
     /// Unlock the key for signing. A protected key needs its password; a plain one ignores it.
     pub fn unlock(&self, password: Option<&[u8]>) -> Result<TqslKey, KeyError> {
+        let der = self.pkcs8_der(password)?;
+        TqslKey::from_pkcs8_der(
+            &der,
+            &self.public_key_der().ok_or(KeyError::PublicKeyMismatch)?,
+        )
+    }
+
+    // Kept inside the crate: only the credential-store handoff may obtain the DER, never a caller.
+    pub(crate) fn pkcs8_der(
+        &self,
+        password: Option<&[u8]>,
+    ) -> Result<Zeroizing<Vec<u8>>, KeyError> {
         if self.is_encrypted() && password.is_none() {
             return Err(KeyError::PasswordNeeded);
         }
@@ -326,7 +338,7 @@ impl KeyEntry {
         let mut decoded = Zeroizing::new(vec![0u8; self.private_key_pem.len()]);
         let (label, der) = pkcs8::der::pem::decode(self.private_key_pem.as_bytes(), &mut decoded)
             .map_err(|_| KeyError::NotAKey)?;
-        let key = match label {
+        match label {
             "ENCRYPTED PRIVATE KEY" => {
                 let password = password.ok_or(KeyError::PasswordNeeded)?;
                 let info = EncryptedPrivateKeyInfo::from_der(der).map_err(|_| KeyError::NotAKey)?;
@@ -336,12 +348,18 @@ impl KeyEntry {
                 let EncryptionScheme::Pbes2(params) = &info.encryption_algorithm else {
                     return Err(KeyError::UnsupportedProtection);
                 };
-                let plain = decrypt(params, password, info.encrypted_data)?;
-                RsaKey::from_pkcs8_der(&plain).map_err(|_| KeyError::NotRsa)?
+                decrypt(params, password, info.encrypted_data)
             }
-            "PRIVATE KEY" => RsaKey::from_pkcs8_der(der).map_err(|_| KeyError::NotAKey)?,
-            _ => return Err(KeyError::NotAKey),
-        };
+            "PRIVATE KEY" => Ok(Zeroizing::new(der.to_vec())),
+            _ => Err(KeyError::NotAKey),
+        }
+    }
+}
+
+impl TqslKey {
+    // A stored secret is checked again: the credential backend is not a source of trust.
+    pub(crate) fn from_pkcs8_der(der: &[u8], spki: &[u8]) -> Result<Self, KeyError> {
+        let key = RsaKey::from_pkcs8_der(der).map_err(|_| KeyError::NotAKey)?;
         // A key LoTW uses, as tqsllib makes them: 1024 bits, e = 65537 (tqsl_new_rsa_key), two
         // different 512-bit factors, each passing AWS-LC's primality test. Anything else cannot
         // carry a LoTW certificate; unequal, equal or composite factors would sign with a modulus
@@ -351,9 +369,7 @@ impl KeyEntry {
         }
         // The public key the file states is the private key's own, so a certificate matched by it
         // is this key's (found by Codex review).
-        let (label, spki) = pkcs8::der::pem::decode_vec(self.public_key_pem.as_bytes())
-            .map_err(|_| KeyError::PublicKeyMismatch)?;
-        if label != "PUBLIC KEY" || !key.matches_public_key(&spki) {
+        if !key.matches_public_key(spki) {
             return Err(KeyError::PublicKeyMismatch);
         }
         Ok(TqslKey { key })

@@ -205,6 +205,10 @@ impl Certificate {
         &self.spki
     }
 
+    pub(crate) fn der(&self) -> &[u8] {
+        &self.der
+    }
+
     /// The certificate as a tCERT record carries it: base64 of the DER, in lines of 64
     /// characters, each ended by a newline.
     pub fn tcert_base64(&self) -> String {

@@ -40,7 +40,7 @@ zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
 # PBKDF2 with HMAC-SHA1 or -SHA256, then 3DES- or AES-CBC, each with its zeroize
 # feature. pkcs5 still reads the parameters.
 pbkdf2 = { version = "=0.12.2", default-features = false, features = ["hmac"] }
-sha2 = { version = "=0.10.9", default-features = false }
+sha2 = { version = "=0.10.9", default-features = false, features = ["oid"] }
 cbc = { version = "=0.1.2", default-features = false, features = ["block-padding", "zeroize"] }
 des = { version = "=0.8.1", default-features = false, features = ["zeroize"] }
 aes = { version = "=0.8.4", default-features = false, features = ["zeroize"] }
