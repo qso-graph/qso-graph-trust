@@ -10,6 +10,7 @@
 //! TQSL writes to standard error and loggers read. `-i` differs: TQSL imports a file into its own
 //! store, and `qg-trust`, which has no store yet, reads the TQSL backup it names for this run.
 
+use std::ffi::OsString;
 use std::fmt;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -65,8 +66,10 @@ pub(crate) struct Env<'a> {
     pub now: SystemTime,
     /// Asks for a key's password, given the prompt.
     pub ask_password: &'a mut dyn FnMut(&str) -> io::Result<Zeroizing<Vec<u8>>>,
-    /// Whether help, errors and messages use ANSI styling, decided by the caller.
-    pub color: bool,
+    /// Whether help and the version use ANSI styling, decided for standard output.
+    pub color_out: bool,
+    /// Whether messages use ANSI styling, decided for standard error.
+    pub color_err: bool,
     /// Standard output: help, the version and shell completions.
     pub out: &'a mut dyn Write,
     /// Standard error: every message, and the final status line.
@@ -87,7 +90,8 @@ from standard input when a logger runs qg-trust. The last line on standard error
     after_help = AFTER_HELP,
     override_usage = "qg-trust -i <FILE> -l <NAME> [OPTIONS] <LOG.adi>\n       qg-trust --completions <SHELL>",
     disable_version_flag = true,
-    disable_help_flag = true
+    disable_help_flag = true,
+    args_override_self = true
 )]
 struct Options {
     /// The file with your certificate (the .tbk TQSL saves).
@@ -95,6 +99,7 @@ struct Options {
         short = 'i',
         long = "import",
         value_name = "FILE",
+        allow_hyphen_values = true,
         help_heading = "Signing",
         required_unless_present = "completions"
     )]
@@ -104,6 +109,7 @@ struct Options {
         short = 'l',
         long,
         value_name = "NAME",
+        allow_hyphen_values = true,
         value_parser = clap::builder::NonEmptyStringValueParser::new(),
         help_heading = "Signing",
         required_unless_present = "completions"
@@ -111,14 +117,20 @@ struct Options {
     location: Option<String>,
     /// Sign only QSOs on or after DATE (YYYY-MM-DD or YYYYMMDD).
     #[arg(short = 'b', long = "begindate", value_name = "DATE", help_heading = "Signing",
-          value_parser = |s: &str| date(s, "start"))]
+          allow_hyphen_values = true, value_parser = date)]
     begin: Option<Date>,
     /// Sign only QSOs on or before DATE (YYYY-MM-DD or YYYYMMDD).
     #[arg(short = 'e', long = "enddate", value_name = "DATE", help_heading = "Signing",
-          value_parser = |s: &str| date(s, "end"))]
+          allow_hyphen_values = true, value_parser = date)]
     end: Option<Date>,
     /// Where to write the signed log (default: LOG with .tq8).
-    #[arg(short = 'o', long, value_name = "FILE", help_heading = "Signing")]
+    #[arg(
+        short = 'o',
+        long,
+        value_name = "FILE",
+        allow_hyphen_values = true,
+        help_heading = "Signing"
+    )]
     output: Option<PathBuf>,
     /// The ADIF log to sign.
     #[arg(value_name = "LOG.adi", required_unless_present = "completions")]
@@ -153,60 +165,198 @@ struct Options {
     /// Print this help.
     #[arg(short = 'h', long, action = clap::ArgAction::Help, help_heading = "Other")]
     help: Option<bool>,
+    #[command(flatten)]
+    rejected: Rejected,
 }
 
-/// Runs `qg-trust` with these arguments and returns its exit code.
-pub(crate) fn run(args: &[String], env: &mut Env<'_>) -> u8 {
-    let code = if let Some(message) = refused_option(args) {
-        syntax_error(env, &message)
-    } else {
-        match Options::try_parse_from(
-            std::iter::once("qg-trust").chain(args.iter().map(String::as_str)),
-        ) {
-            Ok(options) => {
-                if let Some(shell) = options.completions {
-                    // Completion scripts are source code, so they never receive styling.
-                    // Written whole from a buffer: clap_complete panics on a failed write, and a
-                    // reader that stops early (`| head`) is not a failure of qg-trust's.
-                    let mut script = Vec::new();
-                    clap_complete::generate(
-                        shell,
-                        &mut Options::command(),
-                        "qg-trust",
-                        &mut script,
-                    );
-                    let _ = env.out.write_all(&script);
-                    return 0;
-                }
-                if let (Some(begin), Some(end)) = (options.begin, options.end)
-                    && begin > end
-                {
-                    syntax_error(env, "the start date is after the end date")
-                } else {
-                    sign(&options, env)
-                }
-            }
-            Err(error) => {
-                let display = matches!(
-                    error.kind(),
-                    ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
-                );
-                let writer = if display { &mut env.out } else { &mut env.err };
-                let rendered = error.render();
-                if env.color {
-                    let _ = write!(writer, "{}", rendered.ansi());
-                } else {
-                    let _ = write!(writer, "{rendered}");
-                }
-                if display {
-                    return 0;
-                }
-                Exit::CommandError
-            }
-        }
+/// These options are recognized only to explain why qg-trust refuses them. Their values are
+/// never used in a diagnostic, even when another argument prevents a successful parse.
+#[derive(Debug, clap::Args)]
+struct Rejected {
+    #[arg(short = 'p', long = "password", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    password: Option<Option<String>>,
+    #[arg(short = 'a', long = "action", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    action: Option<Option<String>>,
+    #[arg(short = 'c', long = "callsign", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    callsign: Option<Option<String>>,
+    #[arg(short = 'f', long = "verify", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    verify: Option<Option<String>>,
+    #[arg(short = 'n', long = "updates", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    updates: Option<Option<String>>,
+    #[arg(short = 's', long = "editlocation", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    editlocation: Option<Option<String>>,
+    #[arg(short = 't', long = "diagnose", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    diagnose: Option<Option<String>>,
+    #[arg(short = 'u', long = "upload", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    upload: Option<Option<String>>,
+    #[arg(short = 'w', long = "wipe", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    wipe: Option<Option<String>>,
+    #[arg(short = 'z', long = "test-sign", hide = true, num_args = 0..=1, allow_hyphen_values = true)]
+    test_sign: Option<Option<String>>,
+}
+
+const PASSWORD_MESSAGE: &str = "a password is never given on the command line: qg-trust asks for \
+    the key's password when it needs it";
+
+// Only these literals can become a refusal message, never a slice of an argument.
+const REJECTED_MESSAGES: &[(char, &str, &str, &str)] = &[
+    ('p', "--password", PASSWORD_MESSAGE, PASSWORD_MESSAGE),
+    (
+        'a',
+        "--action",
+        "-a is not supported yet",
+        "--action is not supported yet",
+    ),
+    (
+        'c',
+        "--callsign",
+        "-c is not supported yet",
+        "--callsign is not supported yet",
+    ),
+    (
+        'f',
+        "--verify",
+        "-f is not supported yet",
+        "--verify is not supported yet",
+    ),
+    (
+        'n',
+        "--updates",
+        "-n is not supported yet",
+        "--updates is not supported yet",
+    ),
+    (
+        's',
+        "--editlocation",
+        "-s is not supported yet",
+        "--editlocation is not supported yet",
+    ),
+    (
+        't',
+        "--diagnose",
+        "-t is not supported yet",
+        "--diagnose is not supported yet",
+    ),
+    (
+        'u',
+        "--upload",
+        "-u is not supported yet",
+        "--upload is not supported yet",
+    ),
+    (
+        'w',
+        "--wipe",
+        "-w is not supported yet",
+        "--wipe is not supported yet",
+    ),
+    (
+        'z',
+        "--test-sign",
+        "-z is not supported yet",
+        "--test-sign is not supported yet",
+    ),
+];
+
+impl Rejected {
+    fn message(&self) -> Option<&'static str> {
+        let present = [
+            self.password.is_some(),
+            self.action.is_some(),
+            self.callsign.is_some(),
+            self.verify.is_some(),
+            self.updates.is_some(),
+            self.editlocation.is_some(),
+            self.diagnose.is_some(),
+            self.upload.is_some(),
+            self.wipe.is_some(),
+            self.test_sign.is_some(),
+        ];
+        present
+            .iter()
+            .zip(REJECTED_MESSAGES)
+            .find_map(|(present, option)| present.then_some(option.2))
+    }
+}
+
+/// Runs `qg-trust` with OS arguments so invalid text cannot panic before the final status line.
+pub(crate) fn run(args: &[OsString], env: &mut Env<'_>) -> u8 {
+    let code = match args
+        .iter()
+        .map(|arg| arg.to_str())
+        .collect::<Option<Vec<_>>>()
+    {
+        Some(args) => match execute(&args, env) {
+            Some(code) => code,
+            None => return 0,
+        },
+        None => syntax_error(env, "an argument is not valid text"),
     };
     let _ = writeln!(env.err, "Final Status: {}({})", code.name(), code as u8);
     code as u8
+}
+
+/// None means informational output, which has no final status line.
+fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
+    // Loggers used to be able to request help even beside an invalid or unsupported option.
+    let help = ["--help"];
+    let parse_args = if args.iter().any(|arg| matches!(*arg, "-h" | "--help")) {
+        help.as_slice()
+    } else {
+        args
+    };
+    match Options::try_parse_from(std::iter::once("qg-trust").chain(parse_args.iter().copied())) {
+        Ok(options) => {
+            if let Some(message) = options.rejected.message() {
+                let message = REJECTED_MESSAGES
+                    .iter()
+                    .find_map(|option| {
+                        (option.2 == message
+                            && args.iter().any(|arg| {
+                                arg.split_once('=').map_or(*arg, |(name, _)| name) == option.1
+                            }))
+                        .then_some(option.3)
+                    })
+                    .unwrap_or(message);
+                return Some(syntax_error(env, message));
+            }
+            if let Some(shell) = options.completions {
+                // Completion scripts are source code, so they never receive styling.
+                // Written whole from a buffer: clap_complete panics on a failed write, and a
+                // reader that stops early (`| head`) is not a failure of qg-trust's.
+                let mut script = Vec::new();
+                clap_complete::generate(shell, &mut Options::command(), "qg-trust", &mut script);
+                let _ = env.out.write_all(&script);
+                return None;
+            }
+            if let (Some(begin), Some(end)) = (options.begin, options.end)
+                && begin > end
+            {
+                Some(syntax_error(env, "the start date is after the end date"))
+            } else {
+                Some(sign(&options, env))
+            }
+        }
+        Err(error) => {
+            if matches!(
+                error.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+            ) {
+                let rendered = error.render();
+                if env.color_out {
+                    let _ = write!(env.out, "{}", rendered.ansi());
+                } else {
+                    let _ = write!(env.out, "{rendered}");
+                }
+                return None;
+            }
+            // Clap's diagnostics, suggestions and parser sources may contain any user value.
+            // Render none of them; even an unrecognized error kind gets only our fixed text.
+            Some(syntax_error(
+                env,
+                rejected_message(args).unwrap_or_else(|| parse_error_message(&error)),
+            ))
+        }
+    }
 }
 
 fn syntax_error(env: &mut Env<'_>, message: &str) -> Exit {
@@ -217,54 +367,22 @@ fn syntax_error(env: &mut Env<'_>, message: &str) -> Exit {
     Exit::CommandError
 }
 
-/// Refuse unsupported TQSL options before clap can include a password in a diagnostic. Values
-/// belong to the option before them, and `--` makes the remaining words file names.
-fn refused_option(args: &[String]) -> Option<String> {
-    let mut rest = args.iter();
-    while let Some(arg) = rest.next() {
-        if arg == "--" {
-            break;
+/// Select a fixed refusal even if clap could not build Options. This does not parse values or
+/// decide acceptance: clap does that. Exact names and short letters only select our own literals.
+fn rejected_message(args: &[&str]) -> Option<&'static str> {
+    for arg in args {
+        let name = arg.split_once('=').map_or(*arg, |(name, _)| name);
+        for &(_, long, _, long_message) in REJECTED_MESSAGES {
+            if name == long {
+                return Some(long_message);
+            }
         }
-        if arg.starts_with("--") {
-            let (flag, inline) = arg
-                .split_once('=')
-                .map_or((arg.as_str(), false), |(f, _)| (f, true));
-            if let Some(message) = refusal(flag) {
-                return Some(message);
-            }
-            if !inline
-                && matches!(
-                    flag,
-                    "--import"
-                        | "--location"
-                        | "--begindate"
-                        | "--enddate"
-                        | "--output"
-                        | "--completions"
-                )
-                && rest
-                    .clone()
-                    .next()
-                    .is_some_and(|value| !value.starts_with('-'))
-            {
-                // A following option is not a value in clap; it must still be checked.
-                rest.next();
-            }
-        } else if let Some(shorts) = arg.strip_prefix('-') {
-            for (index, short) in shorts.char_indices() {
-                let flag = format!("-{short}");
-                if let Some(message) = refusal(&flag) {
-                    return Some(message);
+        if let Some(letters) = arg.strip_prefix('-').filter(|s| !s.starts_with('-')) {
+            for letter in letters.chars() {
+                if let Some(option) = REJECTED_MESSAGES.iter().find(|option| option.0 == letter) {
+                    return Some(option.2);
                 }
-                if matches!(short, 'i' | 'l' | 'b' | 'e' | 'o') {
-                    if index + short.len_utf8() == shorts.len()
-                        && rest
-                            .clone()
-                            .next()
-                            .is_some_and(|value| !value.starts_with('-'))
-                    {
-                        rest.next();
-                    }
+                if matches!(letter, 'i' | 'l' | 'b' | 'e' | 'o') {
                     break;
                 }
             }
@@ -273,17 +391,33 @@ fn refused_option(args: &[String]) -> Option<String> {
     None
 }
 
-fn refusal(flag: &str) -> Option<String> {
-    match flag {
-        "-p" | "--password" => Some(
-            "a password is never given on the command line: qg-trust asks for \
-             the key's password when it needs it"
-                .to_string(),
-        ),
-        "-a" | "--action" | "-c" | "--callsign" | "-f" | "--verify" | "-n" | "--updates" | "-s"
-        | "--editlocation" | "-t" | "--diagnose" | "-u" | "--upload" | "-w" | "--wipe" | "-z"
-        | "--test-sign" => Some(format!("{flag} is not supported yet")),
-        _ => None,
+fn parse_error_message(error: &clap::Error) -> &'static str {
+    use clap::error::{ContextKind, ContextValue};
+
+    // Match complete, known option names. Never interpolate clap's context into output.
+    let option = match error.get(ContextKind::InvalidArg) {
+        Some(ContextValue::String(option)) => option.as_str(),
+        _ => "",
+    };
+    match error.kind() {
+        ErrorKind::UnknownArgument => "an option qg-trust does not know was given",
+        ErrorKind::InvalidValue | ErrorKind::ValueValidation | ErrorKind::TooFewValues => {
+            match option {
+                "--begindate <DATE>" => "--begindate needs a date (YYYY-MM-DD or YYYYMMDD)",
+                "--enddate <DATE>" => "--enddate needs a date (YYYY-MM-DD or YYYYMMDD)",
+                "--import <FILE>" => "-i names the file with your certificate",
+                "--location <NAME>" => "-l names the station location to sign for",
+                "--output <FILE>" => "-o names the file for the signed log",
+                "--completions <SHELL>" => {
+                    "--completions takes bash, zsh, fish, powershell or elvish"
+                }
+                _ => "an option needs a valid value",
+            }
+        }
+        ErrorKind::MissingRequiredArgument => {
+            "give the log to sign, -i with your certificate file and -l with your station location"
+        }
+        _ => "the command line is not valid",
     }
 }
 
@@ -297,7 +431,7 @@ enum Tone {
 impl Env<'_> {
     /// Keep the words identical for loggers, and reset styling before the final status line.
     fn message(&mut self, tone: Tone, message: fmt::Arguments<'_>) {
-        if !self.color {
+        if !self.color_err {
             let _ = writeln!(self.err, "qg-trust: {message}");
             return;
         }
@@ -315,10 +449,10 @@ impl Env<'_> {
 }
 
 /// A date as TQSL takes one on its command line: YYYY-MM-DD or YYYYMMDD.
-fn date(text: &str, which: &str) -> Result<Date, String> {
+fn date(text: &str) -> Result<Date, &'static str> {
     Date::from_iso(text)
         .or_else(|| Date::from_adif(text))
-        .ok_or_else(|| format!("{which} date of {text} is invalid"))
+        .ok_or("a date must be YYYY-MM-DD or YYYYMMDD")
 }
 
 fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
