@@ -16,6 +16,15 @@ versions follow [Semantic Versioning](https://semver.org/).
   PBKDF2-HMAC-SHA-256 at 600,000 iterations. Restore authenticates and checks every certificate, key
   and station location before replacing the store; private key bytes stay inside the library.
 
+### Fixed
+
+- Derive export AES keys directly into wiped heap storage, avoiding moved stack copies. Custody
+  scans now search generated export passwords and both successful and failed-open derived keys,
+  with planted-leak controls in debug and release.
+- Encrypted store parts include pending certificate requests and their keys, checked against each
+  recorded public key before restore changes the destination. The private store-part format is
+  version 2; version 1 plaintext is refused. The encryption envelope remains version 1.
+
 ## [0.1.0-beta.4] - 2026-11-04
 
 Documentation only: the library and `qg-trust` sign exactly as beta.3 does.

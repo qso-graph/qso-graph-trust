@@ -21,14 +21,15 @@ impl fmt::Display for EncryptionError {
 impl std::error::Error for EncryptionError {}
 
 /// Derive an AES-256 key in wiped memory using PBKDF2-HMAC-SHA-256.
-pub fn pbkdf2_sha256(password: &[u8], salt: &[u8], iterations: NonZeroU32) -> Zeroizing<[u8; 32]> {
-    let mut key = Zeroizing::new([0; 32]);
+pub fn pbkdf2_sha256(password: &[u8], salt: &[u8], iterations: NonZeroU32) -> Zeroizing<Vec<u8>> {
+    // Derive into the allocation itself: moving an inline array can leave an unwiped stack copy.
+    let mut key = Zeroizing::new(vec![0; 32]);
     pbkdf2::derive(
         pbkdf2::PBKDF2_HMAC_SHA256,
         iterations,
         salt,
         password,
-        &mut *key,
+        &mut key,
     );
     key
 }
@@ -36,7 +37,7 @@ pub fn pbkdf2_sha256(password: &[u8], salt: &[u8], iterations: NonZeroU32) -> Ze
 /// Seal with AES-256-GCM and authenticated associated data. The caller must never reuse a
 /// `(key, nonce)` pair. The result includes the 16-byte tag and is wiped even on failure.
 pub fn aes256_gcm_seal(
-    key: &[u8; 32],
+    key: &[u8],
     nonce: [u8; 12],
     aad: &[u8],
     plaintext: &[u8],
@@ -59,7 +60,7 @@ pub fn aes256_gcm_seal(
 
 /// Authenticate and open AES-256-GCM into wiped memory, including on authentication failure.
 pub fn aes256_gcm_open(
-    key: &[u8; 32],
+    key: &[u8],
     nonce: [u8; 12],
     aad: &[u8],
     ciphertext: &[u8],
@@ -125,7 +126,7 @@ mod tests {
             0xb7, 0x0b, 0xe1, 0x7b,
         ];
         assert_eq!(
-            *pbkdf2_sha256(b"password", b"salt", NonZeroU32::new(1).expect("nonzero")),
+            pbkdf2_sha256(b"password", b"salt", NonZeroU32::new(1).expect("nonzero")).as_slice(),
             expected
         );
     }

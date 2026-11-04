@@ -108,7 +108,7 @@ fn hostile_work_factors_are_refused_before_deriving() {
     assert!(
         open_with(LOTW_PART, &bytes, &password, |_, _, _| {
             called.set(true);
-            Zeroizing::new([0; 32])
+            Zeroizing::new(vec![0; 32])
         })
         .is_err()
     );

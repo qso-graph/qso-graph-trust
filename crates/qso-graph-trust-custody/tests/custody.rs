@@ -7,12 +7,13 @@
 //! debugger or a crash dump would see it, and looks for the key: the key file's text, the key's
 //! DER, its private exponent, primes and all three CRT values (`d mod p−1`, `d mod q−1` and
 //! `q⁻¹ mod p`), `e·d`, `p−1` and `q−1`, each in both byte orders, and the password. None may be
-//! there.
+//! there. Generated export passwords and both AES keys (including failed opens) are searched too.
 //!
-//! Two controls prove the search finds what is there: with the key still in use, every one of its
+//! Controls prove the search finds what is there: with the key still in use, every one of its
 //! private values must be found, so each needle is shown to be right;
 //! and in the same program built without the wiping allocator, what an ordinary free leaves (the
-//! key file's text, read into a plain buffer as any caller reads a file) must be found.
+//! key file's text, read into a plain buffer as any caller reads a file) must be found. Separate
+//! runs deliberately keep copies of both export passwords and both derived AES keys.
 //!
 //! Linux, where a parent may read its child's memory through `/proc`; run in CI on Linux, debug and
 //! release, as optimisation is what removes wipes.
@@ -21,8 +22,10 @@
 #![cfg(target_os = "linux")]
 
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pkcs8::der::Decode;
 use rsa::traits::{PrivateKeyParts, PublicKeyParts};
@@ -128,11 +131,68 @@ fn memory(pid: u32) -> Vec<(String, Vec<u8>)> {
     regions
 }
 
-/// Which needles are found in the program's memory once it says `ready`.
-/// Which needles are found in the program's memory once it says `ready`. The key's password, if
-/// it has one, is read from the corpus (`key-password`), where the corpus script wrote it.
+// Test-only files contain fresh generated export passwords, never operator credentials.
+struct SecretsFolder(PathBuf);
+impl SecretsFolder {
+    fn new() -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "qgt-custody-needles-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .expect("private test directory");
+        Self(path)
+    }
+}
+impl Drop for SecretsFolder {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn export_needles(path: &Path) -> Vec<(String, Vec<u8>)> {
+    let secrets = std::fs::read(path).expect("test-only export secrets");
+    assert_eq!(secrets.len(), 56);
+    // Independent test oracle, using Python 3 (also required by the repository's build checks).
+    // Passwords travel over stdin. No production crate or feature exposes passwords or AES keys.
+    let mut derive = Command::new("python3")
+        .args([
+            "-c",
+            "import hashlib, sys
+s = sys.stdin.buffer.read()
+for p in (s[:20], s[20:40]):
+    sys.stdout.buffer.write(hashlib.pbkdf2_hmac('sha256', p, s[40:], 600000, 32))",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Python PBKDF2 oracle");
+    derive
+        .stdin
+        .take()
+        .expect("oracle input")
+        .write_all(&secrets)
+        .expect("derive input");
+    let derived = derive.wait_with_output().expect("derive");
+    assert!(derived.status.success());
+    assert_eq!(derived.stdout.len(), 64);
+    vec![
+        ("export password".into(), secrets[..20].to_vec()),
+        ("failed-open password".into(), secrets[20..40].to_vec()),
+        ("export AES key".into(), derived.stdout[..32].to_vec()),
+        ("failed-open AES key".into(), derived.stdout[32..].to_vec()),
+    ]
+}
+
+/// Scan before reading the child's test-secret file, then construct the export needles.
 fn found_in(program: &str, case: &str, mode: &str) -> Vec<String> {
     let arg = |p: &Path| p.to_str().expect("a UTF-8 path").to_string();
+    let folder = SecretsFolder::new();
+    let secrets_file = folder.0.join("export-secrets");
     let mut child = Command::new(program)
         .args([
             arg(&corpus(case, "tqsl/keys/QG0TEST")),
@@ -140,6 +200,7 @@ fn found_in(program: &str, case: &str, mode: &str) -> Vec<String> {
             arg(&PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../../tests/corpus/adif/qg0test-small.adi")),
             arg(&corpus(case, "key-password")),
+            arg(&secrets_file),
             mode.to_string(),
         ])
         .stdin(Stdio::piped())
@@ -151,7 +212,23 @@ fn found_in(program: &str, case: &str, mode: &str) -> Vec<String> {
         .read_line(&mut line)
         .expect("reads");
     assert_eq!(line, "ready\n", "{program} {case} {mode}");
-    let regions = memory(child.id());
+    let mut regions = memory(child.id());
+    let export_needles = export_needles(&secrets_file);
+    if mode == "export-keys" {
+        // After observing the completed export/restore, deliberately keep copies of both derived
+        // keys in the child. The same search must find each planted key in a second snapshot.
+        let input = child.stdin.as_mut().expect("its input");
+        input.write_all(b"\n").expect("release first wait");
+        for (_, key) in &export_needles[2..] {
+            input.write_all(key).expect("plant AES key");
+        }
+        line.clear();
+        BufReader::new(child.stdout.as_mut().expect("its output"))
+            .read_line(&mut line)
+            .expect("second ready");
+        assert_eq!(line, "ready\n");
+        regions = memory(child.id());
+    }
     child
         .stdin
         .as_mut()
@@ -160,7 +237,8 @@ fn found_in(program: &str, case: &str, mode: &str) -> Vec<String> {
         .expect("writes");
     assert!(child.wait().expect("exits").success());
 
-    let needles = needles(case);
+    let mut needles = needles(case);
+    needles.extend(export_needles);
     if std::env::var_os("QGT_CUSTODY_WHERE").is_some() {
         for (label, n) in &needles {
             for (region, bytes) in &regions {
@@ -169,11 +247,7 @@ fn found_in(program: &str, case: &str, mode: &str) -> Vec<String> {
                     .enumerate()
                     .filter(|(_, w)| *w == n.as_slice())
                 {
-                    let ctx = &bytes[i.saturating_sub(48)..(i + n.len() + 48).min(bytes.len())];
-                    eprintln!(
-                        "FOUND {label} in {region} at +{i:#x}: {:?}",
-                        String::from_utf8_lossy(ctx)
-                    );
+                    eprintln!("FOUND {label} in {region} at +{i:#x}");
                 }
             }
         }
@@ -230,4 +304,26 @@ fn without_the_wiping_allocator_a_free_leaves_the_key_file_behind() {
         found.contains(&"the key file's text".to_string()),
         "{found:?}"
     );
+}
+
+#[test]
+fn the_search_catches_both_planted_export_passwords() {
+    let found = found_in(WIPED, "1024", "export-passwords");
+    for label in ["export password", "failed-open password"] {
+        assert!(
+            found.iter().any(|f| f == label),
+            "{label} not found in {found:?}"
+        );
+    }
+}
+
+#[test]
+fn the_search_catches_both_planted_aes_keys() {
+    let found = found_in(WIPED, "1024", "export-keys");
+    for label in ["export AES key", "failed-open AES key"] {
+        assert!(
+            found.iter().any(|f| f == label),
+            "{label} not found in {found:?}"
+        );
+    }
 }

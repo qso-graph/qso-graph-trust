@@ -461,3 +461,195 @@ fn request_mutations_wait_for_the_os_lock_and_reload_pending_records() {
     ));
     assert_eq!(store.certificates().expect("reload certificates").len(), 1);
 }
+
+#[test]
+fn export_restores_pending_keys_and_can_attach_the_response_after_reopening() {
+    use crate::export::Password;
+
+    let source_folder = Folder::new();
+    let (source, _) = Store::open(&source_folder.0, KeyBackend::Memory).expect("source");
+    let attached = generated();
+    source.store_request(&attached).expect("attached request");
+    source
+        .add_requested_certificate(&response(&attached))
+        .expect("attach");
+    let request = generated();
+    let cert = response(&request);
+    source.store_request(&request).expect("pending request");
+    let pending = source.pending_requests().expect("pending");
+    let password = Password::generate().expect("password");
+    let bytes = source.export_part(&password).expect("export");
+    drop((request, attached, source));
+
+    let target_folder = Folder::new();
+    let keys = Arc::new(MemoryKeyStore::new());
+    let (target, _) = open(&target_folder.0, &keys).expect("target");
+    target
+        .store_request(&generated())
+        .expect("old pending request");
+    let old_names = keys.names().expect("old keys");
+    let trust = Trust::with_roots(&[&corpus("../tqsl/pki/ca.pem")]).expect("CA");
+    let report = target
+        .restore_part(&bytes, &password, &trust)
+        .expect("restore");
+    assert_eq!(report.certificates, 1);
+    assert_eq!(report.keys, 2);
+    for old in old_names {
+        assert!(!keys.exists(&old).expect("old pending key removed"));
+    }
+    let mut expected = pending.clone();
+    let restored = target.pending_requests().expect("restored pending");
+    assert_ne!(restored[0].key_name, pending[0].key_name);
+    expected[0].key_name = restored[0].key_name.clone();
+    assert_eq!(restored, expected);
+    // Self-restore also refreshes pending credential names without deleting active keys.
+    target
+        .restore_part(&bytes, &password, &trust)
+        .expect("self restore");
+    drop(target);
+    let (target, report) = open(&target_folder.0, &keys).expect("reopen");
+    assert_eq!(report, OpenReport::default());
+    let cert_id = target
+        .add_requested_certificate(&cert)
+        .expect("attach after restore");
+    assert!(target.pending_requests().expect("consumed").is_empty());
+    target
+        .with_key(&cert_id, |key| {
+            assert!(key.matches_public_key(cert.public_key_der()));
+            key.sign(b"restored pending request").expect("sign")
+        })
+        .expect("restored private key");
+}
+
+#[test]
+fn pending_export_keys_are_required_and_validated_before_destination_mutation() {
+    use crate::export::{self, LOTW_PART, Password};
+    use crate::store::PartError;
+
+    let source_folder = Folder::new();
+    let keys = Arc::new(MemoryKeyStore::new());
+    let (source, _) = open(&source_folder.0, &keys).expect("source");
+    let attached = generated();
+    source.store_request(&attached).expect("attached request");
+    source
+        .add_requested_certificate(&response(&attached))
+        .expect("attach");
+    let request = generated();
+    source.store_request(&request).expect("request");
+    let pending = source.pending_requests().expect("pending");
+    let name = &pending[0].key_name;
+    let password = Password::generate().expect("password");
+    let original = source.part_plaintext().expect("plaintext");
+    assert!(original.starts_with(b"QGT-STORE\x02"));
+    let other = generated();
+    keys.delete(name).expect("plant missing key");
+    assert!(matches!(
+        source.export_part(&password),
+        Err(PartError::Store(StoreError::NotFound))
+    ));
+    keys.put(name, &other.private)
+        .expect("plant mismatched key");
+    assert!(matches!(
+        source.export_part(&password),
+        Err(PartError::Invalid)
+    ));
+    keys.delete(name).expect("remove plant");
+    keys.put(name, &request.private).expect("restore key");
+    source.export_part(&password).expect("export without plant");
+
+    let target_folder = Folder::new();
+    let target_keys = Arc::new(ObservedKeys::new(&target_folder.0, false, false));
+    let (target, _) = open(&target_folder.0, &target_keys).expect("target");
+    target
+        .store_request(&generated())
+        .expect("existing pending");
+    let before = fs::read(target_folder.0.join("store.xml")).expect("before");
+    let names = target_keys.names().expect("before keys");
+    target_keys.calls.lock().expect("calls").clear();
+    let trust = Trust::with_roots(&[&corpus("../tqsl/pki/ca.pem")]).expect("CA");
+    let xml_end = 14 + u32::from_be_bytes(original[10..14].try_into().expect("length")) as usize;
+    // Keep the earlier certificate key valid: rejecting the later pending key must still happen
+    // before any of the destination's keys are staged.
+    let pending_offset = xml_end
+        + 4
+        + u32::from_be_bytes(
+            original[xml_end..xml_end + 4]
+                .try_into()
+                .expect("certificate key length"),
+        ) as usize;
+    let mut malformed = original.clone();
+    malformed[pending_offset + 4] ^= 1;
+    let mut wrong_key =
+        Zeroizing::new(Vec::with_capacity(pending_offset + 4 + other.private.len()));
+    wrong_key.extend_from_slice(&original[..pending_offset]);
+    wrong_key.extend_from_slice(&(other.private.len() as u32).to_be_bytes());
+    wrong_key.extend_from_slice(&other.private);
+    let mut oversized = original.clone();
+    oversized[pending_offset..pending_offset + 4]
+        .copy_from_slice(&((MAX_KEY_LEN + 1) as u32).to_be_bytes());
+    let mut legacy = original.clone();
+    legacy[9] = 1;
+    for invalid in [
+        malformed,
+        wrong_key,
+        oversized,
+        legacy,
+        Zeroizing::new(original[..pending_offset].to_vec()),
+    ] {
+        let part = export::seal(LOTW_PART, &invalid, &password).expect("seal planted part");
+        assert!(matches!(
+            target.restore_part(&part, &password, &trust),
+            Err(PartError::Invalid)
+        ));
+        assert_eq!(
+            fs::read(target_folder.0.join("store.xml")).expect("unchanged"),
+            before
+        );
+        assert_eq!(target_keys.names().expect("unchanged keys"), names);
+        assert!(
+            target_keys
+                .calls
+                .lock()
+                .expect("no backend reads or mutations")
+                .is_empty()
+        );
+    }
+    // Pre-rename failure rolls back the newly staged pending key and preserves the old one.
+    let valid = export::seal(LOTW_PART, &original, &password).expect("valid part");
+    fs::create_dir(target_folder.0.join("store.xml.partial")).expect("plant write failure");
+    assert!(matches!(
+        target.restore_part(&valid, &password, &trust),
+        Err(PartError::Store(StoreError::Io(_)))
+    ));
+    assert_eq!(target_keys.names().expect("rollback"), names);
+    assert_eq!(
+        fs::read(target_folder.0.join("store.xml")).expect("unchanged"),
+        before
+    );
+    fs::remove_dir(target_folder.0.join("store.xml.partial")).expect("remove plant");
+    target
+        .fail_sync
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    assert!(matches!(
+        target.restore_part(&valid, &password, &trust),
+        Err(PartError::Store(StoreError::Durability(_)))
+    ));
+    assert_eq!(target.pending_requests().expect("visible").len(), 1);
+    assert_eq!(
+        target_keys.names().expect("both key sets retained").len(),
+        3
+    );
+    for old in &names {
+        assert!(target_keys.exists(old).expect("old key retained"));
+    }
+    target
+        .fail_sync
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    target
+        .restore_part(&valid, &password, &trust)
+        .expect("restore without planted cases");
+    let cert = response(&request);
+    target
+        .add_requested_certificate(&cert)
+        .expect("restored pending key remains usable");
+}

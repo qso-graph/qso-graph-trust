@@ -40,16 +40,21 @@ opening returns the same fixed error as a wrong password. Plaintext is bounded t
 
 ## Plaintext and replacement
 
-The private plaintext format is `QGT-STORE` (9 ASCII bytes), a version byte (`1`), then a u32 length
+The private plaintext format is `QGT-STORE` (9 ASCII bytes), a version byte (`2`), then a u32 length
 and the complete versioned store XML. It includes the store's signed-QSO section (currently version
 1 and empty, as the store itself requires). Following that are u32-length-prefixed PKCS#8 DER keys,
-one per certificate whose XML record names a key, in certificate order. No extra records or trailing
-bytes are accepted. Certificate and location identifiers survive restore; credential names are fresh.
+one per certificate whose XML record names a key, in certificate order, followed by one per pending
+certificate request in request order. The XML includes each pending request's identity, SPKI and
+creation time. Version 2 adds these pending keys; version 1 plaintext is refused rather than silently
+losing pending requests. The outer authenticated encryption envelope remains version 1. No extra
+records or trailing bytes are accepted. Certificate, request and location identifiers survive restore;
+credential names are fresh.
 
 Export reads XML and all referenced keys under the store lock and refuses missing or mismatched
 keys. Restore decrypts and authenticates, parses through the existing strict store reader (including
 `StationLocation::new`), verifies every certificate against caller-supplied `Trust`, and checks every
-private key against its certificate, before acquiring the destination lock or changing anything.
+private key against its certificate or pending request's recorded SPKI, before acquiring the
+destination lock or changing anything.
 Production callers use `Trust::lotw()`, which pins ARRL's root and production CA; the part never
 supplies trust anchors. Custom test trust must include the issuers needed by its certificates.
 
@@ -61,8 +66,9 @@ both old and new keys, report `StoreError::Durability`, and stop: deleting the n
 the visible file. A later old-key deletion failure likewise leaves a usable new store and reports the
 credential error. This is the store's existing safe ordering, not a cross-service atomic transaction.
 
-Passwords, derived keys, raw DER and plaintext use `Zeroizing`; secret buffers reserve their full size
-before copying, to avoid unwiped reallocations. Cryptography uses only aws-lc-rs's safe APIs inside
+Passwords, derived keys, raw DER and plaintext use heap-backed `Zeroizing` storage; PBKDF2 writes
+directly into its final allocation so returning it cannot leave inline stack copies. Secret buffers
+reserve their full size before copying, to avoid unwiped reallocations. Cryptography uses only aws-lc-rs's safe APIs inside
 the existing binding; its owned cipher contexts are freed by AWS-LC. Programs must still install the
 wiping global allocator required by decision 0002. No new dependency package is added; the binding
 uses the workspace's existing, pinned `zeroize` version.
@@ -70,3 +76,10 @@ uses the workspace's existing, pinned `zeroize` version.
 The public operations are `Store::export_part` and `Store::restore_part`, plus password generation,
 entry and explicit disclosure. Generic seal/open helpers and plaintext serialization stay crate-private
 so the library has no API that hands the decrypted keys to a caller.
+
+The unpublished custody crate records its generated export passwords and the part's salt in an
+owner-only test directory. After scanning the child's whole memory, the harness reads that file and
+independently derives both AES keys with Python 3's PBKDF2, including the deliberately failed open's
+key. It searches for all four secrets, with planted password and AES-key controls in debug and
+release. This instrumentation exists only in the custody test tool; no library API or feature
+exposes these secrets. The test directory is removed when the harness finishes.

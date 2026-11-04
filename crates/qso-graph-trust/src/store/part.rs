@@ -2,7 +2,8 @@
 // Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 
 //! The plaintext is library-private: versioned public store XML followed by length-prefixed
-//! PKCS#8 DER in certificate order. Public XML includes the signed-QSO section unchanged.
+//! PKCS#8 DER in certificate order, then pending-request order. Public XML includes pending
+//! request metadata and the signed-QSO section unchanged.
 
 use std::fmt;
 
@@ -13,14 +14,14 @@ use crate::certificate::Trust;
 use crate::export::{self, ExportError, LOTW_PART, Password};
 use crate::signing::TqslKey;
 
-const MAGIC: &[u8] = b"QGT-STORE\x01";
+const MAGIC: &[u8] = b"QGT-STORE\x02";
 
 /// A restore result, containing counts only, never credentials.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RestoreReport {
     /// Certificates installed, including public-only ones.
     pub certificates: usize,
-    /// Private keys installed.
+    /// Private keys installed, including pending-request keys.
     pub keys: usize,
     /// Checked station locations installed.
     pub locations: usize,
@@ -78,17 +79,27 @@ impl Store {
         let xml = Zeroizing::new(format::write(&data)?);
         let mut secrets = Vec::new();
         let mut size = MAGIC.len() + 4 + xml.len();
-        for cert in &data.certificates {
-            if let Some(name) = &cert.key_name {
-                let der = self.keys.get(name)?.ok_or(StoreError::NotFound)?;
-                if der.is_empty() || der.len() > MAX_KEY_LEN {
-                    return Err(PartError::Invalid);
-                }
-                TqslKey::from_pkcs8_der(&der, cert.certificate.public_key_der())
-                    .map_err(|_| PartError::Invalid)?;
-                size += 4 + der.len();
-                secrets.push(der);
+        for (name, spki) in data
+            .certificates
+            .iter()
+            .filter_map(|cert| {
+                cert.key_name
+                    .as_deref()
+                    .map(|name| (name, cert.certificate.public_key_der()))
+            })
+            .chain(
+                data.pending_requests
+                    .iter()
+                    .map(|r| (r.key_name.as_str(), r.public_key_der.as_slice())),
+            )
+        {
+            let der = self.keys.get(name)?.ok_or(StoreError::NotFound)?;
+            if der.is_empty() || der.len() > MAX_KEY_LEN {
+                return Err(PartError::Invalid);
             }
+            TqslKey::from_pkcs8_der(&der, spki).map_err(|_| PartError::Invalid)?;
+            size += 4 + der.len();
+            secrets.push(der);
         }
         // Exact capacity avoids reallocating plaintext into freed, unwiped memory.
         let mut out = Zeroizing::new(Vec::with_capacity(size));
@@ -103,8 +114,8 @@ impl Store {
     }
 
     /// Authenticate and validate the complete part before touching this store. All certificates
-    /// must chain to caller-supplied trust, keys must match, and locations must pass the store's
-    /// `StationLocation::new` reader. Staged keys precede atomic file replacement; old keys are
+    /// must chain to caller-supplied trust, keys must match their certificate or pending-request
+    /// SPKI, and locations must pass the store's `StationLocation::new` reader. Staged keys precede atomic file replacement; old keys are
     /// deleted afterwards. A failure before replacement rolls back staged keys. A durability
     /// failure after replacement keeps both sets of keys and reports uncertain crash durability.
     pub fn restore_part(
@@ -125,14 +136,17 @@ impl Store {
         let mut names = Vec::new();
         // Allocate fresh credential names so even a restore onto the source cannot overwrite a
         // key named by the current file. No backend mutation until all names and XML are checked.
-        for cert in &mut data.certificates {
-            if let Some(name) = &mut cert.key_name {
-                *name = keys::new_name("key:")?;
-                if names.contains(name) || self.keys.exists(name)? {
-                    return Err(StoreError::AlreadyExists.into());
-                }
-                names.push(name.clone());
+        for name in data
+            .certificates
+            .iter_mut()
+            .filter_map(|c| c.key_name.as_mut())
+            .chain(data.pending_requests.iter_mut().map(|r| &mut r.key_name))
+        {
+            *name = keys::new_name("key:")?;
+            if names.contains(name) || self.keys.exists(name)? {
+                return Err(StoreError::AlreadyExists.into());
             }
+            names.push(name.clone());
         }
         let xml = format::write(&data)?;
         for (index, (name, der)) in names.iter().zip(&secrets).enumerate() {
@@ -146,10 +160,13 @@ impl Store {
             }
             return Err(self.rollback_part(&names, e).into());
         }
-        for cert in old.certificates {
-            if let Some(name) = cert.key_name {
-                self.keys.delete(&name)?;
-            }
+        for name in old
+            .certificates
+            .into_iter()
+            .filter_map(|c| c.key_name)
+            .chain(old.pending_requests.into_iter().map(|r| r.key_name))
+        {
+            self.keys.delete(&name)?;
         }
         Ok(report)
     }
@@ -200,6 +217,11 @@ fn decode(opened: &[u8], trust: &Trust) -> Result<(Data, Secrets), PartError> {
                 .map_err(|_| PartError::Invalid)?;
             secrets.push(Zeroizing::new(der.to_vec()));
         }
+    }
+    for request in &data.pending_requests {
+        let der = take_record(&mut input, MAX_KEY_LEN)?;
+        TqslKey::from_pkcs8_der(der, &request.public_key_der).map_err(|_| PartError::Invalid)?;
+        secrets.push(Zeroizing::new(der.to_vec()));
     }
     if !input.is_empty() {
         return Err(PartError::Invalid);

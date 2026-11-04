@@ -4,17 +4,19 @@
 //! What the custody test's programs do: sign the corpus log as a QG Trust program would, from
 //! reading the key file to writing the `.tq8`, then wait while the test reads their memory.
 //!
-//! `qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE live|done`
+//! `qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE SECRETS_FILE live|done|export-passwords|export-keys`
 //!
 //! - `live`: wait with the key unlocked, so the test can prove it finds a key that is there.
 //! - `done`: sign, drop everything, then wait: no key data may be left.
+//! - `export-passwords`: deliberately keep copies of both generated export passwords.
+//! - `export-keys`: after the first scan, accept both derived keys over stdin and keep them.
 //!
 //! The password comes from a file, never the command line (AGENTS.md); an empty file means none.
 //! The program prints `ready` when it is waiting and exits when a line arrives on its input.
 
 #![forbid(unsafe_code)]
 
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 use std::process::ExitCode;
 use std::time::SystemTime;
 
@@ -32,16 +34,34 @@ use zeroize::Zeroizing;
 /// Runs the program; see the module documentation.
 pub fn run() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let [key_file, cert_file, adif_file, password_file, mode] = &args[..] else {
-        eprintln!("usage: qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE live|done");
+    let [
+        key_file,
+        cert_file,
+        adif_file,
+        password_file,
+        secrets_file,
+        mode,
+    ] = &args[..]
+    else {
+        eprintln!(
+            "usage: qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE SECRETS_FILE live|done|export-passwords|export-keys"
+        );
         return ExitCode::from(2);
     };
-    let live = match mode.as_str() {
-        "live" => true,
-        "done" => false,
-        _ => return ExitCode::from(2),
-    };
-    match sign(key_file, cert_file, adif_file, password_file, live) {
+    if !matches!(
+        mode.as_str(),
+        "live" | "done" | "export-passwords" | "export-keys"
+    ) {
+        return ExitCode::from(2);
+    }
+    match sign(
+        key_file,
+        cert_file,
+        adif_file,
+        password_file,
+        secrets_file,
+        mode,
+    ) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("qgt-custody: {e}");
@@ -55,7 +75,8 @@ fn sign(
     cert_file: &str,
     adif_file: &str,
     password_file: &str,
-    live: bool,
+    secrets_file: &str,
+    mode: &str,
 ) -> Result<(), String> {
     let read = |path: &str| std::fs::read(path).map_err(|e| format!("{path}: {e}"));
     // As any caller would: the file's bytes in an ordinary buffer, freed when done with.
@@ -92,9 +113,15 @@ fn sign(
 
     // Exercise the backup's derived keys, plaintext, provider contexts and restored credential
     // buffers too. They must leave no private values behind when the external memory scan runs.
-    exercise_export(key_file, cert_file, password)?;
+    let leaks = exercise_export(
+        key_file,
+        cert_file,
+        password,
+        secrets_file,
+        mode == "export-passwords",
+    )?;
 
-    if live {
+    if mode == "live" {
         wait()?;
         // Kept alive until the test has looked.
         drop((entry, signer, password_bytes, key_bytes));
@@ -104,7 +131,19 @@ fn sign(
         drop((entry, signer, log, gz, password_bytes));
         drop(key_bytes);
         wait()?;
+        if mode == "export-keys" {
+            // Test-only planted leaks: the parent derives these from the recorded passwords and
+            // salt after the first scan, then sends them over stdin, never on a command line.
+            let mut keys = Zeroizing::new(vec![0; 64]);
+            std::io::stdin()
+                .lock()
+                .read_exact(&mut keys)
+                .map_err(|e| e.to_string())?;
+            wait()?;
+            std::hint::black_box(&keys);
+        }
     }
+    std::hint::black_box(&leaks);
     Ok(())
 }
 
@@ -115,7 +154,13 @@ impl Drop for ExportFolder {
     }
 }
 
-fn exercise_export(key_file: &str, cert_file: &str, password: Option<&[u8]>) -> Result<(), String> {
+fn exercise_export(
+    key_file: &str,
+    cert_file: &str,
+    password: Option<&[u8]>,
+    secrets_file: &str,
+    leak_passwords: bool,
+) -> Result<Vec<Zeroizing<Vec<u8>>>, String> {
     let path = std::env::temp_dir().join(format!("qgt-custody-export-{}", std::process::id()));
     std::fs::create_dir(&path).map_err(|e| e.to_string())?;
     let folder = ExportFolder(path);
@@ -155,7 +200,26 @@ fn exercise_export(key_file: &str, cert_file: &str, password: Option<&[u8]>) -> 
     if store.restore_part(&part, &wrong, &trust).is_ok() {
         return Err("wrong password accepted".into());
     }
-    Ok(())
+    // This unpublished custody crate alone writes test secrets. The parent created an owner-only
+    // directory; it reads this file only after taking the memory snapshot, and removes it.
+    // Fixed test framing: generated password (20), failed-open password (20), actual salt (16).
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(secrets_file)
+        .map_err(|e| e.to_string())?;
+    file.write_all(export_password.expose_secret().as_bytes())
+        .and_then(|()| file.write_all(wrong.expose_secret().as_bytes()))
+        .and_then(|()| file.write_all(&part[13..29]))
+        .map_err(|e| e.to_string())?;
+    if leak_passwords {
+        Ok(vec![
+            Zeroizing::new(export_password.expose_secret().as_bytes().to_vec()),
+            Zeroizing::new(wrong.expose_secret().as_bytes().to_vec()),
+        ])
+    } else {
+        Ok(Vec::new())
+    }
 }
 
 /// Says `ready`, then waits for a line on the input.

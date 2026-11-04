@@ -57,9 +57,9 @@ impl Password {
     /// Generate 20 unbiased ASCII letters and digits, about 119 bits of entropy.
     pub fn generate() -> Result<Self, ExportError> {
         let mut secret = Zeroizing::new(String::with_capacity(20));
-        let mut bytes = Zeroizing::new([0; 32]);
+        let mut bytes = Zeroizing::new(vec![0; 32]);
         while secret.len() < 20 {
-            random(&mut *bytes).map_err(|_| ExportError::Random)?;
+            random(&mut bytes).map_err(|_| ExportError::Random)?;
             for &byte in bytes.iter() {
                 // 248 = 4 * 62: every alphabet index has exactly four preimages.
                 if byte < 248 {
@@ -179,7 +179,7 @@ fn open_with(
     part_name: &str,
     bytes: &[u8],
     password: &Password,
-    derive: impl FnOnce(&[u8], &[u8], NonZeroU32) -> Zeroizing<[u8; 32]>,
+    derive: impl FnOnce(&[u8], &[u8], NonZeroU32) -> Zeroizing<Vec<u8>>,
 ) -> Result<Zeroizing<Vec<u8>>, ExportError> {
     if bytes.len() < HEADER + 16
         || bytes.len() > HEADER + 16 + MAX_PLAINTEXT_LEN

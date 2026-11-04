@@ -276,7 +276,7 @@ fn every_certificate_key_and_location_is_validated_before_mutating() {
         invalid_inputs.push(altered);
     }
     let mut version = original.clone();
-    version[MAGIC.len() - 1] = 2;
+    version[MAGIC.len() - 1] = 3;
     invalid_inputs.push(version);
     let mut trailing = Zeroizing::new(Vec::with_capacity(original.len() + 1));
     trailing.extend_from_slice(&original);
