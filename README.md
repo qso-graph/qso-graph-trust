@@ -1,10 +1,12 @@
 # QSO Graph Trust
 
-Sign your ADIF logs for ARRL's [Logbook of The World](https://lotw.arrl.org) (LoTW) with your LoTW
-certificate. QSO Graph Trust is an alternative to TQSL.
+QSO Graph Trust signs your ADIF logs with your LoTW certificate, so ARRL's
+[Logbook of The World](https://lotw.arrl.org) (LoTW) accepts them. It is QSO Graph's LoTW signing: a
+library, the `qg-trust` command line, and, to come, part of
+[QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop).
 
-> **This is a beta.** Still to come: keeping your key in your computer's own credential store, uploading straight to LoTW,
-> requesting certificates, and signing inside [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop).
+> **This is a beta.** Still to come: keeping your key in your computer's own credential store,
+> uploading straight to LoTW, and requesting certificates.
 
 ## Sign a log
 
@@ -24,7 +26,7 @@ certificate. QSO Graph Trust is an alternative to TQSL.
    If your key has a password, `qg-trust` asks for it, with what you type hidden. It writes
    `mylog.tq8` and tells you how many QSOs it signed. A QSO LoTW would refuse is left out and named,
    with the reason.
-3. **Upload `mylog.tq8`** on LoTW's website, as you would one TQSL saved.
+3. **Upload `mylog.tq8`** on LoTW's website.
 
 To sign only some dates, add `-b 2026-01-01` and `-e 2026-06-30`. `qg-trust --help` lists everything,
 and the [command line's page](crates/qso-graph-trust-cli/README.md) has every option and exit code.
@@ -43,8 +45,8 @@ More, and how to report a security problem: [SECURITY.md](SECURITY.md).
 
 The signing is a Rust library, [`qso-graph-trust`](https://crates.io/crates/qso-graph-trust), for your
 own programs; its [page](crates/qso-graph-trust/README.md) has an example. To work on QSO Graph Trust
-itself: [CONTRIBUTING.md](CONTRIBUTING.md). What it does, plans and leaves out, feature by feature
-against TQSL: [docs/FEATURE-PARITY.md](docs/FEATURE-PARITY.md).
+itself: [CONTRIBUTING.md](CONTRIBUTING.md). What it does and plans, feature by feature:
+[docs/FEATURE-PARITY.md](docs/FEATURE-PARITY.md).
 
 ## Credits
 

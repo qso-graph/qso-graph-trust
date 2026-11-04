@@ -1,9 +1,8 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 # qso-graph-trust
 
-Sign ADIF logs for ARRL's [Logbook of The World](https://lotw.arrl.org) (LoTW). From the same key,
-station location and QSOs, the signed records and their signatures are TQSL's, byte for byte; only the line naming the program
-that made the file differs.
+Sign ADIF logs with your LoTW certificate, so ARRL's [Logbook of The World](https://lotw.arrl.org)
+(LoTW) accepts them. This is QSO Graph Trust's library, for your own programs.
 
 QSO Graph Trust is the library behind the [`qg-trust`](https://crates.io/crates/qso-graph-trust-cli)
 command line and, still to come, LoTW signing in [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop),
@@ -12,8 +11,8 @@ forbids `unsafe` code. LoTW's signature is AWS-LC's, through one small binding, 
 the only crate here with `unsafe` code; a password-protected key is unlocked with RustCrypto.
 
 **This is a beta.** It signs your log with your LoTW certificate. Still to come: keeping keys in the operating system's credential
-store, uploading to LoTW, and requesting certificates. What is done, planned and left out, feature by feature against
-TQSL: [`docs/FEATURE-PARITY.md`](https://github.com/qso-graph/qso-graph-trust/blob/main/docs/FEATURE-PARITY.md).
+store, uploading to LoTW, and requesting certificates. What it does and plans, feature by feature:
+[`docs/FEATURE-PARITY.md`](https://github.com/qso-graph/qso-graph-trust/blob/main/docs/FEATURE-PARITY.md).
 
 ## Example
 

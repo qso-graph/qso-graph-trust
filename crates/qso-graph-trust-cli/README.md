@@ -1,10 +1,8 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 # qso-graph-trust-cli: `qg-trust`
 
-Sign ADIF logs for ARRL's [Logbook of The World](https://lotw.arrl.org) (LoTW) from the command line,
-with [`qso-graph-trust`](https://crates.io/crates/qso-graph-trust). From the same key, station location
-and QSOs, the signed records and their signatures are TQSL's, byte for byte; only the line naming the
-program that made the file differs.
+Sign your ADIF logs with your LoTW certificate from the command line, so ARRL's
+[Logbook of The World](https://lotw.arrl.org) (LoTW) accepts them.
 
 ```sh
 cargo install qso-graph-trust-cli
@@ -30,11 +28,11 @@ one line from standard input. A password is never given on the command line.
 | `-b`, `--begindate DATE` | sign only QSOs on or after DATE (`YYYY-MM-DD` or `YYYYMMDD`) |
 | `-e`, `--enddate DATE` | sign only QSOs on or before DATE |
 | `-o`, `--output FILE` | where to write the signed log (default: the log's name with `.tq8`) |
-| `-x`, `-q`, `-d` | accepted, as TQSL takes them; `qg-trust` always exits when done |
+| `-x`, `-q`, `-d` | accepted and ignored; `qg-trust` always exits when done |
 | `-h`, `-v` | help, version |
 
-The option letters, the exit codes and the last line it writes to standard error,
-`Final Status: <name>(<code>)`, are TQSL's, so a logger that runs `tqsl` reads `qg-trust` the same way.
+For loggers: the option letters, the exit codes and the last line written to standard error,
+`Final Status: <name>(<code>)`, are the ones the `tqsl` command line uses.
 
 | Code | Meaning |
 |---|---|
@@ -47,8 +45,8 @@ The option letters, the exit codes and the last line it writes to standard error
 | 10 | Command syntax: a missing or unknown option, an invalid date, a password given on the command line |
 | 15 | The password does not unlock the key: nothing is written |
 
-TQSL's other options (`-a`, `-c`, `-f`, `-n`, `-p`, `-s`, `-t`, `-u`, `-w`, `-z`) are refused with code
-10, saying so; what `qg-trust` will and won't take on is in the
+Other options (`-a`, `-c`, `-f`, `-n`, `-p`, `-s`, `-t`, `-u`, `-w`, `-z`) are refused with code 10,
+saying so. What `qg-trust` does and plans:
 [feature-parity list](https://github.com/qso-graph/qso-graph-trust/blob/main/docs/FEATURE-PARITY.md).
 
 The program wipes every block of memory it frees, so no key data or password is left there.
