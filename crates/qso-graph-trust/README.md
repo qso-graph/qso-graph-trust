@@ -6,9 +6,8 @@ Sign ADIF logs with your LoTW certificate, so ARRL's [Logbook of The World](http
 
 QSO Graph Trust is the library behind the [`qg-trust`](https://crates.io/crates/qso-graph-trust-cli)
 command line and, still to come, LoTW signing in [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop),
-and it is for other people's programs too. Its parsers are safe Rust, and the library
-forbids `unsafe` code. LoTW's signature is AWS-LC's, through one small binding, `qso-graph-trust-awslc`,
-the only crate here with `unsafe` code; a password-protected key is unlocked with RustCrypto.
+and it is for other people's programs too. It is written in memory-safe Rust, and its signatures are
+made by AWS-LC, Amazon's open-source cryptography library, the same one QSO Graph Desktop ships.
 
 **This is a beta.** It signs your log with your LoTW certificate. Still to come: keeping keys in the operating system's credential
 store, uploading to LoTW, and requesting certificates. What it does and plans, feature by feature:
