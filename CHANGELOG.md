@@ -17,7 +17,9 @@ versions follow [Semantic Versioning](https://semver.org/).
   a record is read and passed to `Qso::from_adif`. The command line is not published until it signs.
   CI tests each pull request's own commit, packages both crates as crates.io would receive them, and
   `.github/workflows/release.yml` publishes them from main with Trusted Publishing, then tags the
-  commit; a run that stopped halfway finishes when run again. Its decisions are
+  commit; a run that stopped halfway finishes when run again, and a first-publish token left in
+  the Environment once the crates exist fails the run. Each crate names exactly what its package
+  holds (`include`). Its decisions are
   `scripts/release_check.py`'s, each tested with the cases it must refuse.
 - Credits and Sources, in the README and the library's README: TrustedQSL's contributors, as its
   `AUTHORS.txt` lists them, ARRL, and rfrht's qso-web; and what QG Trust was built from, ARRL's LoTW

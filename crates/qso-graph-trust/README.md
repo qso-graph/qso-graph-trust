@@ -5,9 +5,9 @@ Sign logs for ARRL's [Logbook of The World](https://lotw.arrl.org) (LoTW). The s
 byte for byte, as the one TQSL makes from the same key, station location and QSOs.
 
 QSO Graph Trust is one library shared by [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop),
-its `qg-trust` command line and other people's programs. Its parsers and signing are safe Rust: the
-library forbids `unsafe` code, and its one cryptographic provider, AWS-LC, is reached through a single
-small binding, `qso-graph-trust-awslc`.
+its `qg-trust` command line and other people's programs. Its parsers are safe Rust, and the library
+forbids `unsafe` code. LoTW's signature is AWS-LC's, through one small binding, `qso-graph-trust-awslc`,
+the only crate here with `unsafe` code; a password-protected key is unlocked with RustCrypto.
 
 **This is a beta.** It signs from a TQSL backup (`.tbk`) and the key's password. Keeping keys in the
 operating system's credential store, uploading to LoTW and requesting certificates are still to come.

@@ -10,12 +10,14 @@ repository.workspace = true
 readme = "README.md"
 keywords = ["lotw", "arrl", "ham-radio", "amateur-radio", "adif"]
 categories = ["cryptography", "parser-implementations"]
-# The tests read this repository's corpus, which is not in the package, so they stay here.
-exclude = ["tests/"]
+# What the package holds, and nothing else: a new file in this folder does not reach crates.io until
+# it is named here. The tests read this repository's corpus, so they stay here.
+include = ["src/**/*.rs", "README.md", "LICENSE.md", "LICENSE-ARRL.md", "NOTICE.md", "AUTHORS.md"]
 
-# The key, signing and every file parser live in this crate, so no C or C++ may
-# be anywhere in its dependency tree, on any platform: `cargo xtask policy`
-# fails the build if one is (docs/decisions/0002-no-c-in-the-library.md).
+# The key, signing and every file parser live in this crate, so its dependency
+# tree holds no C or C++ but the one cryptographic provider, AWS-LC, reached
+# only through the binding; `cargo xtask policy` fails the build otherwise
+# (docs/decisions/0002-no-c-in-the-library.md, as amended, and 0006).
 # Every one is pinned exactly: they are the key and signing path.
 [dependencies]
 # LoTW's signature, RSA PKCS#1 v1.5 with SHA-1, from AWS-LC through QG Trust's

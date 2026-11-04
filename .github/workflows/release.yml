@@ -34,6 +34,10 @@ jobs:
     name: check
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Reads the Environment only to learn whether the first-publish token is there, never the token.
+    environment: crates-io
+    env:
+      FIRST_PUBLISH: ${{ secrets.CRATES_IO_FIRST_PUBLISH != '' }}
     permissions:
       contents: read
       actions: read
@@ -54,17 +58,23 @@ jobs:
           set -euo pipefail
           fail() { echo "::error::$1"; exit 1; }
           [ "$REF" = refs/heads/main ] || fail "Release runs from main, not ${REF}."
-          python3 scripts/release_check.py version "$VERSION"
+          python3 -I scripts/release_check.py version "$VERSION"
           said=$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[] | select(.name == "qso-graph-trust") | .version')
           [ "$said" = "$VERSION" ] || fail "main says ${said}, not ${VERSION}."
-          python3 scripts/gen-lotw-tables.py --check
-          python3 scripts/package-files.py --check
+          python3 -I scripts/gen-lotw-tables.py --check
+          python3 -I scripts/package-files.py --check
           sha=$(git rev-parse HEAD)
           # A tag already there must be on this commit: a release half done is finished, never moved.
-          python3 scripts/release_check.py tag "$REPO" "$VERSION" "$sha" >/dev/null
+          python3 -I scripts/release_check.py tag "$REPO" "$VERSION" "$sha" >/dev/null
+          # The first-publish token is for a crate's very first publish only. Left behind, it would
+          # quietly stand in for Trusted Publishing, so once the crates exist its presence fails.
+          if [ "$FIRST_PUBLISH" = true ]; then
+            code=$(curl -s -o /dev/null -w '%{http_code}' -A "qso-graph-trust release (https://github.com/${REPO})" https://crates.io/api/v1/crates/qso-graph-trust)
+            [ "$code" = 404 ] || fail "qso-graph-trust is on crates.io: delete CRATES_IO_FIRST_PUBLISH from the crates-io Environment and set up Trusted Publishing (HTTP ${code})."
+          fi
           # A merge runs no CI, so main's commit has none of its own: what proves it is a green pull
           # request run of this repository's CI whose own commit holds exactly main's files.
-          proved=$(python3 scripts/release_check.py proving-run "$REPO" "$(git rev-parse 'HEAD^{tree}')")
+          proved=$(python3 -I scripts/release_check.py proving-run "$REPO" "$(git rev-parse 'HEAD^{tree}')")
           echo "main ${sha} holds exactly what pull request run of ${proved} checked."
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
@@ -104,7 +114,7 @@ jobs:
         run: |
           set -euo pipefail
           for crate in qso-graph-trust-awslc qso-graph-trust; do
-            state=$(python3 scripts/release_check.py crate "$crate" "$VERSION" "target/package/${crate}-${VERSION}.crate")
+            state=$(python3 -I scripts/release_check.py crate "$crate" "$VERSION" "target/package/${crate}-${VERSION}.crate")
             if [ "$state" = same ]; then echo "crates.io already has ${crate} ${VERSION}, exactly this package."; continue; fi
             cargo publish -p "$crate" --locked
           done
@@ -118,8 +128,8 @@ jobs:
           set -euo pipefail
           # Asked again here, not trusted from the check job: a tag made meanwhile, anywhere but this
           # commit, fails the release rather than being reported as this one.
-          if [ "$(python3 scripts/release_check.py tag "$REPO" "$VERSION" "$SHA")" = absent ]; then
+          if [ "$(python3 -I scripts/release_check.py tag "$REPO" "$VERSION" "$SHA")" = absent ]; then
             gh api "repos/${REPO}/git/refs" -f "ref=refs/tags/v${VERSION}" -f "sha=${SHA}" >/dev/null
           fi
-          [ "$(python3 scripts/release_check.py tag "$REPO" "$VERSION" "$SHA")" = same ]
+          [ "$(python3 -I scripts/release_check.py tag "$REPO" "$VERSION" "$SHA")" = same ]
           echo "Published ${VERSION} on crates.io and tagged v${VERSION} at ${SHA}."

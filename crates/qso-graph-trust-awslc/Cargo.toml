@@ -8,8 +8,9 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
-keywords = ["lotw", "arrl", "ham-radio", "amateur-radio", "adif"]
-categories = ["cryptography", "parser-implementations"]
+keywords = ["lotw", "arrl", "ham-radio", "aws-lc"]
+categories = ["cryptography"]
+include = ["src/**/*.rs", "README.md", "LICENSE.md", "NOTICE.md", "AUTHORS.md"]
 
 # The only crate in QSO Graph Trust allowed unsafe code, and only to call AWS-LC's C functions for the
 # key (docs/decisions/0006). aws-lc-rs's safe API does not sign RSA with SHA-1,
