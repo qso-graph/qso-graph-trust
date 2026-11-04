@@ -243,7 +243,7 @@ fn a_log_is_signed_only_for_the_certificates_station_and_dates() {
         sign(&kansas(), &early, SystemTime::now()),
         Err(LogError::QsoOutsideCertificate { index: 2 })
     );
-    // Codex review: a QSO naming another station was signed for this one.
+    // Found in review: a QSO naming another station was signed for this one.
     let other = [
         qsos[0].clone(),
         adif("20261101", "<STATION_CALLSIGN:7>QG1TEST"),

@@ -2,82 +2,82 @@
 # cargo-vet audits file
 
 [[audits.autocfg]]
-who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+who = "QSO Graph project"
 criteria = "safe-to-deploy"
 delta = "1.5.0 -> 1.5.1"
-notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: production probing unchanged; a shell test fixture replaced by a Rust test executable."
+notes = "Reviewed, findings checked against the source, 2026-11-03: production probing unchanged; a shell test fixture replaced by a Rust test executable."
 
 [[audits.flagset]]
-who = "Bob, agent for KI7MT"
+who = "QSO Graph project"
 criteria = "safe-to-deploy"
 delta = "0.4.3 -> 0.4.7"
-notes = "Reviewed by Bob, 2026-11-03: a std feature for an Error impl, Hash and repr(C) on FlagSet, Extend, a const constructor; no new unsafe, no build script, no I/O; the rest is CI files and a toolchain file."
+notes = "Reviewed 2026-11-03: a std feature for an Error impl, Hash and repr(C) on FlagSet, Extend, a const constructor; no new unsafe, no build script, no I/O; the rest is CI files and a toolchain file."
 
 [[audits.miniz_oxide]]
-who = "Bob, agent for KI7MT"
+who = "QSO Graph project"
 criteria = "safe-to-deploy"
 delta = "0.8.9 -> 0.9.1"
-notes = "Reviewed by Bob, 2026-11-03: compression changes in safe code (new flush modes, window-bits limits, a halved distance table, Clone derives); the crate stays #![forbid(unsafe_code)], with no build script and no file, network or process access. QG Trust round-trips its output in tests and gzip -t accepts it."
+notes = "Reviewed 2026-11-03: compression changes in safe code (new flush modes, window-bits limits, a halved distance table, Clone derives); the crate stays #![forbid(unsafe_code)], with no build script and no file, network or process access. QG Trust round-trips its output in tests and gzip -t accepts it."
 
 [[audits.num-integer]]
-who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+who = "QSO Graph project"
 criteria = "safe-to-deploy"
 delta = "0.1.46 -> 0.1.47"
-notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: adds a u128 Karatsuba square root with its input normalized; otherwise documentation and tests."
+notes = "Reviewed, findings checked against the source, 2026-11-03: adds a u128 Karatsuba square root with its input normalized; otherwise documentation and tests."
 
 [[audits.num-iter]]
-who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+who = "QSO Graph project"
 criteria = "safe-to-deploy"
 delta = "0.1.43 -> 0.1.46"
-notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: range-checked backward iteration; the build script and autocfg removed."
+notes = "Reviewed, findings checked against the source, 2026-11-03: range-checked backward iteration; the build script and autocfg removed."
 
 [[audits.rpassword]]
-who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+who = "QSO Graph project"
 criteria = "safe-to-deploy"
 version = "7.5.4"
-notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-04: the whole crate. No network, process or file access but the terminal (/dev/tty; CONIN$ and CONOUT$ on Windows); no build script. Its unsafe blocks, terminal mode and console calls, are sound. Known and accepted: Ctrl-C at the prompt can leave the terminal's echo off until reset; copies of the password left in buffers it frees, which qg-trust's wiping allocator overwrites."
+notes = "Reviewed, findings checked against the source, 2026-11-04: the whole crate. No network, process or file access but the terminal (/dev/tty; CONIN$ and CONOUT$ on Windows); no build script. Its unsafe blocks, terminal mode and console calls, are sound. Known and accepted: Ctrl-C at the prompt can leave the terminal's echo off until reset; copies of the password left in buffers it frees, which qg-trust's wiping allocator overwrites."
 
 [[audits.rsa]]
-who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+who = "QSO Graph project"
 criteria = "safe-to-deploy"
 version = "0.9.10"
-notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: the whole crate. No unsafe code, no file, network, environment or process access, no build script. Blinding is on the try_sign_with_rng path (src/pkcs1v15/signing_key.rs:150, src/algorithms/rsa.rs:48). RsaPrivateKey and SigningKey derive an unredacted Debug (src/key.rs:37, src/pkcs1v15/signing_key.rs:22): QG Trust wraps them in TqslKey, whose Debug prints nothing. Zeroization is partial: among others, validate() multiplies e by a clone of d that is dropped unwiped (src/key.rs:408-409), on every key QG Trust unlocks, which QG Trust cannot change without patching rsa (refused by its policy); the custody test (qso-graph-desktop#172, Gate C) measures what remains. The arithmetic is not constant-time (RUSTSEC-2023-0071), accepted for local signing only (decision 0002)."
+notes = "Reviewed, findings checked against the source, 2026-11-03: the whole crate. No unsafe code, no file, network, environment or process access, no build script. Blinding is on the try_sign_with_rng path (src/pkcs1v15/signing_key.rs:150, src/algorithms/rsa.rs:48). RsaPrivateKey and SigningKey derive an unredacted Debug (src/key.rs:37, src/pkcs1v15/signing_key.rs:22): QG Trust wraps them in TqslKey, whose Debug prints nothing. Zeroization is partial: among others, validate() multiplies e by a clone of d that is dropped unwiped (src/key.rs:408-409), on every key QG Trust unlocks, which QG Trust cannot change without patching rsa (refused by its policy); the custody test (qso-graph-desktop#172, Gate C) measures what remains. The arithmetic is not constant-time (RUSTSEC-2023-0071), accepted for local signing only (decision 0002)."
 
 [[audits.rtoolbox]]
-who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+who = "QSO Graph project"
 criteria = "safe-to-deploy"
 version = "0.0.6"
-notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-04: the whole crate. Terminal detection, printing to the terminal, and buffers wiped to their length; serde features optional and off. Known and accepted: its Windows MSYS terminal detection (atty.rs msys_tty_on) assumes alignment a byte buffer does not guarantee; it is not on rpassword's prompt_password path."
+notes = "Reviewed, findings checked against the source, 2026-11-04: the whole crate. Terminal detection, printing to the terminal, and buffers wiped to their length; serde features optional and off. Known and accepted: its Windows MSYS terminal detection (atty.rs msys_tty_on) assumes alignment a byte buffer does not guarantee; it is not on rpassword's prompt_password path."
 
 [[audits.sha1]]
-who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+who = "QSO Graph project"
 criteria = "safe-to-deploy"
 version = "0.10.6"
-notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: the whole crate: no I/O, logging or build script; the unsafe block-slice conversion (src/compress.rs:38), the x86 backend behind its runtime feature check (src/compress/x86.rs:33, :100) and the LoongArch assembly are sound. The optional asm feature (sha1-asm) is not used and not covered."
+notes = "Reviewed, findings checked against the source, 2026-11-03: the whole crate: no I/O, logging or build script; the unsafe block-slice conversion (src/compress.rs:38), the x86 backend behind its runtime feature check (src/compress/x86.rs:33, :100) and the LoongArch assembly are sound. The optional asm feature (sha1-asm) is not used and not covered."
 
 [[audits.smallvec]]
-who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+who = "QSO Graph project"
 criteria = "safe-to-deploy"
 delta = "1.15.2 -> 1.16.4"
-notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: the changed unsafe push, growth and retain paths reviewed, including panics and zero-sized elements; no unsoundness found."
+notes = "Reviewed, findings checked against the source, 2026-11-03: the changed unsafe push, growth and retain paths reviewed, including panics and zero-sized elements; no unsoundness found."
 
 [[audits.subtle]]
-who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+who = "QSO Graph project"
 criteria = "safe-to-deploy"
 delta = "2.5.0 -> 2.6.1"
-notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: black_box generalised to Copy types with read_volatile, and a BlackBox wrapper: optimisation barriers only."
+notes = "Reviewed, findings checked against the source, 2026-11-03: black_box generalised to Copy types with read_volatile, and a BlackBox wrapper: optimisation barriers only."
 
 [[audits.version_check]]
-who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+who = "QSO Graph project"
 criteria = "safe-to-deploy"
 delta = "0.9.4 -> 0.9.5"
-notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: metadata and documentation only; the implementation is unchanged."
+notes = "Reviewed, findings checked against the source, 2026-11-03: metadata and documentation only; the implementation is unchanged."
 
 [[audits.zeroizing-alloc]]
-who = "Bob, agent for KI7MT"
+who = "QSO Graph project"
 criteria = "safe-to-deploy"
 version = "0.1.1"
-notes = "Reviewed in full by Bob, 2026-11-03 (src/lib.rs, 103 lines; no dependencies, no build script, no I/O): a GlobalAlloc wrapper that writes zeroes over layout.size() bytes on dealloc, through a function pointer read volatilely so the store is not removed as dead; alloc and alloc_zeroed pass through; realloc is the trait's default, which allocates, copies and deallocates, so the old block is wiped too. The unsafe is the GlobalAlloc contract, met by passing the caller's pointer and layout straight through. QG Trust's custody test checks the effect in a running process."
+notes = "Reviewed in full, 2026-11-03 (src/lib.rs, 103 lines; no dependencies, no build script, no I/O): a GlobalAlloc wrapper that writes zeroes over layout.size() bytes on dealloc, through a function pointer read volatilely so the store is not removed as dead; alloc and alloc_zeroed pass through; realloc is the trait's default, which allocates, copies and deallocates, so the old block is wiped too. The unsafe is the GlobalAlloc contract, met by passing the caller's pointer and layout straight through. QG Trust's custody test checks the effect in a running process."
 
 [[trusted.aes]]
 criteria = "safe-to-deploy"
@@ -121,7 +121,7 @@ criteria = "safe-to-deploy"
 user-id = 156764 # Justin W Smith (justsmth)
 start = "2023-04-11"
 end = "2027-11-03"
-notes = "AWS-LC's safe Rust API, the provider decision 0006 names, as QSO Graph Desktop ships it; reached only through qso-graph-trust-awslc, for certificate signature checks (Bob, 2026-11-03)"
+notes = "AWS-LC's safe Rust API, the provider decision 0006 names, as QSO Graph Desktop ships it; reached only through qso-graph-trust-awslc, for certificate signature checks (2026-11-03)"
 
 [[trusted.aws-lc-sys]]
 criteria = "safe-to-deploy"

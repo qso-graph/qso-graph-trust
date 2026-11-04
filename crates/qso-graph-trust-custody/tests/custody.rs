@@ -376,7 +376,7 @@ fn no_key_data_or_password_is_left_from_a_protected_key() {
 fn the_search_finds_a_key_that_is_there() {
     // Control: while the key is unlocked, each of its private values is in memory, as the signer
     // holds it, and the search must see every one: a needle it cannot find would prove nothing
-    // (Codex review: q^-1 mod p was not searched for at all).
+    // (found in review: q^-1 mod p was not searched for at all).
     let found = found_in(WIPED, "1024", "live");
     for value in ["d", "p", "q", "d mod p-1", "d mod q-1", "q^-1 mod p"] {
         assert!(

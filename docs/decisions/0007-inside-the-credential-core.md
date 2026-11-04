@@ -1,6 +1,6 @@
 # 0007: In QSO Graph Desktop, QG Trust runs inside the credential core
 
-Decided 2026-11-03 by KI7MT, after a review by Codex (gpt-6-astra, high). Settles what decision 0005 left
+Decided 2026-11-03 by KI7MT, after review. Settles what decision 0005 left
 open: where the library's code loads in QSO Graph Desktop. Desktop's requirements are in its
 specification, `QGD-SPEC-001` §3.4 (`QGD-LTW-0001` to `0014`), and are not restated here.
 
@@ -61,7 +61,7 @@ specification, `QGD-SPEC-001` §3.4 (`QGD-LTW-0001` to `0014`), and are not rest
 
 ## Corrected in review
 
-The first draft claimed more than the code shows, and Codex's review found it:
+The first draft claimed more than the code shows, and review found it:
 
 - The wiping allocator covers Rust's memory only, not V8's heap, and wiping cannot protect a key while it
   signs. `QGD-LTW-0006` says exactly that, and the custody test runs against the packaged process.

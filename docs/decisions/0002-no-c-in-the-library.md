@@ -56,7 +56,7 @@ tokens, whatever its `cfg`: the identifiers `unsafe`, `include`, `asm`, `global_
 named by a macro variable fail the check. **The workspace's crates define no macros**: no
 `macro_rules!` and no procedural-macro crate, because a macro can assemble code from pieces no scan
 sees whole (review found five such constructions before this rule replaced chasing them). The
-cost, named so the rule is not relaxed quietly later (Watson's review): tables of OIDs and fields,
+cost, named so the rule is not relaxed quietly later: tables of OIDs and fields,
 per-record test cases and error enums, where a signing library would usually use `macro_rules!`,
 are written out longhand. The canary already catches a macro that expands to `unsafe` in any
 build that compiles it; this rule adds coverage for macros behind a `cfg` no build compiles. Nor do
@@ -96,7 +96,7 @@ key. The key, the signing and the parsers of files from outside are where memory
 
 ## What the check allows
 
-Decided by KI7MT, 2026-11-03, after Watson's review measured that phase 2's first dependencies
+Decided by KI7MT, 2026-11-03, after a review measured that phase 2's first dependencies
 (`rsa`, `sha1`) would otherwise fail it 181 times, none of them C:
 
 - **Bindings to the operating system, as a named category** (`OS_BINDINGS` in
@@ -132,7 +132,7 @@ from vetted providers, each named in the policy checks:
   says "local use on a non-compromised computer is fine". QG Trust signs only on the ham's own
   machine, for that ham, and the library never signs for a remote caller. `cargo audit` ignores that
   one advisory, pointing here; any other, and a fixed release of `rsa`, fails CI.
-- **What QG Trust adds around `rsa`** (Codex reviews of qso-graph-trust#3): a key signs only if it is
+- **What QG Trust adds around `rsa`** (reviews of qso-graph-trust#3): a key signs only if it is
   LoTW-shaped (1024-bit modulus, exponent 65537, two different 512-bit primes, each passing
   Baillie-PSW and 32 Miller-Rabin rounds with random bases) and matches its stated public key; a
   protected key is decrypted by QG Trust itself (PBKDF2, then 3DES- or AES-CBC), every buffer wiped.

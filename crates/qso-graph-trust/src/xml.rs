@@ -118,7 +118,7 @@ impl<'a> Element<'a> {
 /// Decodes text already checked by the reader, as XML 1.0 does (sections 2.11 and 3.3.3): a line end
 /// (`\r\n` or a lone `\r`) becomes `\n`, and in an attribute each literal tab or line end becomes a
 /// space; then XML's five entities and character references, whose characters are kept as they are
-/// (found by Codex review: `HOME<tab>A` and `HOME A` were two names).
+/// (found in review: `HOME<tab>A` and `HOME A` were two names).
 fn decode<'a>(pieces: impl Iterator<Item = &'a str> + Clone, attribute: bool) -> Zeroizing<String> {
     decode_bounded(pieces, attribute, usize::MAX).expect("reader checked the values")
 }
@@ -285,7 +285,7 @@ pub fn parse(input: &str) -> Result<Element<'_>, XmlError> {
 /// existing depth, attribute-count and element-count ceilings still apply.
 pub fn parse_with_limits<'a>(input: &'a str, limits: &Limits<'_>) -> Result<Element<'a>, XmlError> {
     let mut r = Reader { input, at: 0 };
-    // Every character first: XML forbids control characters but tab and line ends (found by Codex
+    // Every character first: XML forbids control characters but tab and line ends (found in
     // review: NUL and U+0001 were read).
     if let Some((at, _)) = input.char_indices().find(|(_, c)| !is_xml_char(*c)) {
         r.at = at;
@@ -523,7 +523,7 @@ mod tests {
             parse(&format!("<a{attrs}/>")).err().map(|e| e.problem),
             Some("too many attributes")
         );
-        // Codex review: 128 MiB of < inside a comment made another parser reserve gigabytes; here
+        // Found in review: 128 MiB of < inside a comment made another parser reserve gigabytes; here
         // a comment is skipped, nothing reserved.
         let comment = format!("<a><!--{}--></a>", "<".repeat(1 << 20));
         assert!(parse(&comment).is_ok());

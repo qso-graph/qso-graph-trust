@@ -1,6 +1,6 @@
 # 0004: Outside crates are reviewed with cargo-vet, and their sources held by cargo-deny
 
-Decided 2026-11-03 by KI7MT, after Watson's review of qso-graph-trust#1.
+Decided 2026-11-03 by KI7MT, after review of qso-graph-trust#1.
 
 ## What was decided
 

@@ -1,6 +1,6 @@
 # 0006: AWS-LC signs, through one binding
 
-Decided 2026-11-03 by KI7MT, after Codex (gpt-6-astra, high) and Watson each recommended it. Amends
+Decided 2026-11-03 by KI7MT, after two independent reviews each recommended it. Amends
 decision 0002, and replaces RustCrypto's `rsa` as what signs.
 
 ## What was decided

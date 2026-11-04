@@ -1,6 +1,6 @@
 # 0005: No QGT app: QSO Graph Desktop is QG Trust's interface
 
-Decided 2026-11-02 by KI7MT (KI7MT/ki7mt-ai-lab-devel#50). Supersedes the app in decisions 0001 and
+Decided 2026-11-02 by KI7MT. Supersedes the app in decisions 0001 and
 0003.
 
 ## What was decided

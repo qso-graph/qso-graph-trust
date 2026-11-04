@@ -294,7 +294,7 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
     // Defaults have indices too, so only command-line occurrences take part in the ordering.
     // A refused option anywhere on the line is refused before help or the version is shown: a
     // repeated option keeps only its last occurrence's index, so an order-based rule would let
-    // `-p SECRET --version -p SECRET2` print the version (found by Astra's review).
+    // `-p SECRET --version -p SECRET2` print the version (found in review).
     let given = |arg: &&clap::Arg| {
         matches.value_source(arg.get_id().as_str()) == Some(clap::parser::ValueSource::CommandLine)
     };

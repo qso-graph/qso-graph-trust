@@ -11,7 +11,7 @@
 //! numbers nor their temporaries are left in memory.
 //! Every buffer here that holds key text is wiped when dropped (`Zeroizing`), and a protected key's
 //! encryption parameters are checked before any work is done with the password, so a crafted file
-//! cannot ask for unbounded memory or time (found by Codex review).
+//! cannot ask for unbounded memory or time (found in review).
 
 use std::fmt;
 
@@ -154,7 +154,7 @@ impl KeyEntry {
 
     fn from_record(record: &Record) -> Result<KeyEntry, KeyError> {
         // A key field given twice is refused: QG Trust would read the first and tqsllib the last,
-        // so the two could unlock different keys from one file (found by Codex review).
+        // so the two could unlock different keys from one file (found in review).
         for name in [
             "CALLSIGN",
             "PUBLIC_KEY",
@@ -173,7 +173,7 @@ impl KeyEntry {
         }
         let text = |name: &'static str| record.text(name).ok_or(KeyError::MissingField(name));
         // The DXCC entity the certificate was requested for, as tqsllib records it with the key.
-        // Present but not text is not absent (found by Codex review).
+        // Present but not text is not absent (found in review).
         let request_dxcc = match record.get("TQSL_CRQ_DXCC_ENTITY") {
             None => None,
             Some(v) => Some(
@@ -216,7 +216,7 @@ impl KeyEntry {
     /// Checks what can be checked without the password: the public key is an RSA one, and a
     /// protected private key is an encrypted PKCS#8 envelope with a protection QG Trust accepts; a
     /// plain one is unlocked, which proves it whole. A protected key's private half is checked
-    /// against its public half when it is first unlocked (found by Codex review: a protected key
+    /// against its public half when it is first unlocked (found in review: a protected key
     /// was taken on its PEM label alone).
     pub fn check(&self) -> Result<(), KeyError> {
         const RSA: pkcs8::ObjectIdentifier =
@@ -276,7 +276,7 @@ impl KeyEntry {
             return Err(KeyError::PasswordNeeded);
         }
         // Decoded, and decrypted, into buffers wiped on every path: a key that fails to decode or
-        // decrypt leaves no plaintext behind either (found by Codex review).
+        // decrypt leaves no plaintext behind either (found in review).
         let mut decoded = Zeroizing::new(vec![0u8; self.private_key_pem.len()]);
         let (label, der) = pkcs8::der::pem::decode(self.private_key_pem.as_bytes(), &mut decoded)
             .map_err(|_| KeyError::NotAKey)?;
@@ -307,12 +307,12 @@ impl TqslKey {
         // A key LoTW uses, as tqsllib makes them: 1024 bits, e = 65537 (tqsl_new_rsa_key), two
         // different 512-bit factors, each passing AWS-LC's primality test. Anything else cannot
         // carry a LoTW certificate; unequal, equal or composite factors would sign with a modulus
-        // anyone can factor, or hang (found by Codex review).
+        // anyone can factor, or hang (found in review).
         if !key.is_lotw_shaped() {
             return Err(KeyError::NotLotwKey);
         }
         // The public key the file states is the private key's own, so a certificate matched by it
-        // is this key's (found by Codex review).
+        // is this key's (found in review).
         if !key.matches_public_key(spki) {
             return Err(KeyError::PublicKeyMismatch);
         }
@@ -421,7 +421,7 @@ mod tests {
     #[test]
     fn a_crafted_encryption_is_refused_before_any_work() {
         let (salt, iv) = ([7u8; 16], [9u8; 16]);
-        // Codex review: scrypt with N = 2^30 would try to allocate about 1 TiB.
+        // Found in review: scrypt with N = 2^30 would try to allocate about 1 TiB.
         let huge = pkcs8::pkcs5::scrypt::Params::new(30, 8, 1, 32).expect("params");
         let scrypt = pbes2::Parameters::scrypt_aes256cbc(huge, &salt, &iv).expect("scrypt");
         assert_eq!(
@@ -574,7 +574,7 @@ mod tests {
 
     #[test]
     fn a_key_protected_with_pbkdf2_hmac_sha1_unlocks_and_signs_the_same() {
-        // Codex review: accepted, but pkcs8 lacked sha1-insecure, so the right password failed.
+        // Found in review: accepted, but pkcs8 lacked sha1-insecure, so the right password failed.
         // The test key re-encrypted the way older OpenSSL wrote TQSL's keys (PBKDF2, HMAC-SHA1).
         let plain = entry(include_str!("../../../tests/corpus/pki/user-1024.key.pem"));
         let sha1 = entry(include_str!(
@@ -599,7 +599,7 @@ mod tests {
 
     #[test]
     fn a_damaged_protected_key_is_refused() {
-        // Codex review: with the right password, a damaged last block once left plaintext unwiped;
+        // Found in review: with the right password, a damaged last block once left plaintext unwiped;
         // the decryption is now in place, in a wiped buffer, and the error is the same.
         let file = include_bytes!("../../../tests/corpus/tqsl/1024-password/tqsl/keys/QG0TEST");
         let pem = KeyEntry::read_key_file(file)
@@ -625,7 +625,7 @@ mod tests {
     #[test]
     fn a_key_that_is_not_lotw_shaped_is_refused_before_it_can_sign() {
         use rsa::pkcs8::EncodePrivateKey;
-        // Codex review: p = 3 and a 1022-bit q make a 1024-bit key that rsa accepts, whose CRT step
+        // Found in review: p = 3 and a 1022-bit q make a 1024-bit key that rsa accepts, whose CRT step
         // would then loop for over 2^1000 iterations. q from `openssl prime -generate -bits 1022`.
         let q = [
             "39241060f9dd871a47f383b6d93528e91ef2f26a23a18ac4c84be4a7de864fd4",
@@ -656,7 +656,7 @@ mod tests {
 
     #[test]
     fn a_public_key_that_is_not_the_private_keys_is_refused() {
-        // Codex review: certificate matching reads PUBLIC_KEY, so it must be the signing key's own.
+        // Found in review: certificate matching reads PUBLIC_KEY, so it must be the signing key's own.
         let file = |case: &str| -> Vec<u8> {
             std::fs::read(format!(
                 "{}/../../tests/corpus/tqsl/{case}/tqsl/keys/QG0TEST",
@@ -751,7 +751,7 @@ mod tests {
 
     #[test]
     fn a_key_with_composite_factors_does_not_unlock() {
-        // Codex review's key: p = 3^323 and q = 7 * 3^321, both 512 bits, n of 1024 bits, d the
+        // The review's key: p = 3^323 and q = 7 * 3^321, both 512 bits, n of 1024 bits, d the
         // inverse of e modulo lcm(p - 1, q - 1, 2 * 3^643): rsa accepts it, and it would sign.
         let three_to = |k: u32| (0..k).fold(rsa::BigUint::from(1u32), |acc, _| acc * 3u32);
         let one = rsa::BigUint::from(1u32);
@@ -788,7 +788,7 @@ mod tests {
     #[test]
     fn a_key_with_equal_primes_does_not_unlock() {
         use rsa::traits::PrivateKeyParts;
-        // Codex review: p = q gives a 1024-bit modulus of two 512-bit primes, which rsa accepts,
+        // Found in review: p = q gives a 1024-bit modulus of two 512-bit primes, which rsa accepts,
         // and anyone can factor it with a square root. d is the inverse of e modulo p(p - 1).
         let real = RsaPrivateKey::from_pkcs8_pem(include_str!(
             "../../../tests/corpus/pki/user-1024.key.pem"

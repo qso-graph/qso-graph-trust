@@ -423,7 +423,7 @@ mod tests {
         ] {
             assert!(!loc.contradicts(adif, value), "{adif} {value}");
         }
-        // Codex review: a two-grid QSO passed for a four-grid location.
+        // Found in review: a two-grid QSO passed for a four-grid location.
         let mut block = KANSAS.to_vec();
         block[4] = ("GRIDSQUARE", "EM17,EM18,EM27,EM28");
         let block = StationLocation::new(&block).expect("location");
@@ -443,7 +443,7 @@ mod tests {
                 && !is_adif_vucc_grids("EM17")
                 && !is_adif_vucc_grids("EM17,FN31")
         );
-        // Codex review: subsquares that differ were compared only as squares.
+        // Found in review: subsquares that differ were compared only as squares.
         let mut fine = KANSAS.to_vec();
         fine[4] = ("GRIDSQUARE", "EM17AB");
         let fine = StationLocation::new(&fine).expect("location");
@@ -571,7 +571,7 @@ mod tests {
         assert!(with("GRIDSQUARE", "EM17,EM27").is_ok());
         assert!(with("GRIDSQUARE", "EM19,EN10").is_ok());
         assert!(with("GRIDSQUARE", "EM17,EM18,EM27,EM28").is_ok());
-        // Codex review: grids that do not meet were accepted as one location.
+        // Found in review: grids that do not meet were accepted as one location.
         for bad in [
             "EM17,FN31",
             "EM17,EM18,EM19",
@@ -585,7 +585,7 @@ mod tests {
                 "{bad}"
             );
         }
-        // Codex review: zones the entity does not lie in were accepted.
+        // Found in review: zones the entity does not lie in were accepted.
         assert!(matches!(
             with("CQZ", "25"),
             Err(StationError::Invalid { field: "ZONES", .. })
@@ -595,7 +595,7 @@ mod tests {
             with("ITUZ", "8"),
             Err(StationError::Invalid { field: "ZONES", .. })
         ));
-        // Codex review: a six-byte grid with a two-byte character inside panicked on slicing.
+        // Found in review: a six-byte grid with a two-byte character inside panicked on slicing.
         assert!(matches!(
             with("GRIDSQUARE", "AAA\u{e9}A"),
             Err(StationError::Invalid { .. })

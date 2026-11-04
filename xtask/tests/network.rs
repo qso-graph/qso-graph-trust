@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 
-//! Astra's three networking bypasses, planted as source and never executed.
+//! Three networking bypasses found in review, planted as source and never executed.
 
 #![forbid(unsafe_code)]
 
