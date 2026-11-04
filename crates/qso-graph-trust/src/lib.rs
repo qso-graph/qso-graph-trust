@@ -13,6 +13,7 @@ pub mod export;
 pub mod gzip;
 pub mod import;
 mod lotw;
+mod memory;
 mod pkcs12;
 pub mod qso;
 pub mod records;

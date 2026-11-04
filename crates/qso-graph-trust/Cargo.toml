@@ -24,10 +24,10 @@ include = ["src/**/*.rs", "README.md", "LICENSE.md", "LICENSE-ARRL.md", "NOTICE.
 # one binding (decision 0006).
 qso-graph-trust-awslc = { path = "../qso-graph-trust-awslc", version = "=0.1.0-beta.4" }
 sha1 = { version = "=0.10.6", default-features = false, features = ["oid"] }
-# tqsllib's keys: PKCS#8 PEM, plain, or encrypted (PBES2 with 3DES) when the
-# ham set a password. sha1-insecure: PBKDF2 with HMAC-SHA1, which older OpenSSL
-# wrote for TQSL's keys; it is a key derivation here, not a signature.
-pkcs8 = { version = "=0.10.2", default-features = false, features = ["std", "pem", "encryption", "3des", "sha1-insecure"] }
+# Parse PKCS#8/PBES parameters only. 3des exposes the legacy cipher parameter variant (and
+# transitively enables RustCrypto crypto features); no pkcs8/pkcs5 crypto is called in shipped code.
+# Derivation and decryption use the binding's safe AWS-LC API.
+pkcs8 = { version = "=0.10.2", default-features = false, features = ["std", "pem", "3des"] }
 # The LoTW certificate a signed log carries: its callsign, DXCC entity, QSO dates and public key.
 x509-cert = { version = "=0.2.5", default-features = false, features = ["pem", "std"] }
 # The .tq8: a signed log, gzipped. Deflate only; the gzip wrapper is ours (signed_log.rs).
@@ -35,16 +35,11 @@ miniz_oxide = { version = "=0.9.1", default-features = false, features = ["with-
 base64ct = { version = "=1.8.3", default-features = false, features = ["alloc"] }
 # Every buffer that can hold a key is wiped when it is dropped.
 zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
-# Derive into wiped buffers rather than pkcs5's unwiped derived-key buffer. pkcs5 reads the
-# parameters; CBC decryption uses the binding's safe AWS-LC API (including legacy 3DES).
-pbkdf2 = { version = "=0.12.2", default-features = false, features = ["hmac"] }
-sha2 = { version = "=0.10.9", default-features = false, features = ["oid"] }
-cbc = { version = "=0.1.2", default-features = false, features = ["block-padding", "zeroize"] }
-des = { version = "=0.8.1", default-features = false, features = ["zeroize"] }
-aes = { version = "=0.8.4", default-features = false, features = ["zeroize"] }
-
 # Test tools only, never shipped: rsa and num-bigint-dig build the crafted keys the tests refuse.
 [dev-dependencies]
+# Independent test oracles and crafted encrypted envelopes only; never shipped crypto paths.
+sha2 = { version = "=0.10.9", default-features = false, features = ["oid"] }
+pkcs8 = { version = "=0.10.2", default-features = false, features = ["encryption", "3des", "sha1-insecure"] }
 rsa = { version = "=0.9.10", default-features = false, features = ["std", "pem", "getrandom"] }
 rand_core = { version = "=0.6.4", default-features = false, features = ["getrandom"] }
 num-bigint-dig = { version = "=0.8.6", default-features = false, features = ["prime"] }

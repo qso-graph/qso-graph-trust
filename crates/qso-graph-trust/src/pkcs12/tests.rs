@@ -68,10 +68,8 @@ fn authority_bag() -> Zeroizing<Vec<u8>> {
 }
 fn pfx(auth: &[u8]) -> Zeroizing<Vec<u8>> {
     let password = bmp(b"qgt-test").expect("password");
-    let key = kdf::<Sha256>(&password, b"test-salt", 2048, 3, 32);
-    let mut mac = Hmac::<Sha256>::new_from_slice(&key).expect("HMAC");
-    Mac::update(&mut mac, auth);
-    let digest = mac.finalize().into_bytes();
+    let key = kdf(ImportDigest::Sha256, &password, b"test-salt", 2048, 3, 32);
+    let digest = qso_graph_trust_awslc::import_hmac(ImportDigest::Sha256, &key, auth);
     let info = seq(&[&seq(&[&tlv(6, SHA256), &tlv(5, &[])]), &tlv(4, &digest)]);
     let mac = seq(&[&info, &tlv(4, b"test-salt"), &tlv(2, &[8, 0])]);
     seq(&[&tlv(2, &[3]), &data(auth), &mac])

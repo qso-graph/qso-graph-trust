@@ -139,6 +139,15 @@ pub(crate) fn seal(
     plaintext: &[u8],
     password: &Password,
 ) -> Result<Vec<u8>, ExportError> {
+    crate::memory::scrub_after(|| seal_inner(part_name, plaintext, password))
+}
+
+#[inline(never)]
+fn seal_inner(
+    part_name: &str,
+    plaintext: &[u8],
+    password: &Password,
+) -> Result<Vec<u8>, ExportError> {
     password.require_generated()?;
     if plaintext.len() > MAX_PLAINTEXT_LEN {
         return Err(ExportError::Seal);
@@ -172,9 +181,10 @@ pub(crate) fn open(
     bytes: &[u8],
     password: &Password,
 ) -> Result<Zeroizing<Vec<u8>>, ExportError> {
-    open_with(part_name, bytes, password, pbkdf2_sha256)
+    crate::memory::scrub_after(|| open_with(part_name, bytes, password, pbkdf2_sha256))
 }
 
+#[inline(never)]
 fn open_with(
     part_name: &str,
     bytes: &[u8],

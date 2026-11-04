@@ -20,7 +20,6 @@ use pkcs8::pkcs5::EncryptionScheme;
 use pkcs8::pkcs5::pbes2::{self, Kdf, Pbkdf2Prf};
 use pkcs8::{EncryptedPrivateKeyInfo, der::Decode};
 use qso_graph_trust_awslc::RsaKey;
-use sha1::Sha1;
 use zeroize::Zeroizing;
 
 use crate::records::{self, Record, RecordError};
@@ -138,16 +137,18 @@ pub(crate) fn decrypt(
     if kdf.key_length.is_some_and(|l| usize::from(l) != key_len) {
         return Err(KeyError::UnsupportedProtection);
     }
-    let mut key = Zeroizing::new(vec![0u8; key_len]);
-    match kdf.prf {
-        Pbkdf2Prf::HmacWithSha1 => {
-            pbkdf2::pbkdf2_hmac::<Sha1>(password, kdf.salt, kdf.iteration_count, &mut key)
-        }
-        Pbkdf2Prf::HmacWithSha256 => {
-            pbkdf2::pbkdf2_hmac::<sha2::Sha256>(password, kdf.salt, kdf.iteration_count, &mut key)
-        }
+    let algorithm = match kdf.prf {
+        Pbkdf2Prf::HmacWithSha1 => qso_graph_trust_awslc::ImportDigest::Sha1,
+        Pbkdf2Prf::HmacWithSha256 => qso_graph_trust_awslc::ImportDigest::Sha256,
         _ => return Err(KeyError::UnsupportedProtection),
-    }
+    };
+    let key = qso_graph_trust_awslc::import_pbkdf2(
+        algorithm,
+        password,
+        kdf.salt,
+        std::num::NonZeroU32::new(kdf.iteration_count).ok_or(KeyError::UnsupportedProtection)?,
+        key_len,
+    );
     let (cipher, iv): (_, &[u8]) = match params.encryption {
         pbes2::EncryptionScheme::DesEde3Cbc { iv } => (ImportCipher::DesEde3, iv),
         pbes2::EncryptionScheme::Aes128Cbc { iv } => (ImportCipher::Aes128, iv),
@@ -297,11 +298,13 @@ impl KeyEntry {
 
     /// Unlock the key for signing. A protected key needs its password; a plain one ignores it.
     pub fn unlock(&self, password: Option<&[u8]>) -> Result<TqslKey, KeyError> {
-        let der = self.pkcs8_der(password)?;
-        TqslKey::from_pkcs8_der(
-            &der,
-            &self.public_key_der().ok_or(KeyError::PublicKeyMismatch)?,
-        )
+        crate::memory::scrub_after(|| {
+            let der = self.pkcs8_der_inner(password)?;
+            TqslKey::from_pkcs8_der_inner(
+                &der,
+                &self.public_key_der().ok_or(KeyError::PublicKeyMismatch)?,
+            )
+        })
     }
 
     // Kept inside the crate: only the credential-store handoff may obtain the DER, never a caller.
@@ -309,6 +312,11 @@ impl KeyEntry {
         &self,
         password: Option<&[u8]>,
     ) -> Result<Zeroizing<Vec<u8>>, KeyError> {
+        crate::memory::scrub_after(|| self.pkcs8_der_inner(password))
+    }
+
+    #[inline(never)]
+    fn pkcs8_der_inner(&self, password: Option<&[u8]>) -> Result<Zeroizing<Vec<u8>>, KeyError> {
         if self.is_encrypted() && password.is_none() {
             return Err(KeyError::PasswordNeeded);
         }
@@ -338,6 +346,11 @@ impl KeyEntry {
 impl TqslKey {
     // A stored secret is checked again: the credential backend is not a source of trust.
     pub(crate) fn from_pkcs8_der(der: &[u8], spki: &[u8]) -> Result<Self, KeyError> {
+        crate::memory::scrub_after(|| Self::from_pkcs8_der_inner(der, spki))
+    }
+
+    #[inline(never)]
+    pub(crate) fn from_pkcs8_der_inner(der: &[u8], spki: &[u8]) -> Result<Self, KeyError> {
         let key = RsaKey::from_pkcs8_der(der).map_err(|_| KeyError::NotAKey)?;
         // A key LoTW uses, as tqsllib makes them: 1024 bits, e = 65537 (tqsl_new_rsa_key), two
         // different 512-bit factors, each passing AWS-LC's primality test. Anything else cannot
@@ -358,7 +371,7 @@ impl TqslKey {
 impl TqslKey {
     /// The signature over `data`, as the bytes tqsllib's `tqsl_signDataBlock` returns.
     pub fn sign(&self, data: &[u8]) -> Result<Vec<u8>, KeyError> {
-        self.key.sign_sha1(data).map_err(|_| KeyError::Signing)
+        crate::memory::scrub_after(|| self.key.sign_sha1(data).map_err(|_| KeyError::Signing))
     }
 
     /// Whether `spki_der`, a certificate's SubjectPublicKeyInfo, is this key's public key.

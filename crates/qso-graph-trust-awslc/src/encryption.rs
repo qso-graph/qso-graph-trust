@@ -6,7 +6,7 @@
 use std::fmt;
 use std::num::NonZeroU32;
 
-use aws_lc_rs::{aead, pbkdf2};
+use aws_lc_rs::{aead, digest, hmac, pbkdf2};
 use zeroize::Zeroizing;
 
 /// A fixed failure category, with no key, password or plaintext attached.
@@ -32,6 +32,75 @@ pub fn pbkdf2_sha256(password: &[u8], salt: &[u8], iterations: NonZeroU32) -> Ze
         &mut key,
     );
     key
+}
+
+/// Hash algorithms accepted only for password-protected legacy imports.
+#[derive(Clone, Copy, Debug)]
+pub enum ImportDigest {
+    /// SHA-1 for existing files, never new protection.
+    Sha1,
+    /// SHA-256.
+    Sha256,
+}
+impl ImportDigest {
+    fn digest(self) -> &'static digest::Algorithm {
+        match self {
+            Self::Sha1 => &digest::SHA1_FOR_LEGACY_USE_ONLY,
+            Self::Sha256 => &digest::SHA256,
+        }
+    }
+    fn hmac(self) -> hmac::Algorithm {
+        match self {
+            Self::Sha1 => hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
+            Self::Sha256 => hmac::HMAC_SHA256,
+        }
+    }
+}
+
+/// Hash secret-bearing input using the safe provider API. Only wiped heap storage is returned.
+/// The enclosing import operation must scrub provider stack temporaries after its last hash.
+pub fn import_digest(algorithm: ImportDigest, parts: &[&[u8]]) -> Zeroizing<Vec<u8>> {
+    let mut context = digest::Context::new(algorithm.digest());
+    for part in parts {
+        context.update(part);
+    }
+    Zeroizing::new(context.finish().as_ref().to_vec())
+}
+
+/// Derive directly into wiped heap storage; no inline derived-key array crosses this API.
+pub fn import_pbkdf2(
+    algorithm: ImportDigest,
+    password: &[u8],
+    salt: &[u8],
+    iterations: NonZeroU32,
+    len: usize,
+) -> Zeroizing<Vec<u8>> {
+    let algorithm = match algorithm {
+        ImportDigest::Sha1 => pbkdf2::PBKDF2_HMAC_SHA1,
+        ImportDigest::Sha256 => pbkdf2::PBKDF2_HMAC_SHA256,
+    };
+    let mut key = Zeroizing::new(vec![0; len]);
+    pbkdf2::derive(algorithm, iterations, salt, password, &mut key);
+    key
+}
+
+/// Compute an import MAC directly into wiped heap storage (also used by test-file builders).
+pub fn import_hmac(algorithm: ImportDigest, key: &[u8], data: &[u8]) -> Zeroizing<Vec<u8>> {
+    let key = hmac::Key::new(algorithm.hmac(), key);
+    let mut out = Zeroizing::new(vec![0; algorithm.digest().output_len()]);
+    hmac::sign_to_buffer(&key, data, &mut out).expect("correct HMAC output length");
+    out
+}
+
+/// Verify a PKCS#12 MAC using the provider's constant-time comparison.
+pub fn import_hmac_verify(
+    algorithm: ImportDigest,
+    key: &[u8],
+    data: &[u8],
+    expected: &[u8],
+) -> Result<(), EncryptionError> {
+    let key = hmac::Key::new(algorithm.hmac(), key);
+    hmac::verify(&key, data, expected).map_err(|_| EncryptionError)
 }
 
 /// Seal with AES-256-GCM and authenticated associated data. The caller must never reuse a

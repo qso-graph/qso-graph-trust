@@ -21,7 +21,8 @@ use zeroize::Zeroizing;
 
 mod encryption;
 pub use encryption::{
-    EncryptionError, ImportCipher, aes256_gcm_open, aes256_gcm_seal, import_cbc_decrypt,
+    EncryptionError, ImportCipher, ImportDigest, aes256_gcm_open, aes256_gcm_seal,
+    import_cbc_decrypt, import_digest, import_hmac, import_hmac_verify, import_pbkdf2,
     pbkdf2_sha256,
 };
 

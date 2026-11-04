@@ -7,13 +7,16 @@
 //! debugger or a crash dump would see it, and looks for the key: the key file's text, the key's
 //! DER, its private exponent, primes and all three CRT values (`d mod p−1`, `d mod q−1` and
 //! `q⁻¹ mod p`), `e·d`, `p−1` and `q−1`, each in both byte orders, and the password. None may be
-//! there. Generated export passwords and both AES keys (including failed opens) are searched too.
+//! there. Import passwords in UTF-8 and BMP form, MAC and AES keys (including failed MACs),
+//! recoverable HMAC pads/hash words and the CBC pre-XOR final key block are searched too, along
+//! with generated export passwords and both export AES keys (including failed opens).
 //!
 //! Controls prove the search finds what is there: with the key still in use, every one of its
 //! private values must be found, so each needle is shown to be right;
 //! and in the same program built without the wiping allocator, what an ordinary free leaves (the
 //! key file's text, read into a plain buffer as any caller reads a file) must be found. Separate
-//! runs deliberately keep copies of both export passwords and both derived AES keys.
+//! runs deliberately keep copies of export passwords/keys and every import needle. On x86_64,
+//! scans also run with AES-NI and VAES masked off in the child's environment before AWS-LC starts.
 //!
 //! Linux, where a parent may read its child's memory through `/proc`; run in CI on Linux, debug and
 //! release, as optimisation is what removes wipes.
@@ -188,14 +191,86 @@ for p in (s[:20], s[20:40]):
     ]
 }
 
+fn import_needles(case: &str, secrets_file: &Path) -> Vec<(String, Vec<u8>)> {
+    let secrets = std::fs::read(secrets_file).expect("test-only export secrets");
+    let mut derive = Command::new("python3")
+        .args([
+            "-c",
+            include_str!("../../../scripts/custody-import-needles.py"),
+        ])
+        .arg(corpus(case, "QG0TEST.p12"))
+        .arg(corpus(case, "tqsl/keys/QG0TEST"))
+        .arg(corpus(case, "key-password"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Python import KDF oracle");
+    derive
+        .stdin
+        .take()
+        .expect("input")
+        .write_all(&secrets[20..40])
+        .expect("password input");
+    let output = derive.wait_with_output().expect("derive import keys");
+    assert!(output.status.success());
+    let mut out = Vec::new();
+    for line in std::str::from_utf8(&output.stdout)
+        .expect("oracle text")
+        .lines()
+    {
+        let (label, hex) = line.split_once('\t').expect("labelled hex");
+        let bytes: Vec<u8> = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("hex"))
+            .collect();
+        if label == "envelope" {
+            // AWS-LC's in-place fallback tmp is AES_decrypt(C_last), before the CBC XOR.
+            // Search that recoverable representation too, including the last key bytes and pad.
+            let info = pkcs8::EncryptedPrivateKeyInfo::from_der(&bytes).expect("key envelope");
+            let plain = info
+                .decrypt(b"qgt-test")
+                .expect("independent test decryption");
+            let cipher = info.encrypted_data;
+            let padding = 16 - plain.as_bytes().len() % 16;
+            let mut block = vec![padding as u8; 16];
+            let tail = 16 - padding;
+            block[..tail].copy_from_slice(&plain.as_bytes()[plain.as_bytes().len() - tail..]);
+            for (b, c) in block
+                .iter_mut()
+                .zip(&cipher[cipher.len() - 32..cipher.len() - 16])
+            {
+                *b ^= c;
+            }
+            out.push(("PKCS#12 CBC pre-XOR final block".into(), block));
+        } else {
+            out.push((label.to_owned(), bytes));
+        }
+    }
+    assert!(out.len() > 20, "import oracle must produce every needle");
+    out
+}
+
 /// Scan before reading the child's test-secret file, then construct the export needles.
 fn found_in(program: &str, case: &str, mode: &str) -> Vec<String> {
+    found_with_cpu(program, case, mode, false)
+}
+
+fn found_with_cpu(program: &str, case: &str, mode: &str, disable_aesni: bool) -> Vec<String> {
     let arg = |p: &Path| p.to_str().expect("a UTF-8 path").to_string();
     let folder = SecretsFolder::new();
     let secrets_file = folder.0.join("export-secrets");
     let import_password_file = folder.0.join("import-password");
     std::fs::write(&import_password_file, b"qgt-test").expect("test import password");
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    // aws-lc-sys 0.45.0: cpucap/internal.h CRYPTO_is_AESNI_capable tests word 1 bit 25.
+    // cpu_intel.c interprets '~' as AND-NOT on the first 64-bit pair: bit 32+25 = 57.
+    // Leave SSSE3 enabled for VPAES. Clear VAES (word 3 bit 9) too for wider AES dispatch.
+    if disable_aesni {
+        command.env("OPENSSL_ia32cap", "~0x200000000000000:~0x20000000000");
+    } else {
+        command.env_remove("OPENSSL_ia32cap");
+    }
+    let mut child = command
         .args([
             arg(&corpus(case, "tqsl/keys/QG0TEST")),
             arg(&corpus(case, "tqsl/certs/user")),
@@ -217,13 +292,24 @@ fn found_in(program: &str, case: &str, mode: &str) -> Vec<String> {
     assert_eq!(line, "ready\n", "{program} {case} {mode}");
     let mut regions = memory(child.id());
     let export_needles = export_needles(&secrets_file);
-    if mode == "export-keys" {
+    let import_needles = import_needles(case, &secrets_file);
+    if mode == "export-keys" || mode == "import-secrets" {
         // After observing the completed export/restore, deliberately keep copies of both derived
         // keys in the child. The same search must find each planted key in a second snapshot.
         let input = child.stdin.as_mut().expect("its input");
         input.write_all(b"\n").expect("release first wait");
-        for (_, key) in &export_needles[2..] {
-            input.write_all(key).expect("plant AES key");
+        if mode == "import-secrets" {
+            let len: usize = import_needles.iter().map(|(_, bytes)| bytes.len()).sum();
+            input
+                .write_all(&(len as u32).to_be_bytes())
+                .expect("planted length");
+            for (_, bytes) in &import_needles {
+                input.write_all(bytes).expect("plant import secret");
+            }
+        } else {
+            for (_, key) in &export_needles[2..] {
+                input.write_all(key).expect("plant AES key");
+            }
         }
         line.clear();
         BufReader::new(child.stdout.as_mut().expect("its output"))
@@ -243,6 +329,7 @@ fn found_in(program: &str, case: &str, mode: &str) -> Vec<String> {
     let mut needles = needles(case);
     needles.push(("PKCS#12 password".into(), b"qgt-test".to_vec()));
     needles.extend(export_needles);
+    needles.extend(import_needles);
     if std::env::var_os("QGT_CUSTODY_WHERE").is_some() {
         for (label, n) in &needles {
             for (region, bytes) in &regions {
@@ -332,6 +419,53 @@ fn the_search_catches_both_planted_aes_keys() {
         assert!(
             found.iter().any(|f| f == label),
             "{label} not found in {found:?}"
+        );
+    }
+}
+
+#[test]
+fn the_search_catches_every_planted_import_secret() {
+    for disabled in [false, true] {
+        if disabled && !cfg!(target_arch = "x86_64") {
+            continue;
+        }
+        let found = found_with_cpu(WIPED, "1024-password", "import-secrets", disabled);
+        for label in [
+            "PKCS#12 BMP password",
+            "failed PKCS#12 BMP password",
+            "PKCS#12 CBC pre-XOR final block",
+        ] {
+            assert!(
+                found.iter().any(|f| f == label),
+                "{label} missing (AES-NI disabled={disabled}): {found:?}"
+            );
+        }
+        for key in [
+            "PKCS#12 MAC key",
+            "failed PKCS#12 MAC key",
+            "PKCS#12 certificate AES key",
+            "PKCS#12 private AES key",
+            "TQSL unlock key",
+        ] {
+            for suffix in ["", " fragment", " LE words", " ipad", " opad"] {
+                let label = format!("{key}{suffix}");
+                assert!(
+                    found.contains(&label),
+                    "{label} missing (AES-NI disabled={disabled}): {found:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+#[cfg(target_arch = "x86_64")]
+fn no_secrets_remain_without_aesni() {
+    for case in ["1024", "1024-password"] {
+        assert_eq!(
+            found_with_cpu(WIPED, case, "done", true),
+            Vec::<String>::new(),
+            "{case}"
         );
     }
 }

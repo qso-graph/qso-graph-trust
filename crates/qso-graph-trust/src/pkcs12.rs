@@ -6,12 +6,10 @@
 //! input, bag count, nesting, salts, iterations and total derivation work are bounded separately.
 //! Every owned password, plaintext and derived-key buffer is wiped on success and error paths.
 
-use pbkdf2::hmac::{Hmac, Mac};
 use pkcs8::der::Decode;
 use pkcs8::pkcs5::{EncryptionScheme, pbes2};
-use sha1::{Digest, Sha1};
-use sha2::Sha256;
-use zeroize::{Zeroize, Zeroizing};
+use qso_graph_trust_awslc::{ImportDigest, import_digest, import_hmac_verify};
+use zeroize::Zeroizing;
 
 use crate::certificate::{Certificate, MAX_CERTIFICATE_LEN, Trust};
 use crate::import::{
@@ -149,9 +147,10 @@ fn bmp(password: &[u8]) -> Result<Zeroizing<Vec<u8>>, ImportError> {
     Ok(out)
 }
 
-// RFC 7292 B.2; both accepted digests have v=64. D is a vetted RustCrypto digest, never an
-// in-house primitive. The KDF's I, A, B, output and password all live in wiping buffers.
-fn kdf<D: Digest>(
+// RFC 7292 B.2; both accepted digests have v=64. Hashes use the binding's safe provider API.
+// The KDF's I, A, B, output and password all live in wiping heap buffers.
+fn kdf(
+    algorithm: ImportDigest,
     password: &[u8],
     salt: &[u8],
     iterations: u32,
@@ -170,18 +169,11 @@ fn kdf<D: Digest>(
     let mut out = Zeroizing::new(Vec::with_capacity(len));
     let d = [id; 64];
     while out.len() < len {
-        let mut hash = D::new();
-        Digest::update(&mut hash, d);
-        Digest::update(&mut hash, &*input);
-        let mut digest = hash.finalize();
-        let mut a = Zeroizing::new(digest.to_vec());
-        digest.as_mut_slice().zeroize();
+        let mut a = import_digest(algorithm, &[&d, &input]);
         for _ in 1..iterations {
-            let mut digest = D::digest(&*a);
-            a.copy_from_slice(&digest);
-            digest.as_mut_slice().zeroize();
+            a = import_digest(algorithm, &[&a]);
         }
-        let mut b = Zeroizing::new([0u8; 64]);
+        let mut b = Zeroizing::new(vec![0u8; 64]);
         for (i, v) in b.iter_mut().enumerate() {
             *v = a[i % a.len()];
         }
@@ -222,24 +214,13 @@ fn verify_mac(
     let iterations = if mac.0.is_empty() { 1 } else { mac.uint()? };
     mac.end()?;
     work(iterations, 1, budget)?;
-    let bad = |_| ImportError::Authentication;
-    match oid {
-        SHA1 => {
-            let key = kdf::<Sha1>(password, salt_bytes, iterations, 3, 20);
-            let mut hmac = Hmac::<Sha1>::new_from_slice(&key).map_err(bad)?;
-            Mac::update(&mut hmac, data);
-            hmac.verify_slice(expected)
-                .map_err(|_| ImportError::Authentication)
-        }
-        SHA256 => {
-            let key = kdf::<Sha256>(password, salt_bytes, iterations, 3, 32);
-            let mut hmac = Hmac::<Sha256>::new_from_slice(&key).map_err(bad)?;
-            Mac::update(&mut hmac, data);
-            hmac.verify_slice(expected)
-                .map_err(|_| ImportError::Authentication)
-        }
-        _ => Err(ImportError::UnsupportedProtection),
-    }
+    let (algorithm, len) = match oid {
+        SHA1 => (ImportDigest::Sha1, 20),
+        SHA256 => (ImportDigest::Sha256, 32),
+        _ => return Err(ImportError::UnsupportedProtection),
+    };
+    let key = kdf(algorithm, password, salt_bytes, iterations, 3, len);
+    import_hmac_verify(algorithm, &key, data, expected).map_err(|_| ImportError::Authentication)
 }
 
 fn decrypt(
@@ -276,8 +257,8 @@ fn decrypt(
             let iterations = params.uint()?;
             params.end()?;
             work(iterations, 3, budget)?;
-            let key = kdf::<Sha1>(bmp, salt_bytes, iterations, 1, 24);
-            let iv = kdf::<Sha1>(bmp, salt_bytes, iterations, 2, 8);
+            let key = kdf(ImportDigest::Sha1, bmp, salt_bytes, iterations, 1, 24);
+            let iv = kdf(ImportDigest::Sha1, bmp, salt_bytes, iterations, 2, 8);
             qso_graph_trust_awslc::import_cbc_decrypt(
                 qso_graph_trust_awslc::ImportCipher::DesEde3,
                 &key,
@@ -395,6 +376,11 @@ impl Contents {
 }
 
 pub(crate) fn read(bytes: &[u8], password: &[u8], trust: &Trust) -> Result<Loaded, ImportError> {
+    crate::memory::scrub_after(|| read_inner(bytes, password, trust))
+}
+
+#[inline(never)]
+fn read_inner(bytes: &[u8], password: &[u8], trust: &Trust) -> Result<Loaded, ImportError> {
     if bytes.len() > MAX_IMPORT_LEN {
         return Err(ImportError::Limit);
     }
@@ -457,7 +443,8 @@ pub(crate) fn read(bytes: &[u8], password: &[u8], trust: &Trust) -> Result<Loade
     }
     let certificate = certificates.remove(0);
     let key = contents.key.ok_or(ImportError::Malformed)?;
-    signing::TqslKey::from_pkcs8_der(&key, certificate.public_key_der())?;
+    // The enclosing import scrubs once, after validation and all KDF/CBC frames have returned.
+    signing::TqslKey::from_pkcs8_der_inner(&key, certificate.public_key_der())?;
     Ok(Loaded { certificate, key })
 }
 
