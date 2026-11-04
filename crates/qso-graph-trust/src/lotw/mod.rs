@@ -124,6 +124,30 @@ pub fn lotw_mode(mode: &str, submode: Option<&str>) -> Option<&'static str> {
     tables::MODES.iter().copied().find(|&m| m == found)
 }
 
+pub(crate) fn native_mode(mode: &str) -> Option<&'static str> {
+    tables::MODES.iter().copied().find(|m| *m == mode)
+}
+
+pub(crate) fn is_native_mode(mode: &str) -> bool {
+    tables::MODES.iter().any(|m| m.eq_ignore_ascii_case(mode))
+}
+
+pub(crate) fn mapped_mode(key: &str) -> Option<&'static str> {
+    let (mode, submode) = key
+        .split_once('%')
+        .map_or((key, None), |(m, s)| (m, Some(s)));
+    tables::ADIF_MODES
+        .iter()
+        .find(|m| m.mode == mode && m.submode == submode)
+        .or_else(|| {
+            submode
+                .is_none()
+                .then(|| tables::ADIF_MODES.iter().find(|m| m.submode == Some(mode)))
+                .flatten()
+        })
+        .map(|m| m.lotw)
+}
+
 /// Whether LoTW accepts this propagation mode, in capitals.
 pub fn is_prop_mode(name: &str) -> bool {
     tables::PROP_MODES.contains(&name)
@@ -167,6 +191,48 @@ pub fn loc_value_zones(field: &str, dependency: &str, value: &str) -> &'static s
         .iter()
         .find(|(f, d, v, _)| *f == field && *d == dependency && *v == value)
         .map_or("", |(_, _, _, z)| *z)
+}
+
+pub(crate) fn loc_value_label(field: &str, dependency: &str, value: &str) -> Option<&'static str> {
+    tables::LOC_LABELS
+        .iter()
+        .find(|(f, d, v, _)| *f == field && *d == dependency && *v == value)
+        .map(|(_, _, _, label)| *label)
+}
+
+pub(crate) fn loc_value_from_label(
+    field: &str,
+    dependency: &str,
+    label: &str,
+) -> Option<&'static str> {
+    // location.cpp:4076–4110: the setter accepts labels without spaces, punctuation or the
+    // administrative suffixes listed here. These are normalization rules, not ARRL tables.
+    let normalize = |value: &str| {
+        let mut value = value.to_ascii_uppercase().replace([' ', '\'', '-'], "");
+        for (from, to) in [
+            ("CITYANDBOROUGH", ""),
+            ("BOROUGH", ""),
+            ("CENSUSAREA", ""),
+            ("MUNICIPALITY", ""),
+            ("ST.", "SAINT"),
+            ("STE.", "SAINTE"),
+            ("DOÑAANA", "DONAANA"),
+            ("BRISTOLCITY", "BRISTOL"),
+            ("SALEMCITY", "SALEM"),
+        ] {
+            value = value.replace(from, to);
+        }
+        value
+    };
+    let label = normalize(label);
+    tables::LOC_LABELS
+        .iter()
+        .find(|(f, d, _, v)| *f == field && *d == dependency && normalize(v) == label)
+        .map(|(_, _, value, _)| *value)
+        .or_else(|| {
+            loc_values(field, dependency)
+                .find(|v| loc_value_label(field, dependency, v).is_none() && normalize(v) == label)
+        })
 }
 
 /// The (ITU, CQ) zone pairs in a zone map as config.xml writes it, `07:04,08:05`.

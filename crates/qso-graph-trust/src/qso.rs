@@ -7,12 +7,14 @@
 //!
 //! A QSO's record may also say which station made it (`STATION_CALLSIGN`, `MY_DXCC`,
 //! `MY_GRIDSQUARE` and the rest). Those are kept, and a log is signed only if they agree with the
-//! station location it is signed for (`signed_log`). A [`Qso`] is made only by
-//! [`Qso::from_adif`], so every one has been checked.
+//! station location it is signed for (`signed_log`), under the caller's chosen log handling
+//! settings. A [`Qso`] is made through [`Qso::from_adif`] or [`Qso::from_adif_with_options`], so
+//! every one has been checked.
 
 use std::fmt;
 
 use crate::lotw;
+use crate::options::{QthHandling, SigningOptions};
 use crate::records::Record;
 
 /// The longest frequency accepted, in characters: far more than any real one's digits.
@@ -121,6 +123,7 @@ pub struct Qso {
     call: String,
     band: &'static str,
     mode: &'static str,
+    adif_submode: Option<String>,
     freq: Option<String>,
     band_rx: Option<&'static str>,
     freq_rx: Option<String>,
@@ -214,6 +217,15 @@ const READ: [&str; 21] = [
 impl Qso {
     /// The QSO in an ADIF record.
     pub fn from_adif(record: &Record) -> Result<Self, QsoError> {
+        Self::from_adif_with_options(record, &SigningOptions::default())
+    }
+
+    /// Read and normalize a QSO using caller-selected log handling settings. Use these same
+    /// options with `sign_log_with_options` or `Store::prepare_signing_with_options`.
+    pub fn from_adif_with_options(
+        record: &Record,
+        options: &SigningOptions,
+    ) -> Result<Self, QsoError> {
         // A Record can be built by hand, so the reader's limit is checked here too.
         if record.fields.len() > crate::records::MAX_FIELDS {
             return Err(QsoError::TooManyFields);
@@ -237,9 +249,21 @@ impl Qso {
                 Some(v) if v.len() > MAX_VALUE_LEN => {
                     Err(invalid(name, &String::from_utf8_lossy(&v[..MAX_VALUE_LEN])))
                 }
-                Some(v) => match std::str::from_utf8(v).map(str::trim) {
-                    Ok("") => Ok(None),
-                    Ok(s) => Ok(Some(s.to_ascii_uppercase())),
+                Some(v) => match std::str::from_utf8(v) {
+                    // Non-amateur calls bypass plausibility, never character safety. Check
+                    // before trimming so leading/trailing controls cannot disappear.
+                    Ok(s)
+                        if name == "CALL"
+                            && s.chars().any(|c| {
+                                c.is_control() || matches!(c, '\u{fffe}' | '\u{ffff}')
+                            }) =>
+                    {
+                        Err(invalid(name, s))
+                    }
+                    Ok(s) => match s.trim() {
+                        "" => Ok(None),
+                        s => Ok(Some(s.to_ascii_uppercase())),
+                    },
                     Err(_) => Err(invalid(name, &String::from_utf8_lossy(v))),
                 },
             }
@@ -247,13 +271,16 @@ impl Qso {
         let required = |name: &'static str| text(name)?.ok_or(QsoError::Missing(name));
 
         let call = required("CALL")?;
-        if !is_contacted_callsign(&call) {
+        if call.len() > 20 || (!options.allow_bad_calls && !is_contacted_callsign(&call)) {
             return Err(invalid("CALL", &call));
         }
         let date = required("QSO_DATE")?;
         let date = Date::from_adif(&date).ok_or_else(|| invalid("QSO_DATE", &date))?;
         let time = required("TIME_ON")?;
-        let time = Time::from_adif(&time).ok_or_else(|| invalid("TIME_ON", &time))?;
+        let mut time = Time::from_adif(&time).ok_or_else(|| invalid("TIME_ON", &time))?;
+        if options.ignore_seconds {
+            time.second = 0;
+        }
 
         let (band, freq) = band_and_freq(text("BAND")?, text("FREQ")?, ("BAND", "FREQ"))?
             .ok_or(QsoError::Missing("BAND"))?;
@@ -262,8 +289,10 @@ impl Qso {
 
         let mode = required("MODE")?;
         let submode = text("SUBMODE")?;
-        let mode = lotw::lotw_mode(&mode, submode.as_deref()).ok_or_else(|| {
-            let shown = submode.map_or(mode.clone(), |s| format!("{mode}/{s}"));
+        let mode = options.mode(&mode, submode.as_deref()).ok_or_else(|| {
+            let shown = submode
+                .as_deref()
+                .map_or(mode.clone(), |s| format!("{mode}/{s}"));
             invalid("MODE", &shown)
         })?;
 
@@ -288,6 +317,11 @@ impl Qso {
 
         let mut station = Vec::new();
         for name in STATION_FIELDS {
+            if (name == "STATION_CALLSIGN" && options.ignore_log_callsigns)
+                || (name != "STATION_CALLSIGN" && options.qth == QthHandling::Ignore)
+            {
+                continue;
+            }
             let Some(v) = text(name)? else { continue };
             let ok = match name {
                 "STATION_CALLSIGN" => is_callsign(&v),
@@ -306,7 +340,8 @@ impl Qso {
         }
         // OPERATOR is a person's call; only when it looks like one, and STATION_CALLSIGN is
         // absent, does it name the station.
-        if !station.iter().any(|(n, _)| *n == "STATION_CALLSIGN")
+        if !options.ignore_log_callsigns
+            && !station.iter().any(|(n, _)| *n == "STATION_CALLSIGN")
             && let Some(op) = text("OPERATOR")?.filter(|op| is_callsign(op))
         {
             station.push(("OPERATOR", op));
@@ -316,6 +351,7 @@ impl Qso {
             call,
             band,
             mode,
+            adif_submode: submode,
             freq,
             band_rx,
             freq_rx,
@@ -375,6 +411,22 @@ impl Qso {
     /// The QSO's time, UTC.
     pub fn time(&self) -> Time {
         self.time
+    }
+
+    pub(crate) fn with_options(&self, options: &SigningOptions) -> Self {
+        let mut qso = self.clone();
+        if options.ignore_seconds {
+            qso.time.second = 0;
+        }
+        qso
+    }
+
+    pub(crate) fn remap_mode(&mut self, options: &SigningOptions) -> bool {
+        let Some(mode) = options.mode(self.mode, self.adif_submode.as_deref()) else {
+            return false;
+        };
+        self.mode = mode;
+        true
     }
 
     /// What the QSO's record says about the station that made it: ADIF field names, from

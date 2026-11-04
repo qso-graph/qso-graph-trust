@@ -29,7 +29,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | List | Features | Done | Part done | To do |
 |---|---|---|---|---|
-| Needed for 0.7.0 | 43 | 19 | 11 | 13 |
+| Needed for 0.7.0 | 43 | 20 | 10 | 13 |
 | Nice to have | 15 |  |  | 15 |
 | Won't add | 15 | | | |
 
@@ -64,7 +64,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Import it on any computer (macOS, Windows, Linux), keys into that computer's credential store | File: Restore | Part by part, onto a clean slate: what this computer holds is removed first, nothing merged | 0.7.0 | #172, #174 |
 | Read TQSL's `.tbk` file: certificates, keys, locations | File menu | Reads and checks it; saving what it holds waits on 1.2 | Part done | #172 |
 | Restore TQSL's record of QSOs already signed | File: Restore | Library: merge a backup's signed QSOs without overwriting existing records; CLI and Desktop integration remains | Part done | #172 |
-| Use TQSL's settings that change what's signed: custom mode mappings, ignore seconds, ignore callsigns in the log, non-amateur calls, location details in the log | Preferences | Read from the `.tbk` file; not yet used when signing | Part done | #172 |
+| Use TQSL's settings that change what's signed: custom mode mappings, ignore seconds, ignore callsigns in the log, non-amateur calls, location details in the log | Preferences | Library: explicit [signing options](SIGNING-OPTIONS.md), built by hand or from `.tbk` preferences; signatures and duplicate records checked against tqsllib | Done | #172 |
 | Say which of TQSL's settings were not taken | | Listed | Done | #172 |
 
 ### 1.4 Certificates

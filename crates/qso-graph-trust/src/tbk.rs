@@ -97,7 +97,8 @@ pub struct BackedUpLocation {
 /// How a log's own QTH details (its `MY_` fields) are treated, as TQSL's "Log Handling" sets it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum QthHandling {
-    /// Not looked at (TQSL_LOC_IGNORE).
+    /// Not looked at (TQSL_LOC_IGNORE). When signing, STATION_CALLSIGN and MY_DXCC are not
+    /// compared either, so another station's QSOs can be signed as the selected location's.
     Ignore,
     /// A QSO whose details disagree with the station location is refused: TQSL's default, and QG
     /// Trust's (TQSL_LOC_REPORT).
