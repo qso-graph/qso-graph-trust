@@ -7,6 +7,9 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Library upload request construction and bounded LoTW response parsing, with TQSL's multipart
+  field, filename format and result codes. The endpoint is fixed; callers supply verified TLS.
+  The library opens no connection. CLI and Desktop integration remains.
 - Library signed-QSO records with exact TQSL keys, backup merging, duplicate inspection and the
   new-only/sign-again/cancel choices. Selected QSOs are recorded after their `.tq8` is written;
   encrypted store exports carry the record. Store XML version 2 reads version 1 and keeps up to

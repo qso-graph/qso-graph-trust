@@ -24,6 +24,7 @@ pub mod signing;
 pub mod station;
 pub mod store;
 pub mod tbk;
+pub mod upload;
 mod xml;
 
 /// This library's version, as Cargo has it.
