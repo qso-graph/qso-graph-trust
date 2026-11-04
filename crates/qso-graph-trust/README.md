@@ -5,20 +5,20 @@ Sign ADIF logs for ARRL's [Logbook of The World](https://lotw.arrl.org) (LoTW). 
 station location and QSOs, the signed records and their signatures are TQSL's, byte for byte; only the line naming the program
 that made the file differs.
 
-QSO Graph Trust is the library behind LoTW signing in [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop)
-and the `qg-trust` command line, both still to come, and it is for other people's programs too. Its parsers are safe Rust, and the library
+QSO Graph Trust is the library behind the [`qg-trust`](https://crates.io/crates/qso-graph-trust-cli)
+command line and, still to come, LoTW signing in [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop),
+and it is for other people's programs too. Its parsers are safe Rust, and the library
 forbids `unsafe` code. LoTW's signature is AWS-LC's, through one small binding, `qso-graph-trust-awslc`,
 the only crate here with `unsafe` code; a password-protected key is unlocked with RustCrypto.
 
-**This is a beta.** For now it reads your certificate and key from a TQSL backup (`.tbk`), with the
-key's password. Still to come: keeping keys in the operating system's credential store, uploading to
-LoTW, and requesting certificates. What is done, planned and left out, feature by feature against
+**This is a beta.** It signs your log with your LoTW certificate. Still to come: keeping keys in the operating system's credential
+store, uploading to LoTW, and requesting certificates. What is done, planned and left out, feature by feature against
 TQSL: [`docs/FEATURE-PARITY.md`](https://github.com/qso-graph/qso-graph-trust/blob/main/docs/FEATURE-PARITY.md).
 
 ## Example
 
-This example takes the certificate, the key and a station location from a TQSL backup, then signs an
-ADIF log with them and writes the `.tq8`. It also uses two other crates, `zeroize` and
+This example signs an ADIF log with your LoTW certificate, read from the `.tbk` file TQSL saves, and
+writes the `.tq8`. It also uses two other crates, `zeroize` and
 `zeroizing-alloc` (`cargo add zeroize zeroizing-alloc@=0.1.1`):
 
 ```rust,no_run

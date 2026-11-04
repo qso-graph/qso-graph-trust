@@ -31,11 +31,23 @@ criteria = "safe-to-deploy"
 delta = "0.1.43 -> 0.1.46"
 notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: range-checked backward iteration; the build script and autocfg removed."
 
+[[audits.rpassword]]
+who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+criteria = "safe-to-deploy"
+version = "7.5.4"
+notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-04: the whole crate. No network, process or file access but the terminal (/dev/tty; CONIN$ and CONOUT$ on Windows); no build script. Its unsafe blocks, terminal mode and console calls, are sound. Known and accepted: Ctrl-C at the prompt can leave the terminal's echo off until reset; copies of the password left in buffers it frees, which qg-trust's wiping allocator overwrites."
+
 [[audits.rsa]]
 who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
 criteria = "safe-to-deploy"
 version = "0.9.10"
 notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-03: the whole crate. No unsafe code, no file, network, environment or process access, no build script. Blinding is on the try_sign_with_rng path (src/pkcs1v15/signing_key.rs:150, src/algorithms/rsa.rs:48). RsaPrivateKey and SigningKey derive an unredacted Debug (src/key.rs:37, src/pkcs1v15/signing_key.rs:22): QG Trust wraps them in TqslKey, whose Debug prints nothing. Zeroization is partial: among others, validate() multiplies e by a clone of d that is dropped unwiped (src/key.rs:408-409), on every key QG Trust unlocks, which QG Trust cannot change without patching rsa (refused by its policy); the custody test (qso-graph-desktop#172, Gate C) measures what remains. The arithmetic is not constant-time (RUSTSEC-2023-0071), accepted for local signing only (decision 0002)."
+
+[[audits.rtoolbox]]
+who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
+criteria = "safe-to-deploy"
+version = "0.0.6"
+notes = "Reviewed by Codex (gpt-6-astra, high), findings checked against the source by Bob, 2026-11-04: the whole crate. Terminal detection, printing to the terminal, and buffers wiped to their length; serde features optional and off. Known and accepted: its Windows MSYS terminal detection (atty.rs msys_tty_on) assumes alignment a byte buffer does not guarantee; it is not on rpassword's prompt_password path."
 
 [[audits.sha1]]
 who = "Bob and Codex (gpt-6-astra, high), agents for KI7MT"
@@ -407,6 +419,13 @@ criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2021-10-02"
 end = "2027-11-03"
+
+[[trusted.windows-sys]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-11-15"
+end = "2027-11-04"
+notes = "Microsoft's Windows bindings (github.com/microsoft/windows-rs), published by Kenny Kerr, who leads the project; generated declarations, about 1.86 billion downloads, trusted by Mozilla, the Bytecode Alliance and Zcash. A trust decision, not a line-by-line audit (docs/decisions/0004-supply-chain.md)."
 
 [[trusted.x509-cert]]
 criteria = "safe-to-deploy"

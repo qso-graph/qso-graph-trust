@@ -97,10 +97,14 @@ merge waits for.
 
 A release is KI7MT's, never an agent's: **Actions → Release → Run workflow** from main, with the version
 main already says (`X.Y.Z` or `X.Y.Z-beta.N`). It publishes `qso-graph-trust-awslc`, then
-`qso-graph-trust`, on crates.io with Trusted Publishing, attests both packages, and tags the commit
+`qso-graph-trust`, then `qso-graph-trust-cli`, on crates.io with Trusted Publishing, attests the
+packages, and tags the commit
 (`.github/workflows/release.yml`; its decisions are `scripts/release_check.py`'s). To prepare one:
 set the workspace version in `Cargo.toml` and the `=` pins on the internal dependencies, move the
-CHANGELOG's Unreleased section under the version, and merge that by pull request.
+CHANGELOG's Unreleased section under the version, and merge that by pull request. A crate new to
+crates.io publishes once with a token scoped to it alone, `CRATES_IO_FIRST_PUBLISH` in the `crates-io`
+Environment; afterwards Trusted Publishing is set up on it, "require trusted publishing" turned on,
+and the token deleted and revoked.
 
 ## Where the real documents are
 

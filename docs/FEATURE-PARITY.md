@@ -163,17 +163,18 @@ calls TQSL's command line today should get the same meaning, including exit code
 | TQSL option | Meaning | Needs | Status | Issue |
 |---|---|---|---|---|
 | `-h`, `-v` | help, version | | Done | #173 |
-| `FILE`, `-o` | the log to sign; the `.tq8` to write | 1.1 | 0.7.0 | #173 |
-| `-l` | station location | 1.5 | 0.7.0 | #173 |
-| `-b`, `-e` | first and last QSO date | 1.6 | 0.7.0 | #173 |
+| `FILE`, `-o` | the log to sign; the `.tq8` to write | 1.1 | Done | #173 |
+| `-l` | station location | 1.5 | Part done: by its name in a TQSL backup | #173 |
+| `-b`, `-e` | first and last QSO date | 1.6 | Done | #173 |
 | `-a` | QSOs signed before: abort, all, compliant, ask | 1.6 | 0.7.0 | #173 |
 | `-f` | location details in the log: ignore, report, update | 1.3 | 0.7.0 | #173 |
-| `-i` | import `.tq6`, `.p12` or `.tbk` | 1.3, 1.4 | 0.7.0 | #173 |
+| `-i` | import `.tq6`, `.p12` or `.tbk` | 1.3, 1.4 | Part done: a `.tbk` is read for the run, not imported | #173 |
 | `-s` | add, or with `-l` edit, a location | 1.5 | 0.7.0 | #173 |
 | `-u` | upload after signing | 1.8 | 0.7.0 | #173 |
 | `-c` | default call | 1.4 | 0.7.0 | #173 |
 | `-t` | diagnostic log, with no key or password in it | | 0.7.0 | #173 |
-| Exit codes 0 to 15 | the same numbers TQSL uses | | Part done: 10 (syntax) | #173 |
+| Exit codes 0 to 15 | the same numbers TQSL uses, and its `Final Status` line | | Part done: 0, 4, 6 to 10 and 15 | #173 |
 | `-z` | test signing | 2 | Later | |
 | `-n` | check for updates | 3 | Won't | |
-| `-p`, `-d`, `-q`, `-x` | see Won't add | 3 | Won't | |
+| `-p` | a password on the command line: refused; the password is asked for at the terminal, hidden, or read from standard input | 3 | Won't | |
+| `-d`, `-q`, `-x` | accepted and ignored: there is no window or date dialog | 3 | Done | #173 |
