@@ -711,12 +711,15 @@ fn create_directory(dir: &Path, sync: impl Fn(&Path) -> io::Result<()>) -> io::R
     chain.reverse();
     chain.extend(missing.into_iter().rev());
 
-    let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
-    {
+    let builder = {
         use std::os::unix::fs::DirBuilderExt;
+        let mut builder = fs::DirBuilder::new();
         builder.mode(0o700);
-    }
+        builder
+    };
+    #[cfg(not(unix))]
+    let builder = fs::DirBuilder::new();
     for (index, path) in chain.iter().enumerate() {
         match builder.create(path) {
             Ok(()) => (),
