@@ -1,12 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-only
 [package]
 name = "qso-graph-trust"
-description = "Sign and upload logs for ARRL's Logbook of The World, with the key in the OS credential store"
+description = "Sign logs for ARRL's Logbook of The World (LoTW), byte for byte as TQSL signs them, from a TQSL backup"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "README.md"
+keywords = ["lotw", "arrl", "ham-radio", "amateur-radio", "adif"]
+categories = ["cryptography", "parser-implementations"]
+# The tests read this repository's corpus, which is not in the package, so they stay here.
+exclude = ["tests/"]
 
 # The key, signing and every file parser live in this crate, so no C or C++ may
 # be anywhere in its dependency tree, on any platform: `cargo xtask policy`
@@ -15,7 +20,7 @@ repository.workspace = true
 [dependencies]
 # LoTW's signature, RSA PKCS#1 v1.5 with SHA-1, from AWS-LC through QG Trust's
 # one binding (decision 0006).
-qso-graph-trust-awslc = { path = "../qso-graph-trust-awslc", version = "=0.1.0" }
+qso-graph-trust-awslc = { path = "../qso-graph-trust-awslc", version = "=0.1.0-beta.1" }
 sha1 = { version = "=0.10.6", default-features = false, features = ["oid"] }
 # tqsllib's keys: PKCS#8 PEM, plain, or encrypted (PBES2 with 3DES) when the
 # ham set a password. sha1-insecure: PBKDF2 with HMAC-SHA1, which older OpenSSL

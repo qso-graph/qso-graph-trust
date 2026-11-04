@@ -3,7 +3,7 @@
 //
 // The data is ARRL's TQSL configuration, Copyright (C) 2001-2015 American Radio Relay League, Inc.,
 // portions (C) 2003-2026 The TrustedQSL Developers, redistributed under ARRL's terms in
-// data/tqsl-config/LICENSE.txt, whose notice and disclaimer this file carries by reference.
+// LICENSE-ARRL.md at this crate's root, whose notice and disclaimer this file carries by reference.
 
 use super::{AdifMode, Band, DxccEntity, FieldKind, LocField, LocPage, Spectrum};
 

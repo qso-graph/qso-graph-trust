@@ -9,7 +9,8 @@ specification. QG Trust reads it as data, never TQSL's code. The tables are gene
 run time, so the library carries no XML parser.
 
     scripts/gen-lotw-tables.py           write the tables
-    scripts/gen-lotw-tables.py --check   fail if the tables are not what config.xml gives (CI)
+    scripts/gen-lotw-tables.py --check   fail if the tables, or the crate's copy of ARRL's terms, are not what
+                                         data/tqsl-config gives (CI)
 
 A developer tool only, never shipped; standard library only.
 """
@@ -21,6 +22,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "data/tqsl-config/config.xml"
 OUT = ROOT / "crates/qso-graph-trust/src/lotw/tables.rs"
+# ARRL's terms, copied into the crate so the published package carries them (their clause 1).
+LICENSE = ROOT / "data/tqsl-config/LICENSE.txt"
+LICENSE_COPY = ROOT / "crates/qso-graph-trust/LICENSE-ARRL.md"
 SIGSPEC = ("LOTW", "2.0")
 
 
@@ -43,7 +47,7 @@ def generate():
     w("//")
     w("// The data is ARRL's TQSL configuration, Copyright (C) 2001-2015 American Radio Relay League, Inc.,")
     w("// portions (C) 2003-2026 The TrustedQSL Developers, redistributed under ARRL's terms in")
-    w("// data/tqsl-config/LICENSE.txt, whose notice and disclaimer this file carries by reference.")
+    w("// LICENSE-ARRL.md at this crate's root, whose notice and disclaimer this file carries by reference.")
     w("")
     w("use super::{AdifMode, Band, DxccEntity, FieldKind, LocField, LocPage, Spectrum};")
     w("")
@@ -139,11 +143,14 @@ def main():
     if sys.argv[1:] == ["--check"]:
         if OUT.read_text() != text:
             sys.exit(f"{OUT.relative_to(ROOT)} is not what config.xml gives: run scripts/gen-lotw-tables.py")
+        if not LICENSE_COPY.is_file() or LICENSE_COPY.read_bytes() != LICENSE.read_bytes():
+            sys.exit(f"{LICENSE_COPY.relative_to(ROOT)} is not ARRL's terms as {LICENSE.relative_to(ROOT)} has them: run scripts/gen-lotw-tables.py")
         return
     if sys.argv[1:]:
         sys.exit(__doc__)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(text)
+    LICENSE_COPY.write_bytes(LICENSE.read_bytes())
 
 
 if __name__ == "__main__":

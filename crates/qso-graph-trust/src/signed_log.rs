@@ -30,18 +30,31 @@ pub enum LogError {
     CertificateNotInForce,
     /// The station location's call is not the certificate's.
     CallNotCertificates {
+        /// The station location's call.
         station: String,
+        /// The certificate's call.
         certificate: String,
     },
     /// The station location's DXCC entity is not the certificate's.
-    DxccNotCertificates { station: u32, certificate: u32 },
+    DxccNotCertificates {
+        /// The station location's entity.
+        station: u32,
+        /// The certificate's entity.
+        certificate: u32,
+    },
     /// A QSO, by its place in the log from 0, dated outside the certificate's QSO dates.
-    QsoOutsideCertificate { index: usize },
+    QsoOutsideCertificate {
+        /// The QSO's place in the log, from 0.
+        index: usize,
+    },
     /// A QSO, by its place in the log from 0, whose record names another station: the ADIF field
     /// and the value it gives.
     QsoFromAnotherStation {
+        /// The QSO's place in the log, from 0.
         index: usize,
+        /// The ADIF field that disagrees.
         field: &'static str,
+        /// The value the log gives it.
         value: String,
     },
     /// A log with no QSOs.

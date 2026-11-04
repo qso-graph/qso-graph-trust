@@ -6,7 +6,7 @@
 //! `<TQSL_Configuration>` holding `<Certificates>`, `<Locations>`, `<TQSLSettings>` and `<DupeDb>`.
 //!
 //! A backup is untrusted input that holds private keys. It is decompressed into one wiped buffer
-//! within a limit, and read by QG Trust's own XML reader ([`crate::xml`]), bounded as it reads, with
+//! within a limit, and read by QG Trust's own XML reader, bounded as it reads, with
 //! no DTD and so no entity to expand. Every callsign certificate must chain, signature by signature,
 //! to a root the caller trusts ([`Trust::lotw`], ARRL's, pinned): the roots a backup carries
 //! establish nothing. Each certificate, key and location is checked as QG Trust
@@ -72,19 +72,25 @@ pub struct Backup {
 /// waiting for ARRL to answer its request; a certificate with no key cannot sign.
 #[derive(Debug)]
 pub struct BackedUpCertificate {
+    /// The call, as the backup's entry names it.
     pub callsign: String,
+    /// The DXCC entity, by ARRL's number.
     pub dxcc: u32,
     /// The certificate's serial number as TQSL wrote it: `-1` for one too large for tqsllib's `long`,
     /// `0` for a key still waiting for its certificate.
     pub serial: i64,
+    /// The certificate, checked to LoTW's root; none for a key still waiting for one.
     pub certificate: Option<Certificate>,
+    /// The key, as TQSL keeps it, locked if it has a password; none for a certificate without one.
     pub key: Option<KeyEntry>,
 }
 
 /// One station location, by its name.
 #[derive(Debug)]
 pub struct BackedUpLocation {
+    /// The location's name in TQSL.
     pub name: String,
+    /// The location, checked as LoTW checks one.
     pub station: StationLocation,
 }
 
@@ -123,7 +129,9 @@ pub struct Preferences {
 /// One QSO TQSL has signed: its duplicate-check key, and the station it was signed for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SignedQso {
+    /// TQSL's duplicate-check key for the QSO.
     pub key: String,
+    /// The station location it was signed for, as TQSL recorded it.
     pub station: String,
 }
 
@@ -138,8 +146,11 @@ pub enum TbkError {
     NotText,
     /// Not XML this reader reads, at this line and column: malformed, or with a DTD.
     Xml {
+        /// The line, from 1.
         line: usize,
+        /// The column, from 1.
         column: usize,
+        /// What is wrong there.
         problem: &'static str,
     },
     /// Well-formed XML, but not a TQSL backup.
@@ -147,26 +158,49 @@ pub enum TbkError {
     /// More of something than a backup holds.
     TooMany(&'static str),
     /// An element or attribute a backup's entry needs is missing, given twice, or not one a backup has.
-    Malformed { what: String },
+    Malformed {
+        /// What is missing, repeated or unknown.
+        what: String,
+    },
     /// A root or CA certificate, by its place among them from 0, that is not a certificate.
-    Authority { index: usize },
+    Authority {
+        /// Its place among the backup's root and CA certificates, from 0.
+        index: usize,
+    },
     /// A callsign certificate that cannot be read.
     Certificate {
+        /// The call its entry names.
         callsign: String,
+        /// Why it cannot be read.
         error: CertificateError,
     },
     /// A key that cannot be read, or, with no password, does not unlock.
-    Key { callsign: String, error: KeyError },
+    Key {
+        /// The call its entry names.
+        callsign: String,
+        /// Why it cannot be read or unlocked.
+        error: KeyError,
+    },
     /// A key or certificate that is not for the call or entity its entry names, or a key that is
     /// not its certificate's.
     Mismatch {
+        /// The call its entry names.
         callsign: String,
+        /// What does not match.
         what: &'static str,
     },
     /// A station location LoTW would not accept.
-    Location { name: String, error: StationError },
+    Location {
+        /// The location's name.
+        name: String,
+        /// Why LoTW would not accept it.
+        error: StationError,
+    },
     /// Two station locations with one name.
-    RepeatedLocation { name: String },
+    RepeatedLocation {
+        /// The name given twice.
+        name: String,
+    },
 }
 
 impl fmt::Display for TbkError {

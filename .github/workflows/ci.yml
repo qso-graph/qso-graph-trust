@@ -79,9 +79,13 @@ jobs:
       # check jobs run it in debug (Linux only: it reads a child's memory through /proc).
       - name: custody test, release
         run: cargo test -p qso-graph-trust-custody --release --locked
-      # LoTW's tables are generated from ARRL's configuration, never edited by hand.
+      # LoTW's tables are generated from ARRL's configuration, never edited by hand, and the crate
+      # carries ARRL's terms unchanged.
       - name: LoTW tables match config.xml
         run: python3 scripts/gen-lotw-tables.py --check
+      # What crates.io would receive, built from the packages alone: the binding, then the library.
+      - name: cargo package
+        run: cargo package -p qso-graph-trust-awslc -p qso-graph-trust --locked
       - name: canary
         run: cargo xtask canary
       # Every outside crate reviewed: audits recorded in supply-chain/, imported

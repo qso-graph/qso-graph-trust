@@ -7,6 +7,13 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Ready for crates.io (decision 0007): `qso-graph-trust` and its binding `qso-graph-trust-awslc` at
+  `0.1.0-beta.1`, each with a README (the library's example is compiled as a doc test), keywords and
+  categories, and every public item documented. The internal modules (ARRL's tables, the XML reader)
+  are private. The library carries ARRL's terms unchanged, as `LICENSE-ARRL.md`, checked against
+  `data/tqsl-config`. The command line is not published until it signs. CI packages both crates as
+  crates.io would receive them, and `.github/workflows/release.yml` publishes them from main with
+  Trusted Publishing, then tags the commit.
 - The repository: the library (`qso-graph-trust`) and command line (`qso-graph-trust-cli`, the `qg-trust` command) crates, CI on Windows, macOS
   and Linux, and the policy checks that fail the build on C in the library or unsafe code, each proved
   by a planted case (qso-graph-desktop#170).
