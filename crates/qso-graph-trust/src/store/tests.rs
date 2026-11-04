@@ -765,6 +765,38 @@ fn first_use_creates_a_nested_directory_and_accepts_later_writes() {
 
 #[cfg(unix)]
 #[test]
+fn a_store_beneath_an_execute_only_ancestor_opens_and_writes() {
+    use std::os::unix::fs::PermissionsExt;
+
+    struct RestorePermissions(PathBuf);
+    impl Drop for RestorePermissions {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+
+    let folder = Folder::new();
+    let ancestor = folder.0.join("ancestor");
+    let existing = ancestor.join("existing");
+    fs::create_dir_all(&existing).expect("existing ancestors");
+    let _restore = RestorePermissions(ancestor.clone());
+    // 0711 permits other users only traversal. Also remove the owner's read bit so this
+    // regression exercises the permission failure without needing another user or root.
+    for mode in [0o711, 0o111] {
+        fs::set_permissions(&ancestor, fs::Permissions::from_mode(mode)).expect("permissions");
+        let nested = existing.join(format!("store-{mode:o}"));
+        let (store, _) = Store::open(&nested, KeyBackend::Memory).expect("create store");
+        store.add_location("home", &station()).expect("first write");
+        let (reopened, _) = Store::open(&nested, KeyBackend::Memory).expect("reopen store");
+        reopened
+            .add_location("away", &station())
+            .expect("later write");
+        assert_eq!(reopened.locations().expect("locations").len(), 2);
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn first_use_syncs_each_parent_and_retries_an_interrupted_directory_sync() {
     use std::cell::RefCell;
     let folder = Folder::new();
@@ -773,45 +805,81 @@ fn first_use_syncs_each_parent_and_retries_an_interrupted_directory_sync() {
     let nested = second.join("store");
     let observed = RefCell::new(Vec::new());
     create_directory(&nested, |parent| {
+        assert!(parent == first || parent == second || parent == nested);
         sync_directory(parent)?;
         observed.borrow_mut().push(parent.to_path_buf());
-        // Do not create the next descendant before acknowledging this parent's flush.
-        if parent == folder.0 {
-            assert!(first.is_dir());
+        // Persist the recovery marker before creating the next descendant.
+        if observed.borrow().len() == 1 {
             assert!(!second.exists());
         }
         Ok(())
     })
     .expect("durable creation");
-    assert!(observed.borrow().ends_with(&[
-        folder.0.clone(),
-        first.clone(),
-        second.clone(),
-        nested.clone()
-    ]));
-
-    let interrupted = folder.0.join("interrupted/child");
-    let result = create_directory(&interrupted, |parent| {
-        if parent == folder.0 {
-            return Err(io::Error::other("injected parent sync failure"));
-        }
-        sync_directory(parent)
-    });
-    assert!(result.is_err());
-    assert!(folder.0.join("interrupted").is_dir());
-    assert!(!interrupted.exists());
-    let retried = RefCell::new(Vec::new());
-    create_directory(&interrupted, |parent| {
+    assert_eq!(
+        *observed.borrow(),
+        [
+            first.clone(),
+            first.clone(),
+            second.clone(),
+            second.clone(),
+            nested.clone(),
+            first.clone(),
+            second.clone(),
+            nested.clone()
+        ]
+    );
+    create_directory(&nested, |parent| {
+        assert_eq!(parent, nested, "completed ancestors must not be reopened");
         sync_directory(parent)?;
-        retried.borrow_mut().push(parent.to_path_buf());
         Ok(())
     })
-    .expect("retry must sync the already-created parent entry");
-    assert!(retried.borrow().ends_with(&[
-        folder.0.clone(),
-        folder.0.join("interrupted"),
-        interrupted
-    ]));
+    .expect("markers were cleared after successful creation");
+
+    for stage in ["parent", "leaf", "unmarked-leaf", "cleanup"] {
+        let first = folder.0.join(stage);
+        let second = first.join("second");
+        let interrupted = second.join("store");
+        let result = create_directory(&interrupted, |parent| {
+            assert!(parent == first || parent == second || parent == interrupted);
+            let fail = match stage {
+                "parent" => parent == first && second.exists(),
+                "leaf" | "unmarked-leaf" => parent == interrupted,
+                "cleanup" => parent == first && !first.join(".qgt-directory-pending").exists(),
+                _ => unreachable!(),
+            };
+            if fail {
+                return Err(io::Error::other("injected directory sync failure"));
+            }
+            sync_directory(parent)
+        });
+        assert!(result.is_err());
+        assert!(second.is_dir());
+        assert_eq!(interrupted.exists(), stage != "parent");
+        if stage == "unmarked-leaf" {
+            // Plant the state left by interruption immediately after mkdir, before its marker.
+            fs::remove_file(interrupted.join(".qgt-directory-pending")).expect("unmarked child");
+        }
+        let retried = RefCell::new(Vec::new());
+        create_directory(&interrupted, |parent| {
+            // Cleanup already synced the top directory before removing its marker.
+            assert!(parent != folder.0 && (stage != "cleanup" || parent != first));
+            sync_directory(parent)?;
+            retried.borrow_mut().push(parent.to_path_buf());
+            Ok(())
+        })
+        .expect("retry must complete only the marked directory chain");
+        let retried = retried.borrow();
+        assert_eq!(
+            retried.first(),
+            Some(if stage == "cleanup" { &second } else { &first })
+        );
+        assert!(retried.contains(&second));
+        assert!(retried.contains(&interrupted));
+        let (store, _) = Store::open(&interrupted, KeyBackend::Memory).expect("recovered store");
+        store
+            .add_location("home", &station())
+            .expect("write after recovery");
+    }
 }
 
 #[test]

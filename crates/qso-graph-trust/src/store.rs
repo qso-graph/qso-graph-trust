@@ -527,27 +527,75 @@ fn sync_directory(dir: &Path) -> io::Result<()> {
 }
 
 fn create_directory(dir: &Path, sync: impl Fn(&Path) -> io::Result<()>) -> io::Result<()> {
+    const PENDING: &str = ".qgt-directory-pending";
+
     let dir = std::path::absolute(dir)?;
+    let mut missing = Vec::new();
+    let mut ancestor = dir.as_path();
+    while !ancestor.try_exists()? {
+        missing.push(ancestor);
+        ancestor = ancestor
+            .parent()
+            .ok_or_else(|| io::Error::other("no existing store ancestor"))?;
+    }
+    // A marker identifies our unfinished work without opening an established ancestor for
+    // reading. The first unmarked ancestor is the caller's existing directory boundary.
+    let mut chain = Vec::new();
+    // Creation can stop between mkdir and its marker. A marked parent identifies that one
+    // unfinished child; its own marker was persisted before we attempted the child's mkdir.
+    if !ancestor.join(PENDING).try_exists()?
+        && let Some(parent) = ancestor.parent()
+        && parent.join(PENDING).try_exists()?
+    {
+        chain.push(ancestor);
+        ancestor = parent;
+    }
+    for path in ancestor.ancestors() {
+        if !path.join(PENDING).try_exists()? {
+            break;
+        }
+        chain.push(path);
+    }
+    chain.reverse();
+    chain.extend(missing.into_iter().rev());
+
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
         builder.mode(0o700);
     }
-    // Work from the root down, never recursively: each entry must reach its parent on disk.
-    // Sync existing ancestors too, since a previous first use may have stopped before its sync.
-    let chain: Vec<_> = dir.ancestors().collect();
-    for path in chain.into_iter().rev() {
-        if let Some(parent) = path.parent() {
-            match builder.create(path) {
-                Ok(()) => (),
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists && path.is_dir() => (),
-                Err(e) => return Err(e),
-            }
-            sync(parent)?;
+    for (index, path) in chain.iter().enumerate() {
+        match builder.create(path) {
+            Ok(()) => (),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists && path.is_dir() => (),
+            Err(e) => return Err(e),
         }
+        match owner_file().create_new(true).open(path.join(PENDING)) {
+            Ok(marker) => marker.sync_all()?,
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => (),
+            Err(e) => return Err(e),
+        }
+        if index > 0 {
+            sync(chain[index - 1])?;
+        }
+        // Persist the recovery marker before creating a descendant. Keep all markers until
+        // every entry below the existing boundary has been synced.
+        sync(path)?;
     }
-    sync(&dir)
+    for path in &chain {
+        match fs::remove_file(path.join(PENDING)) {
+            Ok(()) => (),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => (),
+            Err(e) => return Err(e),
+        }
+        // Remove markers from the top down: any remaining pending chain stays contiguous.
+        sync(path)?;
+    }
+    if chain.is_empty() {
+        sync(&dir)?;
+    }
+    Ok(())
 }
 
 fn check_certificate(data: &Data, cert: &Certificate) -> Result<(), StoreError> {

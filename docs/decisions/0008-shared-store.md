@@ -39,9 +39,13 @@ OS credential backends await their own dependency decision. No backend or new de
   other filesystems and network shares may differ. It is not a volume-wide flush and does not prove
   persistence of newly created Windows ancestor directories. Power-loss testing on Windows remains
   necessary to validate the storage stack; this protocol cannot make faulty hardware durable.
-- First use creates ancestors one at a time. On Unix, each directory entry's parent and the store
-  directory itself are synced before open succeeds. Existing ancestors are also synced so retrying
-  after an interrupted first use does not skip an entry created before its parent was synced.
+- First use creates missing directories one at a time below the first existing ancestor. Temporary
+  `.qgt-directory-pending` files identify unfinished creation, so retries sync that chain too. On
+  Unix, only directories in this chain and the store directory itself are opened and synced;
+  established ancestors need traversal permission only. The caller's existing boundary is assumed
+  durable: QGT cannot flush a new entry in that boundary without read access to it. Within the
+  created chain, each parent is synced after creating its child. Recovery markers are persisted
+  before descending and removed from the top down only after the entire chain has been synced.
 - Import validates and puts the key before publishing its name. Pre-rename failure removes the new
   key; failed cleanup is reported explicitly and leaves an orphan. Deletion publishes the file
   without its certificate before deleting the key. A durability-sync failure after rename has a
@@ -89,8 +93,9 @@ placeholders. A location uses this shape inside `locations`:
 
 Tests plant malformed and oversized files, upgrade a file behind an open Store, inject write and
 post-rename sync failures, and hold the OS lock while a second thread tries to write. Compile-fail
-examples guard the private credential API. Nested first-use tests check permissions, parent sync
-ordering and recovery after an interrupted directory sync. The standard test
+examples guard the private credential API. Nested first-use tests check permissions, bounded parent
+sync ordering, recovery after interrupted creation and cleanup, and writes beneath an execute-only
+ancestor. The standard test
 backup round-trips every certificate and location; signing through `with_key` matches signing
 with the imported key directly for every standard location.
 
