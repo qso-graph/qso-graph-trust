@@ -12,8 +12,11 @@ specification, `QGD-SPEC-001` §3.4 (`QGD-LTW-0001` to `0014`), and are not rest
 - **Desktop takes the library from this repository, pinned to one of QG Trust's releases** by tag and
   commit, never from a registry or a branch (`QGD-LTW-0001`). A Desktop Release carries a QG Trust
   release (`vX.Y.Z`), and a Desktop Beta or Daily a QG Trust beta (`vX.Y.Z-beta.N`), never mixed;
-  Desktop's Release workflow and Daily job refuse anything else (`QGD-LTW-0001.1`). Publishing on crates.io waits until the
-  library is mature.
+  Desktop's Release workflow and Daily job refuse anything else (`QGD-LTW-0001.1`).
+- **Every QG Trust release and beta is also published on crates.io,** from its tag, for everyone else:
+  three crates at one version, `qso-graph-trust` (the library), `qso-graph-trust-awslc` (the binding it
+  needs) and `qso-graph-trust-cli` (installed as `qg-trust`). Desktop still pins the tag and commit, so
+  it fetches QG Trust one way only; crates.io holds the same commit.
 - **The QG Trust extension is JavaScript and holds nothing secret.** It reaches the library only through
   the `lotw:` grants (`QGD-LTW-0002`). The core confirms every act that signs, sends, imports or deletes
   in its own dialog, chooses every file itself, and refuses every request from an extension that is off
@@ -28,7 +31,10 @@ specification, `QGD-SPEC-001` §3.4 (`QGD-LTW-0001` to `0014`), and are not rest
 ## What this asks of the library
 
 - **Releases of its own,** tagged `vX.Y.Z` and `vX.Y.Z-beta.N`, each a commit that passed CI. A tag is
-  never moved.
+  never moved. QG Trust's release workflow publishes the three crates from the tag with crates.io's
+  Trusted Publishing, so no token is stored; the first publish of each crate, before Trusted Publishing
+  can be set up, is KI7MT's, with one short-lived token scoped to that crate. The test and policy crates
+  are never published.
 - **The store** (`QGD-LTW-0007`): the OS credential store service `io.qso-graph.trust`, and
   `io.qso-graph.trust.test` for tests, chosen by the caller, never by default; keys named `key:<uuid>`;
   one versioned file for certificates and the signed-QSO record, written under a lock, replaced whole,
