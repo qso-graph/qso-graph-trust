@@ -7,6 +7,7 @@
   - [0004](decisions/0004-supply-chain.md): outside crates reviewed with cargo-vet, their sources held by cargo-deny.
   - [0005](decisions/0005-qso-graph-desktop-is-the-interface.md): no QGT app; QSO Graph Desktop is the interface, with QG Trust as an extension.
   - [0006](decisions/0006-aws-lc-signs.md): AWS-LC signs LoTW's signature, through one binding, the only crate with unsafe code.
+  - [0007](decisions/0007-inside-the-credential-core.md): in QSO Graph Desktop, QG Trust runs inside the credential core.
 - [FEATURE-PARITY.md](FEATURE-PARITY.md): every TQSL 2.8.7 feature and option, app and command line,
   with QG Trust's status and the decision on each.
 - The plan, its phases and their gates: [qso-graph-desktop#169](https://github.com/qso-graph/qso-graph-desktop/issues/169).
