@@ -25,8 +25,8 @@ one line from standard input. A password is never given on the command line.
 
 | Option | |
 |---|---|
-| `-i`, `--import FILE` | TQSL's backup file, where `qg-trust` gets your certificate and station location |
-| `-l`, `--location NAME` | the station location, by its name in the backup |
+| `-i`, `--import FILE` | the file with your certificate (the `.tbk` TQSL saves) |
+| `-l`, `--location NAME` | your station location, by name |
 | `-b`, `--begindate DATE` | sign only QSOs on or after DATE (`YYYY-MM-DD` or `YYYYMMDD`) |
 | `-e`, `--enddate DATE` | sign only QSOs on or before DATE |
 | `-o`, `--output FILE` | where to write the signed log (default: the log's name with `.tq8`) |
@@ -35,13 +35,12 @@ one line from standard input. A password is never given on the command line.
 
 The option letters, the exit codes and the last line it writes to standard error,
 `Final Status: <name>(<code>)`, are TQSL's, so a logger that runs `tqsl` reads `qg-trust` the same way.
-`-i` differs: TQSL imports the file into its own store; `qg-trust` reads the backup for this run.
 
 | Code | Meaning |
 |---|---|
 | 0 | Success |
 | 4 | No certificate for the station location's call and entity in force, or a key that cannot sign |
-| 6 | The backup or the log could not be read, or the backup's certificates are not under LoTW's root |
+| 6 | The certificate file or the log could not be read, or the certificate is not LoTW's |
 | 7 | The signed log could not be written |
 | 8 | No QSOs to sign: nothing is written |
 | 9 | Some QSOs not signed, each named with the reason; the rest are |

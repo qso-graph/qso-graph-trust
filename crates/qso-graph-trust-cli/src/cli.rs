@@ -71,10 +71,10 @@ const HELP: &str = "\
 qg-trust: QSO Graph Trust's command line. Signs your ADIF log with your LoTW certificate, for ARRL's
 Logbook of The World (LoTW).
 
-Usage: qg-trust -i BACKUP.tbk -l LOCATION [-b DATE] [-e DATE] [-o OUTPUT.tq8] LOG.adi
+Usage: qg-trust -i CERTIFICATE.tbk -l LOCATION [-b DATE] [-e DATE] [-o OUTPUT.tq8] LOG.adi
 
-  -i, --import FILE      TQSL's backup file (.tbk), where it gets your certificate and location
-  -l, --location NAME    the station location to sign for, by its name in the backup
+  -i, --import FILE      the file with your certificate (the .tbk TQSL saves)
+  -l, --location NAME    your station location, by name
   -b, --begindate DATE   sign only QSOs on or after DATE (YYYY-MM-DD or YYYYMMDD)
   -e, --enddate DATE     sign only QSOs on or before DATE
   -o, --output FILE      where to write the signed log (default: LOG with .tq8)
@@ -175,9 +175,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
         return Err("give the log to sign".to_string());
     }
     if options.backup.is_none() {
-        return Err(
-            "-i names TQSL's backup file, where qg-trust gets your certificate".to_string(),
-        );
+        return Err("-i names the file with your certificate".to_string());
     }
     if options.location.is_none() {
         return Err("-l names the station location to sign for".to_string());

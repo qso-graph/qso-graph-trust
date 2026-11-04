@@ -10,16 +10,14 @@ the same signed records TQSL's do, byte for byte.
 
 ## Sign a log
 
-1. **Find TQSL's backup file.** It holds your certificate. In TQSL, *File → Backup Station Locations, Certificates, and Preferences…*
-   saves one. TQSL also saves one by itself, `tqslconfig.tbk`, each time it closes, unless that is
-   turned off in its Preferences.
-2. **Install `qg-trust`** (it needs [Rust](https://rustup.rs)):
+1. **Install `qg-trust`** (it needs [Rust](https://rustup.rs)):
 
    ```sh
    cargo install qso-graph-trust-cli
    ```
 
-3. **Sign**, naming TQSL's backup file, your station location as TQSL calls it, and your log:
+2. **Sign** your log with your certificate (`-i`, the `.tbk` file TQSL saves) for your station
+   location (`-l`):
 
    ```sh
    qg-trust -i tqslconfig.tbk -l "Home" mylog.adi
@@ -28,7 +26,7 @@ the same signed records TQSL's do, byte for byte.
    If your key has a password, `qg-trust` asks for it, with what you type hidden. It writes
    `mylog.tq8` and tells you how many QSOs it signed. A QSO LoTW would refuse is left out and named,
    with the reason.
-4. **Upload `mylog.tq8`** on LoTW's website, as you would one TQSL saved.
+3. **Upload `mylog.tq8`** on LoTW's website, as you would one TQSL saved.
 
 To sign only some dates, add `-b 2026-01-01` and `-e 2026-06-30`. `qg-trust --help` lists everything,
 and the [command line's page](crates/qso-graph-trust-cli/README.md) has every option and exit code.

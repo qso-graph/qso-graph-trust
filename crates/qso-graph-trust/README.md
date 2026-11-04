@@ -11,15 +11,14 @@ and it is for other people's programs too. Its parsers are safe Rust, and the li
 forbids `unsafe` code. LoTW's signature is AWS-LC's, through one small binding, `qso-graph-trust-awslc`,
 the only crate here with `unsafe` code; a password-protected key is unlocked with RustCrypto.
 
-**This is a beta.** It signs your log with your LoTW certificate, which your program gets from the
-backup file TQSL saves (`.tbk`). Still to come: keeping keys in the operating system's credential
+**This is a beta.** It signs your log with your LoTW certificate. Still to come: keeping keys in the operating system's credential
 store, uploading to LoTW, and requesting certificates. What is done, planned and left out, feature by feature against
 TQSL: [`docs/FEATURE-PARITY.md`](https://github.com/qso-graph/qso-graph-trust/blob/main/docs/FEATURE-PARITY.md).
 
 ## Example
 
-This example gets your LoTW certificate and a station location from the backup file TQSL saves, signs
-an ADIF log with the certificate, and writes the `.tq8`. It also uses two other crates, `zeroize` and
+This example signs an ADIF log with your LoTW certificate, read from the `.tbk` file TQSL saves, and
+writes the `.tq8`. It also uses two other crates, `zeroize` and
 `zeroizing-alloc` (`cargo add zeroize zeroizing-alloc@=0.1.1`):
 
 ```rust,no_run
