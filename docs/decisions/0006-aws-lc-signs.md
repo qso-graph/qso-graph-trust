@@ -40,7 +40,7 @@ the custody test (qso-graph-desktop#172, Gate C) still apply to every QG Trust p
 
 ## Amended 2026-11-03: certificate signatures through aws-lc-rs
 
-Importing a TQSL backup checks each callsign certificate's chain to LoTW's pinned root, which needs RSA
+Reading a TQSL `.tbk` file checks each callsign certificate's chain to LoTW's pinned root, which needs RSA
 signature verification. AWS-LC's safe Rust API, `aws-lc-rs` 1.18.1 (QSO Graph Desktop's, over the same
 `aws-lc-sys` 0.45.0), offers that, so the binding calls it (`verify_rsa`) with no unsafe code of its own,
 as AGENTS.md requires for every operation the safe API offers. `aws-lc-rs` is named as part of the

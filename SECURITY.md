@@ -25,12 +25,12 @@ QGT is in beta. The latest release on crates.io, beta or not, is supported; a fi
 - **The library's own code has no `unsafe`.** The one crate with `unsafe` code is the binding to
   AWS-LC, `qso-graph-trust-awslc`, which makes LoTW's signature; AWS-LC is the only C in the library's
   dependency tree (`cargo xtask policy`, decisions 0002 and 0006).
-- **A TQSL backup's certificates are trusted only if they chain to LoTW's own root,** pinned in the
-  library (`tbk::read` with `Trust::lotw()`), never to a root the backup brings with it. A certificate
+- **A certificate is trusted only if it chains to LoTW's own root,** pinned in the
+  library (`tbk::read` with `Trust::lotw()`), never to a root a file brings with it. A certificate
   a program reads itself with `Certificate::from_pem_or_der` is checked only when the program calls
   `Certificate::verify`; `sign_log` checks the key, call, entity and dates, not the chain.
 - **A password is never taken from the command line.** `qg-trust` asks for it at the terminal with
   what is typed hidden, or reads one line from standard input when there is no terminal, and never
   prints it.
-- **To come:** the key held by the OS credential store, leaving it only as a signature or a backup QGT
+- **To come:** the key held by the OS credential store, leaving it only as a signature or an export QGT
   encrypts itself; and TLS verification never turned off when QGT uploads.

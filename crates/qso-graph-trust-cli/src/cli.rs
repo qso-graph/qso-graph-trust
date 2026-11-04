@@ -218,7 +218,7 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
         let names: Vec<&str> = backup.locations.iter().map(|l| l.name.as_str()).collect();
         let _ = writeln!(
             env.err,
-            "qg-trust: the backup has no station location named {name:?}; it has: {}",
+            "qg-trust: there is no station location named {name:?}; there are: {}",
             if names.is_empty() {
                 "none".to_string()
             } else {
@@ -237,7 +237,7 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
     ) else {
         let _ = writeln!(
             env.err,
-            "qg-trust: the backup has no certificate for {} (DXCC {}) in force now, with its key",
+            "qg-trust: there is no certificate for {} (DXCC {}) in force now, with its key",
             station.call(),
             station.dxcc()
         );

@@ -26,7 +26,7 @@ specification, `QGD-SPEC-001` §3.4 (`QGD-LTW-0001` to `0014`), and are not rest
   Locations. The command line keeps its own locations in the library's store.
 - **Keys, certificates and the record of QSOs already signed are in one store the library owns,** shared
   by the command line and Desktop (`QGD-LTW-0007`).
-- **Backup:** LoTW's data is one encrypted part of Desktop's one backup (`QGD-LTW-0010`, `QGD-LTW-0011`).
+- **Export:** LoTW's data is one encrypted part of Desktop's one export file (`QGD-LTW-0010`, `QGD-LTW-0011`).
 
 ## What this asks of the library
 
@@ -40,8 +40,8 @@ specification, `QGD-SPEC-001` §3.4 (`QGD-LTW-0001` to `0014`), and are not rest
   one versioned file for certificates and the signed-QSO record, written under a lock, replaced whole,
   a key stored before the file names it; orphans reported, never removed; an unknown version refused.
   Its layout is designed with phase 3 (qso-graph-desktop#172).
-- **No API returns a key** (`QGD-LTW-0005`). A key is read to sign or to back up, and dropped after.
-- **The backup part** (`QGD-LTW-0010`): written and read by the library, so the command line's backup is
+- **No API returns a key** (`QGD-LTW-0005`). A key is read to sign or to export, and dropped after.
+- **The export part** (`QGD-LTW-0010`): written and read by the library, so the command line's export is
   the same. AES-256-GCM and PBKDF2-HMAC-SHA-256 through aws-lc-rs, inside the binding (decision 0006),
   with the format, version and part name authenticated.
 - **A station from a Desktop Location** (`QGD-LTW-0008`): the library takes its fields as given and

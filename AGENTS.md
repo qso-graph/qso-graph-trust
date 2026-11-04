@@ -51,7 +51,7 @@ removed (ARRL's [certificate security](https://lotw.arrl.org/lotw-help/certifica
   or password.*
 - **The OS credential store holds the key at rest,** once QGT keeps keys (the store is still to
   come; until then the library holds no key at rest), and it leaves the store only to sign, as a
-  signature, or as a backup QGT encrypts itself. While it signs, it is in memory, as in every signer,
+  signature, or in an export QGT encrypts itself. While it signs, it is in memory, as in every signer,
   so a crash dump taken then can hold it; freed memory never does. No API returns it, and nothing QGT
   writes, logs, traces, reports in an error or sends over IPC holds it.
 - **LoTW's tables are ARRL's, never typed in.** Bands, modes, the ADIF mode map, satellites, DXCC

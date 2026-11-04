@@ -1,9 +1,8 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 # qso-graph-trust
 
-Sign ADIF logs for ARRL's [Logbook of The World](https://lotw.arrl.org) (LoTW). From the same key,
-station location and QSOs, the signed records and their signatures are TQSL's, byte for byte; only the line naming the program
-that made the file differs.
+Sign ADIF logs with your LoTW certificate, so ARRL's [Logbook of The World](https://lotw.arrl.org)
+(LoTW) accepts them. This is QSO Graph Trust's library, for your own programs.
 
 QSO Graph Trust is the library behind the [`qg-trust`](https://crates.io/crates/qso-graph-trust-cli)
 command line and, still to come, LoTW signing in [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop),
@@ -12,8 +11,8 @@ forbids `unsafe` code. LoTW's signature is AWS-LC's, through one small binding, 
 the only crate here with `unsafe` code; a password-protected key is unlocked with RustCrypto.
 
 **This is a beta.** It signs your log with your LoTW certificate. Still to come: keeping keys in the operating system's credential
-store, uploading to LoTW, and requesting certificates. What is done, planned and left out, feature by feature against
-TQSL: [`docs/FEATURE-PARITY.md`](https://github.com/qso-graph/qso-graph-trust/blob/main/docs/FEATURE-PARITY.md).
+store, uploading to LoTW, and requesting certificates. What it does and plans, feature by feature:
+[`docs/FEATURE-PARITY.md`](https://github.com/qso-graph/qso-graph-trust/blob/main/docs/FEATURE-PARITY.md).
 
 ## Example
 
@@ -37,15 +36,15 @@ static ALLOCATOR: zeroizing_alloc::ZeroAlloc<std::alloc::System> =
     zeroizing_alloc::ZeroAlloc(std::alloc::System);
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // A backup's certificates are trusted only if they chain to LoTW's own root, pinned here.
-    let backup = tbk::read(&std::fs::read("tqslconfig.tbk")?, &Trust::lotw())?;
+    // A certificate is trusted only if it chains to LoTW's own root, pinned here.
+    let tbk = tbk::read(&std::fs::read("tqslconfig.tbk")?, &Trust::lotw())?;
 
-    let entry = backup.certificates.iter().find(|c| c.callsign == "K1ABC").ok_or("no certificate")?;
+    let entry = tbk.certificates.iter().find(|c| c.callsign == "K1ABC").ok_or("no certificate")?;
     let certificate = entry.certificate.as_ref().ok_or("no certificate yet")?;
     // Ask for the key's password when the program runs: never on a command line, in a file or in code.
     let password: Zeroizing<Vec<u8>> = ask_for_password()?;
     let key = entry.key.as_ref().ok_or("no key")?.unlock(Some(&password))?;
-    let station = &backup.locations.iter().find(|l| l.name == "Home").ok_or("no location")?.station;
+    let station = &tbk.locations.iter().find(|l| l.name == "Home").ok_or("no location")?.station;
 
     // Every QSO is checked as LoTW checks it; one it would refuse is an error naming the field.
     let qsos = records::parse(&std::fs::read("log.adi")?)?

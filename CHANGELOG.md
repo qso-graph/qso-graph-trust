@@ -10,8 +10,7 @@ versions follow [Semantic Versioning](https://semver.org/).
 ### Added
 
 - `qg-trust`, the command line, on crates.io as `qso-graph-trust-cli`: signs your ADIF log with your
-  LoTW certificate, which it gets, with your station location, from the backup file TQSL saves (`-i`,
-  `-l`), within a date range (`-b`,
+  LoTW certificate (`-i`, the file with it) for your station location (`-l`), within a date range (`-b`,
   `-e`, `YYYY-MM-DD` or `YYYYMMDD`), into the `.tq8` named by `-o` or beside the log. The signed records
   and signatures are tqsllib's, byte for byte, for every location in the standard test set. A QSO
   LoTW would refuse, or the certificate or station cannot sign, is left out and named with the
@@ -43,7 +42,7 @@ Documentation only: no change to what the library does or signs.
 - The library's description on crates.io: "Sign ADIF logs for ARRL's Logbook of The World (LoTW)".
 - The README and the library's README say what the beta does today and what is still to come, with
   the status of each phase, how to add the library, and the feature-parity list. The beta reads the
-  certificate and key from a TQSL backup; QG Trust does the signing.
+  certificate and key from TQSL's `.tbk` file; QG Trust does the signing.
 - `SECURITY.md` says what is promised now: the key only ever signs and is wiped from freed memory, the
   library's own code has no `unsafe`, and the one binding with `unsafe` code is AWS-LC's. The OS
   credential store and upload are marked as still to come.
@@ -52,7 +51,7 @@ Documentation only: no change to what the library does or signs.
 - The Sources no longer link a private repository.
 - Claims brought into line with the code: the signed records and signatures match TQSL's byte for
   byte, and only the identification line differs; the OS credential store and upload are planned,
-  not present (README, `AGENTS.md`, `NOTICE`); a backup's certificates are checked to LoTW's root,
+  not present (README, `AGENTS.md`, `NOTICE`); a `.tbk` file's certificates are checked to LoTW's root,
   and a certificate a program reads itself is checked only when it calls `verify`; the custody test
   says what it proves; cargo-vet's exemptions are named as not yet audited; what ARRL does when a key
   is compromised, from its own page.
@@ -101,13 +100,13 @@ The first release on crates.io: `qso-graph-trust` and `qso-graph-trust-awslc`.
   four park locations, KN4YU as the club call and W4W as a one-month special-event call, from a test
   CA, with `standard.tbk` written by TQSL's own app. QG Trust signs every location's log as tqsllib
   does, byte for byte.
-- Importing TQSL's backup, the `.tbk` (qso-graph-desktop#172): every certificate, key and station
+- Reading TQSL's `.tbk` file (qso-graph-desktop#172): every certificate, key and station
   location, and the QSOs TQSL has signed. Read by QG Trust's own XML reader, bounded as it reads, with
   no DTD; gzip into one wiped buffer. Chains are checked as RFC 5280 asks (path length, key usage, no
   unknown critical or repeated extensions), signatures through aws-lc-rs inside the binding. Each callsign certificate must chain, signature by signature,
   to LoTW's root, pinned as TQSL embeds it (`src/lotw/arrl.rs`): a root a file brings establishes
   nothing. A key must be its certificate's, for its call, DXCC entity and serial; one with no password
-  is unlocked at import to prove it. Signing with only what TQSL's backup of the standard set holds
+  is unlocked at import to prove it. Signing with only what TQSL's `.tbk` file of the standard set holds
   gives tqsllib's signed logs, byte for byte.
 - The standard set's certificates have ARRL-style serials (10001 to 10003), so TQSL records each.
 - TQSL's settings that change what LoTW receives come with the import (`tbk::Preferences`): custom

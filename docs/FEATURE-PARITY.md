@@ -57,11 +57,11 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| Back up certificates, keys and the signed-QSO record | File: Backup | A part of QSO Graph Desktop's one backup, beside Callsigns and Locations and Settings; all ticked is a full backup. This part alone is encrypted, under a password QG Trust makes up. To move only some calls, delete the others first | 0.7.0 | #172, #174 |
-| Restore it on any computer (macOS, Windows, Linux), keys into that computer's credential store | File: Restore | Part by part, onto a clean slate: what this computer holds is removed first, nothing merged | 0.7.0 | #172, #174 |
-| Restore a TQSL backup (`.tbk`): certificates, keys, locations | File: Restore | Reads and checks it; saving what it holds waits on 1.2 | Part done | #172 |
+| Export certificates, keys and the signed-QSO record to one file | File menu | A part of QSO Graph Desktop's one export file, beside Callsigns and Locations and Settings; all ticked exports everything. This part alone is encrypted, under a password QG Trust makes up. To move only some calls, delete the others first | 0.7.0 | #172, #174 |
+| Import it on any computer (macOS, Windows, Linux), keys into that computer's credential store | File: Restore | Part by part, onto a clean slate: what this computer holds is removed first, nothing merged | 0.7.0 | #172, #174 |
+| Read TQSL's `.tbk` file: certificates, keys, locations | File menu | Reads and checks it; saving what it holds waits on 1.2 | Part done | #172 |
 | Restore TQSL's record of QSOs already signed | File: Restore | Read; saving waits on 1.2 | Part done | #172 |
-| Use TQSL's settings that change what's signed: custom mode mappings, ignore seconds, ignore callsigns in the log, non-amateur calls, location details in the log | Preferences | Read from the backup; not yet used when signing | Part done | #172 |
+| Use TQSL's settings that change what's signed: custom mode mappings, ignore seconds, ignore callsigns in the log, non-amateur calls, location details in the log | Preferences | Read from the `.tbk` file; not yet used when signing | Part done | #172 |
 | Say which of TQSL's settings were not taken | | Listed | Done | #172 |
 
 ### 1.4 Certificates
@@ -127,7 +127,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Primary QSL manager call | Preferences | Rarely used | Later |
 | Restore a deleted certificate | Restore Deleted | Delete comes first | Later |
 | Restore a deleted station location | Restore Deleted | Delete comes first | Later |
-| Automatic backup on exit | Preferences | Comes after backup itself (1.3) | Later |
+| Automatic export on exit | Preferences | Comes after export itself (1.3) | Later |
 | Rebuild the record of signed QSOs from LoTW | Help: Synchronize | Needs upload first | Later |
 | Ask LoTW whether a certificate is still good (by serial) | | Calls ARRL; needs a decision first | Later |
 | Take a new ARRL configuration (`config.xml`) without a new release | automatic | A release with new tables works meanwhile | Later |
@@ -139,11 +139,11 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | Feature | TQSL | Why not |
 |---|---|---|
-| Save one certificate and key (`.p12`) | Save Callsign Certificate | The full backup moves keys; to move only some, delete the rest first |
+| Save one certificate and key (`.p12`) | Save Callsign Certificate | The export moves keys; to move only some, delete the rest first |
 | `.p12` export in Apple Keychain's older format | Preferences | QG Trust saves no `.p12`; the Keychain reads modern AES-256 files from macOS 15 on anyway |
 | Key password on the command line (`-p`) | `-p` | A password never goes on a command line; another way is needed |
 | Choosing the upload server and its answers | Server Setup | Logs go to LoTW only |
-| Settings for upload, server or proxy taken from a backup | Restore | A file could send logs elsewhere |
+| Settings for upload, server or proxy taken from a `.tbk` file | File menu | A file could send logs elsewhere |
 | A choice to turn off key passwords | Preferences | Handled by the key store (1.2) |
 | Proxy settings | Network Proxy | Desktop's own network settings |
 | Check for program updates | Help | Desktop's updater |
@@ -164,7 +164,7 @@ calls TQSL's command line today should get the same meaning, including exit code
 |---|---|---|---|---|
 | `-h`, `-v` | help, version | | Done | #173 |
 | `FILE`, `-o` | the log to sign; the `.tq8` to write | 1.1 | Done | #173 |
-| `-l` | station location | 1.5 | Part done: by its name in a TQSL backup | #173 |
+| `-l` | station location | 1.5 | Part done: by name | #173 |
 | `-b`, `-e` | first and last QSO date | 1.6 | Done | #173 |
 | `-a` | QSOs signed before: abort, all, compliant, ask | 1.6 | 0.7.0 | #173 |
 | `-f` | location details in the log: ignore, report, update | 1.3 | 0.7.0 | #173 |
