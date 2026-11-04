@@ -47,3 +47,45 @@ as AGENTS.md requires for every operation the safe API offers. `aws-lc-rs` is na
 provider in the policy checks: it may depend on `aws-lc-sys`, and any crate but the binding depending on
 either fails, proved by a planted case. Only LoTW's SHA-1 signing, which `aws-lc-rs` does not make, still
 calls `aws-lc-sys` directly.
+
+## Amended 2026-11-04: certificate requests
+
+TQSL 2.8.7's `tqsl_createCertRequest` generates RSA-1024 with exponent 65537 and signs the
+PKCS#10 request with SHA-256. aws-lc-rs 1.18.1's `rsa/key.rs::validate_rsa_key` rejects signing
+keys below 2048 bits, and its generator starts at 2048. These two RSA operations therefore use
+the same binding: `RSA_generate_key_ex` and the existing `RSA_sign` operation with `NID_sha256`.
+SHA-256 hashing uses aws-lc-rs's safe API. No additional provider or dependency package is added;
+the binding shares the workspace's existing pinned `zeroize` for generated secrets.
+
+The binding hands generated private PKCS#8 to the library only in `Zeroizing`; a fixed wiped
+buffer receives DER directly from AWS-LC. RSA, exponent and EVP allocations are released on
+success and every error path. Each of the twelve new unsafe blocks has one operation and its
+own allowance and safety explanation: RSA allocation; exponent allocation, assignment and free;
+key generation; EVP allocation, RSA reference assignment and free; fixed CBB initialization,
+marshalling, length read (only after successful flush), and cleanup. SHA-256 signing shares the
+existing checked RSA signature operation.
+
+The public library returns an opaque generated request. Only its `.tq5` and SPKI are readable;
+its key goes directly to `KeyStore::put`. Desktop and CLI retain the credential name and public
+request metadata until ARRL responds, then verify the response chain and attach the matched
+credential through `Store::add_requested_certificate`. Pending credentials appear in the current
+store's orphan report; applications retain them until the request is completed or explicitly
+abandoned. No pending secret is written to the public store file.
+
+Format decisions were read from TQSL's source, not inferred: request field order and framing,
+CSR subject order (AROcallsign, commonName, emailAddress), empty attributes, SHA-256 algorithm
+with NULL parameters, and signed-request SHA-1 over the whole decoded CSR DER. The request kind
+is NEW, ADDITIONAL or RENEWAL. `TQSL_CERT_REQ` does not carry a call-kind field;
+`apps/crqwiz.cpp::CRQ_TypePage::TransferDataFromWindow` maps club, DXpedition, special event,
+former, replacing and QSL manager choices to signer-selection guidance. `apps/tqsl.cpp` passes
+the selected signer and renewal flag to the library, with no kind-specific wire field.
+QGT exposes that intent as `CallKind` and requires explicit signer selection, independently of
+TQSL's UI. `TQSL_IDENT` retains the reference format's version string so the request differs
+from tqsllib's only in its generated key and signatures. This file field is separate from the
+HTTP User-Agent, which must name QGT truthfully.
+
+The differential tests reproduce five complete corpus requests, including the deterministic
+CSR signature, using their test keys. Fresh requests verify independently with the test-only
+RSA implementation, as do additional/renewal signatures with the old key. Input refusal cases
+are paired with valid controls; an issued test response exercises the credential handoff,
+certificate-chain verification, attachment and signing after reopening the store.

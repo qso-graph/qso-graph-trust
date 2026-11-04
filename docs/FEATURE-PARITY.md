@@ -104,12 +104,12 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| Request a new certificate (`.tq5`), matching TQSL's | Request New Callsign Certificate | | 0.7.0 | #172 |
-| Request: call, DXCC entity, first and last QSO date | wizard | | 0.7.0 | #172 |
-| Request: name, address, email | wizard | | 0.7.0 | #172 |
-| Request: kind of call (club, DXpedition, special event, former, replacing, QSL manager) | wizard | | 0.7.0 | #172 |
-| Request signed by a certificate already held | wizard | | 0.7.0 | #172 |
-| Renew a certificate | Renew Callsign Certificate | | 0.7.0 | #172 |
+| Request a new certificate (`.tq5`), matching TQSL's | Request New Callsign Certificate | Library: `CertificateRequest::generate`; Desktop/CLI to come | Part done | #172 |
+| Request: call, DXCC entity, first and last QSO date | wizard | Library validates DXCC and QSO dates | Part done | #172 |
+| Request: name, address, email | wizard | Library validates and writes bounded public fields | Part done | #172 |
+| Request: kind of call (club, DXpedition, special event, former, replacing, QSL manager) | wizard | `CallKind` intent; TQSL has no kind-specific wire field; caller chooses signer | Part done | #172 |
+| Request signed by a certificate already held | wizard | Library: `Authorization::Additional`, borrowed `TqslKey` | Part done | #172 |
+| Renew a certificate | Renew Callsign Certificate | Library: `Authorization::Renewal`, fresh key and stored response handoff | Part done | #172 |
 
 ### 1.8 Upload to LoTW
 

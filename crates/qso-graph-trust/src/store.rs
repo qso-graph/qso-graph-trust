@@ -327,6 +327,45 @@ impl Store {
         Ok(id)
     }
 
+    /// Attach a response certificate to a previously stored request key. The caller verifies
+    /// its issuer and pending call/DXCC on import. The credential is checked against the
+    /// certificate before publishing; failures never delete the pending key, allowing retry.
+    pub fn add_requested_certificate(
+        &self,
+        certificate: &Certificate,
+        key_name: &str,
+    ) -> Result<String, StoreError> {
+        if !keys::valid_name(key_name, "key:") {
+            return Err(StoreError::Invalid("credential name"));
+        }
+        let _lock = self.lock()?;
+        let mut data = self.read()?;
+        check_certificate(&data, certificate)?;
+        if data
+            .certificates
+            .iter()
+            .any(|c| c.key_name.as_deref() == Some(key_name))
+        {
+            return Err(StoreError::AlreadyExists);
+        }
+        let der = self.keys.get(key_name)?.ok_or(StoreError::NotFound)?;
+        if der.len() > MAX_KEY_LEN {
+            return Err(StoreError::Limit("credential bytes"));
+        }
+        TqslKey::from_pkcs8_der(&der, certificate.public_key_der())?;
+        let id = keys::new_name("cert:")?;
+        if data.certificates.iter().any(|c| c.id == id) {
+            return Err(StoreError::AlreadyExists);
+        }
+        data.certificates.push(StoredCertificate {
+            id: id.clone(),
+            certificate: certificate.clone(),
+            key_name: Some(key_name.into()),
+        });
+        self.replace(&format::write(&data)?)?;
+        Ok(id)
+    }
+
     /// Add a public certificate without a credential. The caller verifies its issuer on import.
     pub fn add_certificate(&self, certificate: &Certificate) -> Result<String, StoreError> {
         let _lock = self.lock()?;
@@ -654,3 +693,8 @@ fn default_dir_from(env: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests;
+
+// Keep UUID generation and validation in the store, shared with request custody.
+pub(crate) fn request_key_name() -> Result<String, crate::request::RequestError> {
+    keys::new_name("key:").map_err(|_| crate::request::RequestError::Crypto)
+}

@@ -13,6 +13,7 @@ pub mod gzip;
 mod lotw;
 pub mod qso;
 pub mod records;
+pub mod request;
 pub mod signed_log;
 pub mod signing;
 pub mod station;

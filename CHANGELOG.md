@@ -5,6 +5,13 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Library certificate requests: new, signed additional and renewal `.tq5` files, with TQSL 2.8.7's
+  CSR subject, attributes, signatures and field order; DXCC, date and bounded text validation.
+  New RSA-1024 keys pass directly to the caller's credential backend through an opaque request;
+  response certificates can be attached to their stored keys. Desktop and CLI integration remains.
+
 ## [0.1.0-beta.4] - 2026-11-04
 
 Documentation only: the library and `qg-trust` sign exactly as beta.3 does.
