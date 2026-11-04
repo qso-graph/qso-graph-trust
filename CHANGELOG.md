@@ -11,9 +11,16 @@ versions follow [Semantic Versioning](https://semver.org/).
   `0.1.0-beta.1`, each with a README (the library's example is compiled as a doc test), keywords and
   categories, and every public item documented. The internal modules (ARRL's tables, the XML reader)
   are private. The library carries ARRL's terms unchanged, as `LICENSE-ARRL.md`, checked against
-  `data/tqsl-config`. The command line is not published until it signs. CI packages both crates as
-  crates.io would receive them, and `.github/workflows/release.yml` publishes them from main with
-  Trusted Publishing, then tags the commit.
+  `data/tqsl-config`, and each published crate carries `LICENSE.md`, `NOTICE.md` and `AUTHORS.md`,
+  the repository's own, checked by `scripts/package-files.py`. The README's example installs the
+  wiping allocator and asks for the key's password at run time. An ADIF record's fields are private:
+  a record is read and passed to `Qso::from_adif`. The command line is not published until it signs.
+  CI tests each pull request's own commit, packages both crates as crates.io would receive them, and
+  `.github/workflows/release.yml` publishes them from main with Trusted Publishing, then tags the
+  commit; a run that stopped halfway finishes when run again. Its decisions are
+  `scripts/release_check.py`'s, each tested with the cases it must refuse.
+- Credits: TrustedQSL's contributors, as its `AUTHORS.txt` lists them, in the README, the library's
+  README and `NOTICE`, with what QG Trust carries of TQSL's and under which terms.
 - The repository: the library (`qso-graph-trust`) and command line (`qso-graph-trust-cli`, the `qg-trust` command) crates, CI on Windows, macOS
   and Linux, and the policy checks that fail the build on C in the library or unsafe code, each proved
   by a planted case (qso-graph-desktop#170).

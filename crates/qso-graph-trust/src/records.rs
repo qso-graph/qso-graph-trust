@@ -29,13 +29,13 @@ pub const MAX_TOTAL_FIELDS: usize = 20 * MAX_RECORDS;
 /// One field: its name as written, its type letter if it has one, and its value's bytes, wiped
 /// when dropped.
 #[derive(Clone, PartialEq, Eq)]
-pub struct Field {
+pub(crate) struct Field {
     /// The field's name, as written.
-    pub name: String,
+    pub(crate) name: String,
     /// The field's type letter, if it has one.
-    pub kind: Option<String>,
+    pub(crate) kind: Option<String>,
     /// The value's bytes, wiped when dropped.
-    pub value: Zeroizing<Vec<u8>>,
+    pub(crate) value: Zeroizing<Vec<u8>>,
 }
 
 impl fmt::Debug for Field {
@@ -53,11 +53,12 @@ impl fmt::Debug for Field {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Record {
     /// The fields, in the order written.
-    pub fields: Vec<Field>,
+    pub(crate) fields: Vec<Field>,
 }
 
 impl Record {
     /// The first field with this name, compared without regard to case, as tqsllib compares them.
+    /// The value is returned as the input gave it: parse logs with this, never key material.
     pub fn get(&self, name: &str) -> Option<&[u8]> {
         self.fields
             .iter()

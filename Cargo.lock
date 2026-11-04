@@ -486,6 +486,7 @@ dependencies = [
  "sha2",
  "x509-cert",
  "zeroize",
+ "zeroizing-alloc",
 ]
 
 [[package]]

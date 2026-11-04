@@ -3,7 +3,10 @@
 # Run by hand (Actions -> Release -> Run workflow) from main, with the version main already says:
 # a release, X.Y.Z, or a beta, X.Y.Z-beta.N (decision 0007). It refuses, before anything is
 # published, unless main's files are exactly those a green pull request run checked. The tag is cut
-# only after crates.io has both crates, so a tag means published.
+# only after crates.io has both crates, so a tag means published. A run that stopped halfway is
+# finished by running it again: what is already published must be exactly this commit's package,
+# and a tag already cut must be on this commit. Each decision is scripts/release_check.py's, tested
+# by scripts/test_release_check.py.
 #
 # crates.io's Trusted Publishing gives this run a short-lived token for exactly these crates, so no
 # token is stored. A crate's very first publish cannot use it, because Trusted Publishing is set up
@@ -51,24 +54,19 @@ jobs:
           set -euo pipefail
           fail() { echo "::error::$1"; exit 1; }
           [ "$REF" = refs/heads/main ] || fail "Release runs from main, not ${REF}."
-          [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[1-9][0-9]{0,2})?$ ]] || fail "Not a release or beta version: ${VERSION}."
+          python3 scripts/release_check.py version "$VERSION"
           said=$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[] | select(.name == "qso-graph-trust") | .version')
           [ "$said" = "$VERSION" ] || fail "main says ${said}, not ${VERSION}."
           python3 scripts/gen-lotw-tables.py --check
-          status=0; git ls-remote --exit-code "https://github.com/${REPO}.git" "refs/tags/v${VERSION}" >/dev/null || status=$?
-          [ "$status" -eq 2 ] || fail "v${VERSION} is already tagged, or GitHub could not be asked (git ls-remote: ${status})."
-          for crate in qso-graph-trust-awslc qso-graph-trust; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' -A "qso-graph-trust release (https://github.com/${REPO})" "https://crates.io/api/v1/crates/${crate}/${VERSION}")
-            [ "$code" = 404 ] || fail "crates.io already has ${crate} ${VERSION}, or could not be asked (HTTP ${code})."
-          done
+          python3 scripts/package-files.py --check
+          sha=$(git rev-parse HEAD)
+          # A tag already there must be on this commit: a release half done is finished, never moved.
+          tagged=$(git ls-remote "https://github.com/${REPO}.git" "refs/tags/v${VERSION}" | cut -f1)
+          [ -z "$tagged" ] || [ "$tagged" = "$sha" ] || fail "v${VERSION} is already tagged, on ${tagged}, not ${sha}."
           # A merge runs no CI, so main's commit has none of its own: what proves it is a green pull
-          # request run whose commit holds exactly main's files.
-          sha=$(git rev-parse HEAD); tree=$(git rev-parse 'HEAD^{tree}'); found=""
-          for head in $(gh api "repos/${REPO}/actions/workflows/ci.yml/runs?event=pull_request&status=success&per_page=50" --jq '.workflow_runs[].head_sha'); do
-            if [ "$(gh api "repos/${REPO}/git/commits/${head}" --jq .tree.sha)" = "$tree" ]; then found=$head; break; fi
-          done
-          [ -n "$found" ] || fail "No green pull request run checked exactly main's files (tree ${tree})."
-          echo "main ${sha} holds exactly what pull request run ${found} checked."
+          # request run of this repository's CI whose own commit holds exactly main's files.
+          proved=$(python3 scripts/release_check.py proving-run "$REPO" "$(git rev-parse 'HEAD^{tree}')")
+          echo "main ${sha} holds exactly what pull request run of ${proved} checked."
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
   publish:
@@ -95,10 +93,22 @@ jobs:
         name: crates.io token (Trusted Publishing)
         if: ${{ env.FIRST_PUBLISH != 'true' }}
         uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+      - name: Package the binding and the library
+        run: cargo package -p qso-graph-trust-awslc -p qso-graph-trust --locked
+      # One at a time, the binding first. A crate crates.io already has at this version is accepted
+      # only if it is exactly this commit's package, so a release that stopped halfway is finished
+      # by running it again.
       - name: Publish the binding, then the library
         env:
+          VERSION: ${{ inputs.version }}
           CARGO_REGISTRY_TOKEN: ${{ steps.trusted.outputs.token || secrets.CRATES_IO_FIRST_PUBLISH }}
-        run: cargo publish -p qso-graph-trust-awslc -p qso-graph-trust --locked
+        run: |
+          set -euo pipefail
+          for crate in qso-graph-trust-awslc qso-graph-trust; do
+            state=$(python3 scripts/release_check.py crate "$crate" "$VERSION" "target/package/${crate}-${VERSION}.crate")
+            if [ "$state" = same ]; then echo "crates.io already has ${crate} ${VERSION}, exactly this package."; continue; fi
+            cargo publish -p "$crate" --locked
+          done
       - name: Tag the published commit
         env:
           VERSION: ${{ inputs.version }}
@@ -107,5 +117,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api "repos/${REPO}/git/refs" -f "ref=refs/tags/v${VERSION}" -f "sha=${SHA}" >/dev/null
+          if [ -n "$(git ls-remote "https://github.com/${REPO}.git" "refs/tags/v${VERSION}")" ]; then
+            echo "v${VERSION} is already tagged on ${SHA}."
+          else
+            gh api "repos/${REPO}/git/refs" -f "ref=refs/tags/v${VERSION}" -f "sha=${SHA}" >/dev/null
+          fi
           echo "Published ${VERSION} on crates.io and tagged v${VERSION} at ${SHA}."

@@ -41,6 +41,22 @@ cargo xtask policy      # no C in the library, no unsafe code
 cargo run -p qso-graph-trust-cli -- --version
 ```
 
+## Credits
+
+QSO Graph Trust exists because of [TrustedQSL](https://sourceforge.net/projects/trustedqsl/) (TQSL) and
+the people who built it and keep it running. TQSL's contributors, as its `AUTHORS.txt` lists them,
+are **WA1GON, K1MK, KE3Z, K1MU, KC2YWE and AA6YQ**, with ARRL. Since 2003 their work has carried the
+signature on every QSO confirmed through Logbook of The World: a signing format, a certificate system and
+a program that hams on every platform rely on, kept current through two decades of operating systems,
+library changes and new modes, as volunteers. QG Trust learned what LoTW needs from that work, and thanks
+them for it.
+
+QG Trust is written in Rust from ARRL's LoTW documentation and from what TQSL does, not ported from its
+code. It carries two things of TQSL's, both ARRL's, under ARRL's terms: the TQSL configuration
+(`config.xml`), from which the LoTW tables are generated, and ARRL's root and CA certificates as TQSL
+embeds them. TQSL 2.8.7, built from [its own source](https://git.code.sf.net/p/trustedqsl/tqsl), is the
+reference every signature QG Trust makes is tested against, byte for byte.
+
 ## Licence
 
 GPL-3.0-only ([LICENSE](LICENSE)); see [NOTICE](NOTICE). QGT is not made or endorsed by ARRL.

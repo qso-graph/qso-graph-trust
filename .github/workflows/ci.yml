@@ -39,6 +39,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The pull request's own commit, not GitHub's merge of it: what release.yml publishes
+          # is proved by a run of exactly the commit whose files main holds.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       # rust-toolchain.toml names the version; rustup installs it here.
       - name: Rust
         run: rustup show active-toolchain || rustup toolchain install
@@ -71,6 +74,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The pull request's own commit, not GitHub's merge of it: what release.yml publishes
+          # is proved by a run of exactly the commit whose files main holds.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Rust
         run: rustup show active-toolchain || rustup toolchain install
       - name: cargo xtask policy
@@ -83,6 +89,12 @@ jobs:
       # carries ARRL's terms unchanged.
       - name: LoTW tables match config.xml
         run: python3 scripts/gen-lotw-tables.py --check
+      # Each published crate carries the GPL's text and the notices, as the repository has them.
+      - name: Package files match the repository's
+        run: python3 scripts/package-files.py --check
+      # The release's decisions, each with the cases it must refuse.
+      - name: Release checks
+        run: python3 scripts/test_release_check.py
       # What crates.io would receive, built from the packages alone: the binding, then the library.
       - name: cargo package
         run: cargo package -p qso-graph-trust-awslc -p qso-graph-trust --locked
