@@ -11,6 +11,8 @@
 //! - **No unsafe code** (AGENTS.md): the workspace forbids `unsafe_code`, every
 //!   member takes the workspace's lints, and every crate root says
 //!   `#![forbid(unsafe_code)]` where the compiler reads it.
+//! - **No networking in the library or binding**: every source file is read as
+//!   tokens, whatever its cfg; the caller supplies upload's TLS connection.
 //!
 //! - **No key data in freed memory** (AGENTS.md): every program
 //!   a workspace crate builds (a binary, or a library another language loads)
@@ -639,30 +641,11 @@ fn native_in(dir: &Path, skip: &[PathBuf], os_binding: bool) -> Vec<String> {
     found
 }
 
-/// Every way unsafe code could get into the workspace, sorted: the workspace not
-/// forbidding it, a member not taking the workspace's lints, or a crate root not
-/// forbidding it itself.
-pub fn no_unsafe(meta: &Value) -> Vec<String> {
+/// Directories belonging to other packages or Cargo's output, shared by the
+/// source-token checks. A directory inside a crate cannot escape its scan.
+fn source_scan_skips(meta: &Value) -> Vec<PathBuf> {
     let empty = Vec::new();
     let workspace = members(meta);
-    let mut problems = Vec::new();
-    if workspace.is_empty() {
-        problems.push("the workspace has no members".to_string());
-    }
-    match meta["workspace_root"].as_str() {
-        Some(root) => {
-            let manifest = Path::new(root).join("Cargo.toml");
-            match read_toml(&manifest) {
-                Ok(t) if workspace_forbids_unsafe(&t) => {}
-                Ok(_) => problems.push(
-                    "the workspace does not set [workspace.lints.rust] unsafe_code = \"forbid\""
-                        .to_string(),
-                ),
-                Err(e) => problems.push(e),
-            }
-        }
-        None => problems.push("cargo metadata names no workspace root".to_string()),
-    }
     // Directories Cargo treats as other packages: each member's own directory,
     // and each path the workspace's manifest excludes.
     let mut skip: Vec<PathBuf> = meta["packages"]
@@ -708,6 +691,34 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
             .into_iter()
             .filter(|o| !member_dirs.iter().any(|m| o.starts_with(m))),
     );
+    skip
+}
+
+/// Every way unsafe code could get into the workspace, sorted: the workspace not
+/// forbidding it, a member not taking the workspace's lints, or a crate root not
+/// forbidding it itself.
+pub fn no_unsafe(meta: &Value) -> Vec<String> {
+    let empty = Vec::new();
+    let workspace = members(meta);
+    let mut problems = Vec::new();
+    if workspace.is_empty() {
+        problems.push("the workspace has no members".to_string());
+    }
+    match meta["workspace_root"].as_str() {
+        Some(root) => {
+            let manifest = Path::new(root).join("Cargo.toml");
+            match read_toml(&manifest) {
+                Ok(t) if workspace_forbids_unsafe(&t) => {}
+                Ok(_) => problems.push(
+                    "the workspace does not set [workspace.lints.rust] unsafe_code = \"forbid\""
+                        .to_string(),
+                ),
+                Err(e) => problems.push(e),
+            }
+        }
+        None => problems.push("cargo metadata names no workspace root".to_string()),
+    }
+    let skip = source_scan_skips(meta);
     for pkg in meta["packages"].as_array().unwrap_or(&empty) {
         if !pkg["id"].as_str().is_some_and(|id| workspace.contains(id)) {
             continue;
@@ -802,6 +813,40 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
 /// own `Cargo.toml` is another package and is left to its own check (the planted
 /// fixtures are such a package). A file that does not tokenize is a finding.
 pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
+    source_tokens_in(dir, skip, unsafe_tokens)
+}
+
+/// Networking in the library and its binding, sorted; empty passes. The CLI
+/// supplies TLS and is deliberately outside this rule. Scan all Rust sources,
+/// including tests and modules disabled by cfg, using the unsafe check's walker.
+pub fn no_network(meta: &Value) -> Vec<String> {
+    let workspace = members(meta);
+    let skip = source_scan_skips(meta);
+    let mut found = Vec::new();
+    for pkg in meta["packages"].as_array().into_iter().flatten() {
+        let name = pkg["name"].as_str().unwrap_or("?");
+        if !pkg["id"].as_str().is_some_and(|id| workspace.contains(id))
+            || !(PROTECTED.contains(&name) || name == UNSAFE_BINDING)
+        {
+            continue;
+        }
+        match pkg["manifest_path"]
+            .as_str()
+            .and_then(|m| Path::new(m).parent())
+        {
+            Some(dir) => found.extend(source_tokens_in(dir, &skip, network_tokens)),
+            None => found.push(format!("{name} has no manifest directory")),
+        }
+    }
+    found.sort();
+    found
+}
+
+fn source_tokens_in(
+    dir: &Path,
+    skip: &[PathBuf],
+    scan: fn(proc_macro2::TokenStream) -> Vec<&'static str>,
+) -> Vec<String> {
     let mut found = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
@@ -873,7 +918,7 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
                 }
                 match body.parse::<proc_macro2::TokenStream>() {
                     Ok(tokens) => {
-                        for what in unsafe_tokens(tokens) {
+                        for what in scan(tokens) {
                             found.push(format!("{} {what}", path.display()));
                         }
                     }
@@ -886,6 +931,60 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
     }
     found.sort();
     found
+}
+
+/// Network type identifiers and the `net` path segment, including raw spellings,
+/// grouped and aliased imports. Comments and literals are not identifiers; cfg
+/// does not hide tokens. A plain local variable called `net` is not a path.
+pub fn network_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
+    fn scan(tokens: proc_macro2::TokenStream, mut in_use: bool) -> Vec<&'static str> {
+        use proc_macro2::TokenTree;
+        const TYPES: &[(&str, &str)] = &[
+            ("TcpStream", "uses network identifier TcpStream"),
+            ("TcpListener", "uses network identifier TcpListener"),
+            ("UdpSocket", "uses network identifier UdpSocket"),
+            ("UnixStream", "uses network identifier UnixStream"),
+            ("UnixListener", "uses network identifier UnixListener"),
+            ("UnixDatagram", "uses network identifier UnixDatagram"),
+            ("ToSocketAddrs", "uses network identifier ToSocketAddrs"),
+            ("SocketAddr", "uses network identifier SocketAddr"),
+            ("SocketAddrV4", "uses network identifier SocketAddrV4"),
+            ("SocketAddrV6", "uses network identifier SocketAddrV6"),
+            ("IpAddr", "uses network identifier IpAddr"),
+        ];
+        let trees: Vec<_> = tokens.into_iter().collect();
+        let colon =
+            |i: usize| matches!(trees.get(i), Some(TokenTree::Punct(p)) if p.as_char() == ':');
+        let mut found = Vec::new();
+        for (i, tree) in trees.iter().enumerate() {
+            match tree {
+                TokenTree::Ident(id) => {
+                    let name = id.to_string();
+                    let name = name.strip_prefix("r#").unwrap_or(&name);
+                    if name == "use" {
+                        in_use = true;
+                    }
+                    let alias =
+                        i > 0 && matches!(&trees[i - 1], TokenTree::Ident(id) if id == "as");
+                    if name == "net"
+                        && ((in_use && !alias)
+                            || (i >= 2 && colon(i - 2) && colon(i - 1))
+                            || (colon(i + 1) && colon(i + 2)))
+                    {
+                        found.push("uses network path segment net");
+                    }
+                    if let Some((_, what)) = TYPES.iter().find(|(n, _)| *n == name) {
+                        found.push(*what);
+                    }
+                }
+                TokenTree::Group(g) => found.extend(scan(g.stream(), in_use)),
+                TokenTree::Punct(p) if p.as_char() == ';' => in_use = false,
+                _ => {}
+            }
+        }
+        found
+    }
+    scan(tokens, false)
 }
 
 /// Identifiers no workspace source may contain, wherever they appear, with what

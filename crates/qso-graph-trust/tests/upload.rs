@@ -279,8 +279,8 @@ fn messages_are_trimmed_control_free_and_bounded_on_utf8_boundaries() {
     }
 }
 
-// Scan all library Rust sources, including currently cfg-disabled modules. Keep these checks
-// outside src so that their own planted strings do not exempt anything from the scan.
+// Scan all library Rust sources, including currently cfg-disabled modules. The
+// token-aware no-network rule is checked by cargo xtask policy instead.
 fn library_sources(dir: &Path, output: &mut String) {
     for entry in std::fs::read_dir(dir).expect("source directory") {
         let path = entry.expect("source entry").path();
@@ -291,12 +291,6 @@ fn library_sources(dir: &Path, output: &mut String) {
             output.push('\n');
         }
     }
-}
-
-fn network_free(source: &str) -> bool {
-    !["std::net", "TcpStream", "UdpSocket"]
-        .iter()
-        .any(|token| source.contains(token))
 }
 
 fn only_fixed_upload_url(source: &str) -> bool {
@@ -311,24 +305,16 @@ fn only_fixed_upload_url(source: &str) -> bool {
 }
 
 #[test]
-fn library_has_no_network_primitives_and_only_one_https_upload_url() {
+fn library_has_only_one_https_upload_url() {
     assert!(UPLOAD_URL.starts_with("https://"));
     let mut source = String::new();
     library_sources(
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
         &mut source,
     );
-    assert!(network_free(&source));
     assert!(only_fixed_upload_url(&source));
 
-    // Planted cases prove each check fails with a violation, then passes without it.
-    for forbidden in ["std::net", "TcpStream", "UdpSocket"] {
-        assert!(
-            !network_free(&format!("{source}\n{forbidden}")),
-            "missed {forbidden}"
-        );
-        assert!(network_free(&source));
-    }
+    // Planted cases prove the check fails with a violation, then passes without it.
     for url in [
         "http://lotw.arrl.org/lotw/upload",
         "https://example.invalid/upload",

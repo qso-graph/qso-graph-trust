@@ -146,6 +146,118 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
 }
 
 #[test]
+fn every_planted_network_path_or_type_is_caught() {
+    let scan = |s: &str| xtask::network_tokens(s.parse().expect("Rust tokens"));
+    for planted in [
+        "use std::{net};",
+        "use std::net as n;",
+        "std::os::unix::net::UnixStream",
+        "use std::{io, net::{TcpListener}};",
+        "core::net::IpAddr",
+        "use std :: /* spacing */ net :: *;",
+        "use std::{os::{unix::{net as n}}};",
+        "use std::{r#net};",
+        "r#net::connect()",
+        "#[cfg(any())] mod disabled { use std::{net}; }",
+        "consume!(std::net)",
+    ] {
+        assert!(
+            scan(planted).contains(&"uses network path segment net"),
+            "missed {planted}"
+        );
+    }
+    for name in [
+        "TcpStream",
+        "TcpListener",
+        "UdpSocket",
+        "UnixStream",
+        "UnixListener",
+        "UnixDatagram",
+        "ToSocketAddrs",
+        "SocketAddr",
+        "SocketAddrV4",
+        "SocketAddrV6",
+        "IpAddr",
+    ] {
+        for planted in [
+            format!("use provider::{{{name} as Alias}};"),
+            format!("#[cfg(any())] fn f(_: r#{name}) {{}}"),
+        ] {
+            assert_eq!(scan(&planted).len(), 1, "missed {planted}");
+        }
+    }
+    // Identifier tokens count, not matching prose, longer identifiers or local
+    // bindings. A use's alias is not one of its source path segments.
+    for clean in [
+        "// std::net::TcpStream\nconst S: &str = \"use std::{net}; UdpSocket\";",
+        "/// TcpStream and core::net::IpAddr\nfn f() {}",
+        "fn f() { let net = 1; consume(net); }",
+        "use std::io as net;",
+        "use std::io; fn f() { let net = 1; }",
+        "struct TcpStreamBuffer; mod network {}",
+    ] {
+        assert!(scan(clean).is_empty(), "refused {clean}");
+    }
+}
+
+#[test]
+fn network_policy_scans_library_and_binding_but_allows_cli() {
+    let root = xtask::fresh_temp_dir("qso-graph-trust-planted-network").expect("fresh directory");
+    let names = [
+        "qso-graph-trust",
+        xtask::UNSAFE_BINDING,
+        "qso-graph-trust-cli",
+    ];
+    let mut packages = Vec::new();
+    for name in names {
+        let dir = root.join(name);
+        std::fs::create_dir_all(dir.join("src")).expect("mkdir");
+        std::fs::write(dir.join("Cargo.toml"), "[package]\n").expect("manifest");
+        std::fs::write(dir.join("src/lib.rs"), "pub fn clean() {}\n").expect("source");
+        packages.push(serde_json::json!({
+            "id": name,
+            "name": name,
+            "manifest_path": dir.join("Cargo.toml"),
+        }));
+    }
+    let meta = serde_json::json!({
+        "workspace_root": root,
+        "workspace_members": names,
+        "packages": packages,
+    });
+    assert!(xtask::no_network(&meta).is_empty());
+    // An unreferenced file in a nested directory is scanned even if no current
+    // build would compile it. Each plant is removed before the next one.
+    for name in names {
+        let dir = root.join(name).join("src/disabled");
+        std::fs::create_dir(&dir).expect("mkdir");
+        let path = dir.join("payload.rs");
+        for planted in [
+            "use std::{net};",
+            "use std::net as n;",
+            "std::os::unix::net::UnixStream",
+            "use std::{io, net::{TcpListener}};",
+            "core::net::IpAddr",
+        ] {
+            std::fs::write(&path, format!("#[cfg(any())] mod disabled {{ {planted} }}"))
+                .expect("plant");
+            let findings = xtask::no_network(&meta);
+            if name == "qso-graph-trust-cli" {
+                assert!(findings.is_empty(), "CLI must be allowed: {findings:?}");
+            } else {
+                assert!(
+                    findings.contains(&format!("{} uses network path segment net", path.display())),
+                    "missed {name}: {planted}: {findings:?}"
+                );
+            }
+            std::fs::remove_file(&path).expect("remove plant");
+            assert!(xtask::no_network(&meta).is_empty());
+        }
+    }
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
 fn every_planted_way_to_override_the_lints_is_caught() {
     // A repository made for the test, planted with each way found to weaken the
     // lints without touching a manifest or a crate root (Codex review, rounds 6
@@ -420,6 +532,7 @@ fn this_repository_passes() {
         );
     }
     assert_eq!(xtask::no_unsafe(&meta), Vec::<String>::new());
+    assert_eq!(xtask::no_network(&meta), Vec::<String>::new());
     assert_eq!(
         xtask::unreviewed_in(&meta, xtask::SHIPPED),
         Vec::<String>::new()

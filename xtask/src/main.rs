@@ -51,6 +51,7 @@ fn main() -> ExitCode {
             xtask::unreviewed_in(&meta, xtask::SHIPPED),
         ),
         ("no unsafe code", xtask::no_unsafe(&meta)),
+        ("no networking in the library", xtask::no_network(&meta)),
         ("no lint overrides", xtask::no_lint_overrides(&root_dir)),
         ("the pinned compiler", xtask::pinned_compiler(&root_dir)),
         ("the wiping allocator", xtask::wiping_allocator(&meta)),
