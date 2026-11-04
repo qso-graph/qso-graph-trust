@@ -212,6 +212,19 @@ fn every_planted_way_to_override_the_lints_is_caught() {
         ".github/workflows/d.yml",
         "env:\n  RUSTFLAGS: -l static=z\n",
     );
+    // The Windows build's one line is allowed in binaries.yml, and only there and only exactly.
+    write(
+        ".github/workflows/binaries.yml",
+        &format!("steps:\n  - run: |\n      {}\n", xtask::WINDOWS_CRT_STATIC),
+    );
+    write(
+        ".github/workflows/e.yml",
+        &format!("steps:\n  - run: |\n      {}\n", xtask::WINDOWS_CRT_STATIC),
+    );
+    write(
+        ".github/workflows/f.yml",
+        "steps:\n  - run: |\n      export RUSTFLAGS=\"-C target-feature=+crt-static --cap-lints=allow\"\n",
+    );
     let nested = root
         .join("crates")
         .join("lib")
@@ -248,6 +261,10 @@ fn every_planted_way_to_override_the_lints_is_caught() {
         "workflow b.yml mentions --config".to_string(),
         "workflow c.yml mentions RUSTC".to_string(),
         "workflow d.yml sets RUSTFLAGS: RUSTFLAGS: -l static=z".to_string(),
+        format!("workflow e.yml sets RUSTFLAGS: {}", xtask::WINDOWS_CRT_STATIC),
+        "workflow f.yml mentions cap-lints".to_string(),
+        "workflow f.yml sets RUSTFLAGS: export RUSTFLAGS=\"-C target-feature=+crt-static --cap-lints=allow\""
+            .to_string(),
     ];
     want.sort();
     let got = xtask::no_lint_overrides(&root);

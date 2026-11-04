@@ -1198,6 +1198,11 @@ pub fn workspace_forbids_unsafe(manifest: &toml::Table) -> bool {
     }
 }
 
+/// The one RUSTFLAGS line a workflow may hold besides `RUSTFLAGS: -D warnings`: binaries.yml's,
+/// which links Windows' C runtime into `qg-trust.exe`, so it needs no Visual C++ runtime installed.
+pub const WINDOWS_CRT_STATIC: &str =
+    r#"if [ "$RUNNER_OS" = Windows ]; then export RUSTFLAGS="-C target-feature=+crt-static"; fi"#;
+
 /// Every way a build of this repository could have its lints weakened, sorted.
 /// `--cap-lints` overrides even `forbid(unsafe_code)` (found by Codex review, and
 /// checked against rustc 1.99.1), as do `-A`/`-W`/`--force-warn unsafe_code`. So:
@@ -1320,9 +1325,13 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
                     }
                 }
                 // RUSTFLAGS only as the one workflow-wide line; a job or step setting
-                // it would not reach this check's own environment.
+                // it would not reach this check's own environment. The one exception is
+                // the release's Windows build linking the C runtime in, exactly as
+                // WINDOWS_CRT_STATIC says it, in binaries.yml alone: a target feature,
+                // which neither weakens a lint nor links anything but Microsoft's runtime.
                 for line in text.lines().filter(|l| l.contains("RUSTFLAGS")) {
-                    if line.trim() != "RUSTFLAGS: -D warnings" {
+                    let crt_static = name == "binaries.yml" && line.trim() == WINDOWS_CRT_STATIC;
+                    if line.trim() != "RUSTFLAGS: -D warnings" && !crt_static {
                         problems.push(format!("workflow {name} sets RUSTFLAGS: {}", line.trim()));
                     }
                 }
