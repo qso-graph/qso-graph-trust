@@ -29,6 +29,7 @@ Decided 2026-11-03 by KI7MT, after Watson's review of qso-graph-trust#1.
 | David Tolnay (`dtolnay`) | `syn`, `proc-macro2`, `serde`, … | Among the most-used crates in Rust |
 | Google (`github:google/zerocopy`) | `zerocopy` | Maintained by Google's Fuchsia team |
 | Microsoft (`kennykerr`), added 2026-11-04 | `windows-sys` | Microsoft's own Windows bindings (`microsoft/windows-rs`), led by Kenny Kerr; generated declarations, trusted by Mozilla, the Bytecode Alliance and Zcash. The command line's password prompt needs them on Windows |
+| Ed Page (`epage`), added 2026-11-04 | `clap`, `clap_builder`, `clap_derive`, `clap_lex`, `clap_complete`, `anstream`, `anstyle` and its parts, `colorchoice`, two polyfills | Maintainer of clap, Rust's standard command-line parser, and of Cargo's own terminal output; trusted by Mozilla and the Bytecode Alliance. The command line's options, help, completions and styled output; none of it is in the library |
 
 cargo-vet records trust per crate as each crate enters the dependency graph, so the list above
 is applied as phase 2 adds them. Today it covers David Tolnay's crates, which are in `xtask`'s
