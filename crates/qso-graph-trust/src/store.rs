@@ -24,9 +24,9 @@ pub use signed::{
 pub use import::ExpiringCertificate;
 pub use part::{PartError, RestoreReport};
 
-pub use keys::{KeyStoreError, MAX_KEYS, SERVICE, TEST_SERVICE};
+pub use keys::{KeyStoreError, MAX_KEYS, OrphanDetection, SERVICE, TEST_SERVICE};
 
-use keys::{KeyStore, MemoryKeyStore};
+use keys::{KeyStore, MemoryKeyStore, OsKeyStore};
 
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
@@ -51,7 +51,8 @@ pub const MAX_LOCATIONS: usize = 4096;
 pub const MAX_PENDING_REQUESTS: usize = 1024;
 /// The longest location name in bytes.
 pub const MAX_NAME_LEN: usize = 255;
-/// The largest credential secret, matching Windows Credential Manager's limit.
+/// The largest credential secret QGT writes or accepts after a provider read, matching Windows
+/// Credential Manager's limit. Provider allocations/copies before returning a read are not bounded.
 pub const MAX_KEY_LEN: usize = 2560;
 
 /// Select a library-owned credential backend. No backend handle or secret reader is exposed.
@@ -62,8 +63,12 @@ pub enum KeyBackend {
     /// secrets; reopening the folder creates another empty backend and reports missing keys.
     /// This is not persistent storage for an operator's keys.
     Memory,
-    // Os and OsTest belong here once their backend dependency decision is made; they will use
-    // SERVICE and TEST_SERVICE respectively, without handing a backend object to the caller.
+    /// The OS credential store, shared with Desktop and the command line. Uses [`SERVICE`],
+    /// or [`TEST_SERVICE`] whenever `QG_DESKTOP_TEST_KEYCHAIN` is present, as Desktop does.
+    /// The variable's value is never used as a service name. Selection is fixed at open.
+    Os,
+    /// The OS credential store under [`TEST_SERVICE`] only, regardless of the environment.
+    OsTest,
 }
 
 /// A public certificate record; its identifier survives whole-file replacements.
@@ -111,7 +116,11 @@ pub struct OpenReport {
     pub missing_keys: Vec<String>,
     /// Pending request identifiers whose named credential is missing.
     pub missing_request_keys: Vec<String>,
-    /// Credential names with no certificate or pending request in the file.
+    /// Whether orphan detection was performed. Windows OS backends report `Unavailable`;
+    /// missing-key checks still run for every certificate and pending request named by the file.
+    pub orphan_detection: OrphanDetection,
+    /// Credential names with no certificate or pending request in the file. An empty list means
+    /// no orphans were found only when `orphan_detection` is `Available`.
     pub orphaned_keys: Vec<String>,
 }
 
@@ -147,7 +156,7 @@ pub enum StoreError {
     /// Secure randomness was unavailable.
     Random,
     /// The file write failed and the backend also refused to remove the new key. It remains an
-    /// orphan, reported next time the store is opened.
+    /// orphan, reported next time the store is opened if orphan detection is available.
     Rollback {
         /// The file-write failure.
         write: Box<StoreError>,
@@ -243,7 +252,8 @@ pub struct Store {
 }
 
 impl Store {
-    /// Open (or create) a folder, validate its file and report missing and orphaned credentials.
+    /// Open (or create) a folder, validate its file and report missing credentials. Report orphans
+    /// when supported; `OpenReport::orphan_detection` explicitly identifies unavailable detection.
     /// An absent file is an empty store; the first successful mutation creates `store.xml`.
     pub fn open(
         dir: impl AsRef<Path>,
@@ -251,6 +261,8 @@ impl Store {
     ) -> Result<(Self, OpenReport), StoreError> {
         let keys: Box<dyn KeyStore> = match backend {
             KeyBackend::Memory => Box::new(MemoryKeyStore::new()),
+            KeyBackend::Os => Box::new(OsKeyStore::new(false)),
+            KeyBackend::OsTest => Box::new(OsKeyStore::new(true)),
         };
         Self::open_with_keys(dir.as_ref(), keys)
     }
@@ -269,7 +281,10 @@ impl Store {
         };
         let _lock = store.lock()?;
         let data = store.read()?;
-        let mut report = OpenReport::default();
+        let mut report = OpenReport {
+            orphan_detection: store.keys.orphan_detection(),
+            ..OpenReport::default()
+        };
         for cert in &data.certificates {
             if let Some(name) = &cert.key_name
                 && !store.keys.exists(name)?
@@ -281,6 +296,9 @@ impl Store {
             if !store.keys.exists(&request.key_name)? {
                 report.missing_request_keys.push(request.id.clone());
             }
+        }
+        if report.orphan_detection == OrphanDetection::Unavailable {
+            return Ok((store, report));
         }
         let names = store.keys.names()?;
         if names.len() > keys::MAX_KEYS {
@@ -405,7 +423,8 @@ impl Store {
     }
 
     /// Publish removal of a pending record before deleting its key. A failed durability sync
-    /// retains the key; backend deletion failure leaves an orphan reported on the next open.
+    /// retains the key; backend deletion failure leaves an orphan reported on the next open
+    /// when orphan detection is available.
     pub fn abandon_request(&self, id: &str) -> Result<(), StoreError> {
         let _lock = self.lock()?;
         let mut data = self.read()?;
@@ -480,7 +499,8 @@ impl Store {
     }
 
     /// Delete the file record first, then its credential. A backend failure leaves an orphan
-    /// reported by the next open; it never leaves a certificate pointing to a key we deleted.
+    /// reported by the next open when orphan detection is available; it never leaves a certificate
+    /// pointing to a key we deleted.
     pub fn delete_certificate(&self, id: &str) -> Result<(), StoreError> {
         let _lock = self.lock()?;
         let mut data = self.read()?;

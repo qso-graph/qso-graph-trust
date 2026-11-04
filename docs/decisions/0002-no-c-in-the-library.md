@@ -115,6 +115,97 @@ Decided by KI7MT, 2026-11-03, after a review measured that phase 2's first depen
 Still forbidden: C, C++ or assembly source a crate compiles or ships, a crate whose job is
 building native code, and a native link to anything but the operating system.
 
+## Proposed 2026-11-04, for KI7MT: OS credential store shared with Desktop
+
+Use Desktop's `keyring = "=4.2.0"` with its default backends: Keychain on macOS,
+Credential Manager on Windows and Secret Service on Linux. `Os` selects the fixed test service
+when `QG_DESKTOP_TEST_KEYCHAIN` is present, as Desktop does (QGD-LTW-0007); its value never supplies
+a service name. `OsTest` always selects the test service. Select once per backend so changing the
+environment cannot split an operation between services.
+
+KI7MT approved direct, target-gated `security-framework = "=3.7.0"` on macOS and
+`secret-service = "=5.2.0"` with `features = ["crypto-rust"]` on other Unix systems, exactly as
+Desktop's `packages/callsign-core` uses them. Both already existed in the locked tree and have
+exact-version cargo-vet exemptions explicitly marked not audited yet. `keyring-core` 1.0.1 remains
+only a transitive dependency of keyring, with its exemption retained; its direct Windows dependency
+has been removed. No new audit source or publisher trust was added.
+
+**Decided by KI7MT, 2026-11-04: Secret Service session transport provider.** RustCrypto is a named
+provider only inside `secret-service` 5.2.0's Desktop-default `crypto-rust` D-Bus session transport:
+its DH arithmetic, HKDF/SHA-256 and AES-CBC. It is never an exception for signing, certificate
+operations, TLS or other uses. The session exchanges encrypt the key in transit to the local OS
+credential service. This exception grants no native-code exemption: the provider and its dependency
+sources are still scanned. Policy pins the transport version/features, constrains incoming edges to
+its resolved algorithms/arithmetic, and confines QGT's Secret Service API use to the credential
+backend's connection, encryption-mode and error types. Planted cases reject direct use from other
+crates, signing/certificate files, different provider/algorithm versions, other features and public
+session encrypt/decrypt imports, then pass again when each plant is removed.
+
+Linux discovery uses Secret Service's SearchItems and attributes, including locked items without
+unlocking them. macOS searches request generic-password attributes without secret data, explicitly
+restricted to `SecKeychain::default_for_domain(SecPreferencesDomain::User)`, the same keychain as
+apple-native-keyring-store's default reads/writes. Neither searches the entire macOS search list.
+
+**Decided by KI7MT, 2026-11-04: Windows never enumerates.** Credential Manager enumeration returns
+all credential blobs before keyring filters them, including other services' secrets. QGT must not
+call `keyring_core::Entry::search` or `CredEnumerate`. Its backend reports the typed capability
+`OrphanDetection::Unavailable`; `names()` returns `EnumerationUnavailable`, never a misleading empty
+list. `OpenReport::orphan_detection` carries that capability to callers. Windows checks only the
+QGT credentials named by certificates/pending requests in the file; `exists()` uses the default
+backend's CredReadW of that one entry, whose native blob the provider wipes. Missing keys are still
+reported; orphan detection is unavailable. The Windows capability and no-enumeration path also
+compile in Linux unit tests. No global credential-count limit can be enforced there by enumeration;
+the store's public record limits still apply.
+
+**Limits at QGT's API boundaries.** Providers allocate/copy complete secrets and metadata batches
+before returning them; QGT cannot bound those allocations. It wraps returned secret bytes in
+`Zeroizing` immediately, then applies `MAX_KEY_LEN` before use or further QGT copies. Oversized
+responses are wiped and refused too. Linux applies `MAX_KEYS` to both presence and enumeration
+responses as soon as SearchItems returns, before requesting attributes or collecting QGT's names.
+macOS additionally requests at most `MAX_KEYS + 1` items and checks the returned count. These bounds
+limit what QGT accepts and subsequently processes, not the provider's preceding memory use.
+
+Keys are random `key:<uuid v4>` entries. Reads use `get_secret`, immediately wrapped in `Zeroizing`,
+including malformed-secret error payloads; writes use `set_secret`, with existing names refused
+under the owning store's file lock. All provider errors become fixed store categories. The shared
+Store operations continue to put a key before publishing its name, and remove a record before
+deleting its key. The opt-in OS test uses only `TEST_SERVICE`, tracks attempted writes for cleanup
+on unwinding, and exercises binary replacement, persistence, whole-store replacement, deletion,
+missing credential reports on every platform, and orphan reports or the explicit unavailable
+capability as appropriate. Run it on a host with a working credential service:
+`QGT_OS_KEYSTORE_TEST=1 cargo test -p qso-graph-trust os_round_trip -- --ignored`.
+
+Extend the named OS-binding category for that dependency tree, after reading the packaged sources
+and manifests. None carries C, C++ or assembly source files or a native-build dependency:
+
+- `security-framework` 3.7.0 wraps Apple's Security framework. `src/authorization.rs` declares
+  `SMJobBless` and `kSMDomainSystemLaunchd`, linking the OS's ServiceManagement framework;
+  `src/os/macos/code_signing.rs` declares Mach `mach_task_self` and `task_info` in a test.
+- `core-foundation` 0.10.1 wraps Apple's Core Foundation through `core-foundation-sys`.
+  The finding in `tests/use_macro_outside_crate.rs` is a test-only mock declaration of
+  `CFFooBarGetTypeID` and `fake_compare`, exercising its wrapper macros, not shipped native code.
+- `rustix` 1.1.6 wraps libc and Linux syscalls. Read `build.rs` (rustc-only feature probes),
+  `src/backend/libc/`, `src/backend/linux_raw/param/libc_auxv.rs` (`getauxval`, `sysconf`),
+  `src/backend/linux_raw/vdso_wrappers.rs` and `src/weak.rs`. Syscall assembly is Rust inline/global
+  assembly, covered by the existing reviewed-outside-crate category; no assembler is invoked.
+  `src/msan.rs` declares a sanitizer hook, unused in QGT's shipping builds.
+- `linux-raw-sys` 0.12.1 contains generated Linux UAPI types and constants, with no build script;
+  `src/hexagon/general.rs` declares kernel signal trampoline symbols for an unshipped architecture.
+- `errno` 0.3.14 wraps the OS error slot: `src/unix.rs` binds `errno_location` to the platform's
+  libc symbol; `src/wasi.rs` declares `__errno_location` for an unshipped platform. No build script.
+
+`zbus` and `uuid` are **not** OS bindings. A separate `FOREIGN_DECLARATIONS` list allows only a
+foreign-declaration finding in each of these individually read files at the exact version:
+
+- `zbus` 5.19.0, `src/fdo/peer.rs`: macOS's `gethostuuid` supplies the D-Bus machine ID.
+- `uuid` 1.29.0, `src/rng.rs`: wasm-bindgen imports JavaScript `crypto.getRandomValues`.
+- `uuid` 1.29.0, `src/timestamp.rs`: wasm-bindgen imports JavaScript `Date.now`.
+
+Neither JavaScript import is compiled for QGT's shipping targets. Another crate, version or file
+still fails; a native link or native source fails even within an allowed file. Planted cases beside
+the existing OS-binding test prove these limits and pass again when the planted changes are removed.
+All of these dependencies still require cargo-vet coverage by exact version.
+
 ## Amended 2026-11-03: cryptographic primitives
 
 Decided by KI7MT after measuring the options. QG Trust's own code and every parser stay safe Rust with

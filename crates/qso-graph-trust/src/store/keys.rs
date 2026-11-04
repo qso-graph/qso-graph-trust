@@ -9,12 +9,27 @@ use zeroize::Zeroizing;
 
 use super::{MAX_KEY_LEN, StoreError};
 
+mod os;
+pub(super) use os::OsKeyStore;
+
 /// QG Trust's production credential-store service. A backend instance is scoped to this service.
 pub const SERVICE: &str = "io.qso-graph.trust";
 /// The separate service for integration tests; never point tests at the production service.
 pub const TEST_SERVICE: &str = "io.qso-graph.trust.test";
-/// Bound enumeration too: a broken backend must not make opening a store unbounded.
+/// Maximum names QGT accepts from a provider response and collects for orphan detection.
+/// Provider and OS allocations made before returning that response are outside QGT's control.
 pub const MAX_KEYS: usize = 8192;
+
+/// Whether a backend can discover credentials absent from the public store file.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OrphanDetection {
+    /// Enumeration is supported; a successful open checked for orphaned credentials.
+    #[default]
+    Available,
+    /// Enumeration is unavailable. Windows cannot enumerate without reading unrelated secrets,
+    /// so it checks only credentials named by the file. An empty orphan list is inconclusive.
+    Unavailable,
+}
 
 /// A credential failure, deliberately limited to fixed categories so errors cannot expose secrets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,6 +42,8 @@ pub enum KeyStoreError {
     AlreadyExists,
     /// An invalid name, secret length, or enumeration exceeding `MAX_KEYS`.
     InvalidInput,
+    /// This backend cannot enumerate credentials without reading unrelated secrets.
+    EnumerationUnavailable,
 }
 
 impl fmt::Display for KeyStoreError {
@@ -36,27 +53,38 @@ impl fmt::Display for KeyStoreError {
             Self::AccessDenied => "access denied",
             Self::AlreadyExists => "entry already exists",
             Self::InvalidInput => "invalid entry or too many entries",
+            Self::EnumerationUnavailable => "credential enumeration is unavailable",
         })
     }
 }
 impl std::error::Error for KeyStoreError {}
 
 /// The seam to an OS credential store. Instances are scoped to `SERVICE` or `TEST_SERVICE`;
-/// all names are `key:<uuid v4>`. Backends must bound secrets by `MAX_KEY_LEN` and enumeration by
-/// `MAX_KEYS`, wipe secret temporaries, and return only these fixed errors, never backend messages.
+/// all names are `key:<uuid v4>`. Backends apply `MAX_KEY_LEN` and `MAX_KEYS` at the first point
+/// QGT controls, wipe secret temporaries, and return only fixed errors, never backend messages.
+/// These limits cannot bound allocations/copies already made by a provider before it returns.
 /// Secret DER is handed to the backend only for custody; the Store API never exports it.
 pub(crate) trait KeyStore: Send + Sync {
+    /// Whether `names` can discover orphaned keys. This is a capability, not service health;
+    /// a failure of a supported provider still returns an error rather than skipping discovery.
+    fn orphan_detection(&self) -> OrphanDetection {
+        OrphanDetection::Available
+    }
     /// Atomically create a credential containing PKCS#8 DER. On error nothing was created;
     /// existing names are refused, never overwritten.
     fn put(&self, name: &str, der: &[u8]) -> Result<(), KeyStoreError>;
-    /// Read a secret into wiped memory, or `None` if absent. Refuse oversized secrets before copying.
+    /// Read a secret into wiped memory, or `None` if absent. Wrap provider-owned bytes immediately
+    /// and check `MAX_KEY_LEN` before QGT uses or copies them; the provider may already have copied
+    /// or allocated the complete secret. An oversized response is wiped and refused too.
     fn get(&self, name: &str) -> Result<Option<Zeroizing<Vec<u8>>>, KeyStoreError>;
     /// Remove a credential. An absent name is already deleted and succeeds.
     fn delete(&self, name: &str) -> Result<(), KeyStoreError>;
-    /// Check presence without reading secret bytes or prompting to unlock them.
+    /// Check presence without prompting to unlock it. Linux/macOS use metadata only. Windows
+    /// reads only this named credential (including its native blob), which the provider wipes.
     fn exists(&self, name: &str) -> Result<bool, KeyStoreError>;
-    /// Enumerate names in this service without reading secrets, for orphan reporting. Never include
-    /// another service's entries. Bound the result before allocating more than `MAX_KEYS` names.
+    /// Enumerate names in this service without reading secrets, or `EnumerationUnavailable` when
+    /// unsupported. Check the provider's response count before QGT collects names; the provider's
+    /// own response allocations are outside QGT's control. Never include another service's entries.
     fn names(&self) -> Result<Vec<String>, KeyStoreError>;
 }
 
