@@ -67,7 +67,8 @@ pub enum CallKind {
 }
 
 /// Public request data. Text is bounded by TQSL's `TQSL_CRQ_*_MAX` byte limits, trimmed
-/// as TQSL trims it, and cannot contain framing delimiters or control characters.
+/// as TQSL trims it (C-locale whitespace runs become one space), and cannot contain
+/// framing delimiters or control characters.
 #[derive(Clone, Debug)]
 pub struct CertificateRequest {
     /// Uppercase station callsign, embedded in the CSR subject.
@@ -189,12 +190,12 @@ impl CertificateRequest {
                 || value
                     .chars()
                     .any(|c| c.is_control() || matches!(c, '<' | '>'))
-                || (required && value.trim().is_empty())
+                || (required && normalize_text(value).is_empty())
             {
                 return Err(RequestError::Invalid(field));
             }
         }
-        if !is_callsign(self.callsign.trim()) {
+        if !is_callsign(&normalize_text(&self.callsign)) {
             return Err(RequestError::Invalid("CALLSIGN"));
         }
         if crate::lotw::dxcc(self.dxcc).is_none() {
@@ -206,7 +207,7 @@ impl CertificateRequest {
         {
             return Err(RequestError::Invalid("QSO_NOT_AFTER"));
         }
-        let email = self.email.trim();
+        let email = normalize_text(&self.email);
         if !email.is_ascii()
             || !email
                 .split_once('@')
@@ -236,7 +237,7 @@ impl CertificateRequest {
             tq5,
             private,
             public,
-            callsign: self.callsign.trim().into(),
+            callsign: normalize_text(&self.callsign),
             dxcc: self.dxcc,
             created_at,
         })
@@ -266,7 +267,8 @@ impl CertificateRequest {
             Authorization::New => return Ok(None),
             Authorization::Additional { certificate, key } => (certificate, key),
             Authorization::Renewal { certificate, key } => {
-                if certificate.callsign() != self.callsign.trim() || certificate.dxcc() != self.dxcc
+                if certificate.callsign() != normalize_text(&self.callsign)
+                    || certificate.dxcc() != self.dxcc
                 {
                     return Err(RequestError::SignerMismatch);
                 }
@@ -285,15 +287,17 @@ impl CertificateRequest {
             for (oid, value) in [
                 (
                     "1.3.6.1.4.1.12348.1.1",
-                    Any::encode_from(&Utf8StringRef::new(self.callsign.trim())?)?,
+                    Any::encode_from(&Utf8StringRef::new(&normalize_text(&self.callsign))?)?,
                 ),
                 (
                     "2.5.4.3",
-                    Any::encode_from(&Utf8StringRef::new(&latin1_utf8(self.name.trim()))?)?,
+                    Any::encode_from(&Utf8StringRef::new(&latin1_utf8(&normalize_text(
+                        &self.name,
+                    )))?)?,
                 ),
                 (
                     "1.2.840.113549.1.9.1",
-                    Any::encode_from(&Ia5StringRef::new(self.email.trim())?)?,
+                    Any::encode_from(&Ia5StringRef::new(&normalize_text(&self.email))?)?,
                 ),
             ] {
                 subject
@@ -351,7 +355,11 @@ impl CertificateRequest {
             Authorization::Renewal { .. } => "<TQSL_CRQ_RENEWAL>\n\n",
         });
         for (name, value, _, _) in self.text_fields().into_iter().take(10) {
-            field(&mut out, &format!("TQSL_CRQ_{name}"), value.trim());
+            field(
+                &mut out,
+                &format!("TQSL_CRQ_{name}"),
+                &normalize_text(value),
+            );
         }
         field(&mut out, "TQSL_CRQ_DXCC_ENTITY", &self.dxcc.to_string());
         field(
@@ -388,6 +396,16 @@ impl CertificateRequest {
         out.push_str("<eor>\n\n");
         Ok(out)
     }
+}
+
+// tqsl_trim (TQSL 2.8.7, openssl_cert.cpp): trim and fold C-locale isspace only.
+// Validation still rejects controls in the original input before either encoding.
+fn normalize_text(value: &str) -> String {
+    value
+        .split([' ', '\t', '\n', '\u{000b}', '\u{000c}', '\r'])
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn creation_time(now: std::time::SystemTime) -> Result<u64, RequestError> {

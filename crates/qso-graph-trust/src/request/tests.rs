@@ -94,7 +94,8 @@ fn verify_csr(csr: &CertReq) {
 fn same_test_key_reproduces_tqsllib_requests_except_identification() {
     // Differential test: these are tqsllib's *actual* requests, not DER constructed by this test.
     // Reusing each test key also makes its PKCS#1 v1.5 signature deterministic, so compare every
-    // byte except the identification field, including the CSR signature.
+    // byte except the identification field, including the CSR signature. TQSL's tqsl_trim
+    // makes the spaced variants equivalent to each corpus input before both encodings.
     for (prefix, call, password) in [
         ("tqsl/1024", "QG0TEST", None),
         ("tqsl/1024-password", "QG0TEST", Some(b"qgt-key".as_slice())),
@@ -112,27 +113,34 @@ fn same_test_key_reproduces_tqsllib_requests_except_identification() {
         let private = entry.pkcs8_der(password).expect("fixture key unlocks");
         let public = entry.public_key_der().expect("SPKI");
         let req = request(call);
-        let csr = req.csr(&private, &public).expect("CSR");
-        assert_eq!(csr, csr_in(&theirs), "{prefix}/{call}");
-        verify_csr(&csr);
-        let ours = req.frame(&csr, Authorization::New, None).expect("frame");
-        let old_ident = parse_tq5(&theirs)[0]
-            .text("TQSL_IDENT")
-            .expect("ident")
-            .to_owned();
-        let mut normalized = String::new();
-        field(&mut normalized, "TQSL_IDENT", &old_ident);
-        let mut ours_ident = String::new();
-        let current = parse_tq5(&ours)[0]
-            .text("TQSL_IDENT")
-            .expect("ident")
-            .to_owned();
-        field(&mut ours_ident, "TQSL_IDENT", &current);
-        assert_eq!(
-            ours.replace(&ours_ident, &normalized),
-            theirs,
-            "{prefix}/{call}"
-        );
+        let mut spaced_name = req.clone();
+        spaced_name.name = "  QGT   Test  Operator   ".into();
+        let mut spaced_address = req.clone();
+        spaced_address.address1 = "   1  No   Place  ".into();
+        for req in [req, spaced_name, spaced_address] {
+            req.validate().expect("valid request");
+            let csr = req.csr(&private, &public).expect("CSR");
+            assert_eq!(csr, csr_in(&theirs), "{prefix}/{call}");
+            verify_csr(&csr);
+            let ours = req.frame(&csr, Authorization::New, None).expect("frame");
+            let old_ident = parse_tq5(&theirs)[0]
+                .text("TQSL_IDENT")
+                .expect("ident")
+                .to_owned();
+            let mut normalized = String::new();
+            field(&mut normalized, "TQSL_IDENT", &old_ident);
+            let mut ours_ident = String::new();
+            let current = parse_tq5(&ours)[0]
+                .text("TQSL_IDENT")
+                .expect("ident")
+                .to_owned();
+            field(&mut ours_ident, "TQSL_IDENT", &current);
+            assert_eq!(
+                ours.replace(&ours_ident, &normalized),
+                theirs,
+                "{prefix}/{call}"
+            );
+        }
     }
 }
 
@@ -296,7 +304,7 @@ fn bad_inputs_are_refused_and_corrected_inputs_pass() {
     assert!(Date::from_iso("2026-02-29").is_none());
     assert!(Date::from_iso("2024-02-29").is_some());
     assert!(Date::from_iso("0000-01-01").is_none());
-    for invalid in ["<", ">", "\n", "\r", "\0", "\t"] {
+    for invalid in ["<", ">", "\n", "\r", "\0", "\t", "\u{000b}", "\u{000c}"] {
         for index in 0..11 {
             let mut bad = good.clone();
             let fields = [
@@ -342,24 +350,35 @@ fn bad_inputs_are_refused_and_corrected_inputs_pass() {
         assert_eq!(bad.validate(), Err(RequestError::Invalid(field)));
         if required {
             let mut bad = good.clone();
-            let fields = [
-                &mut bad.provider,
-                &mut bad.provider_unit,
-                &mut bad.email,
-                &mut bad.name,
-                &mut bad.address1,
-                &mut bad.address2,
-                &mut bad.city,
-                &mut bad.state,
-                &mut bad.postal_code,
-                &mut bad.country,
-                &mut bad.callsign,
-            ];
-            *fields.into_iter().nth(index).expect("field") = "   ".into();
-            assert_eq!(bad.validate(), Err(RequestError::Invalid(field)));
+            for empty in ["", "   "] {
+                let fields = [
+                    &mut bad.provider,
+                    &mut bad.provider_unit,
+                    &mut bad.email,
+                    &mut bad.name,
+                    &mut bad.address1,
+                    &mut bad.address2,
+                    &mut bad.city,
+                    &mut bad.state,
+                    &mut bad.postal_code,
+                    &mut bad.country,
+                    &mut bad.callsign,
+                ];
+                *fields.into_iter().nth(index).expect("field") = empty.into();
+                assert_eq!(bad.validate(), Err(RequestError::Invalid(field)));
+                assert_eq!(
+                    bad.generate(Authorization::New).err(),
+                    Some(RequestError::Invalid(field))
+                );
+            }
         }
     }
-    for email in ["no-at.invalid", "test@invalid", "tést@example.invalid"] {
+    for email in [
+        "no-at.invalid",
+        "test@invalid",
+        "test.example@invalid",
+        "tést@example.invalid",
+    ] {
         let mut bad = good.clone();
         bad.email = email.into();
         assert_eq!(bad.validate(), Err(RequestError::Invalid("EMAIL")));
@@ -440,32 +459,57 @@ fn kinds_are_wizard_intent_and_do_not_invent_tq5_fields() {
 }
 
 #[test]
+fn normalization_uses_c_locale_whitespace_and_preserves_other_characters() {
+    assert_eq!(normalize_text(" \t\n\u{000b}\u{000c}\r"), "");
+    assert_eq!(
+        normalize_text(" \tAlpha\n\u{000b}  Beta\u{000c}\rGamma "),
+        "Alpha Beta Gamma"
+    );
+    // Unicode whitespace is not C-locale isspace; retain it, including at the ends.
+    assert_eq!(
+        normalize_text("\u{00a0}André  Test\u{2003}"),
+        "\u{00a0}André Test\u{2003}"
+    );
+}
+
+#[test]
 fn optional_fields_dates_trimming_and_openssl_subject_encoding() {
     let mut req = request("QG0TEST");
-    req.provider = " ARRL ".into();
-    req.provider_unit = " LoTW ".into();
-    req.callsign = " QG0TEST ".into();
-    req.name = " André ".into();
-    req.address1 = " 1 No Place ".into();
-    req.address2 = " Suite 2 ".into();
-    req.postal_code = " 12345 ".into();
+    req.provider = "  Test   Provider  ".into();
+    req.provider_unit = "  Test   Unit  ".into();
+    req.callsign = "  QG0TEST   ".into();
+    req.name = "  André   Test  ".into();
+    req.address1 = "  1   No  Place  ".into();
+    req.address2 = "  Suite   2  ".into();
+    req.city = "  Test   City  ".into();
+    req.state = "  Test   State  ".into();
+    req.country = "  Test   Country  ".into();
+    req.postal_code = "  123   45  ".into();
+    req.email = "  test@example.invalid   ".into();
     req.qso_not_after = Date::from_iso("2026-11-04");
     let generated = req.generate(Authorization::New).expect("request");
     let records = parse_tq5(generated.tq5());
     for (field, value) in [
-        ("PROVIDER", "ARRL"),
-        ("PROVIDER_UNIT", "LoTW"),
-        ("NAME", "André"),
+        ("PROVIDER", "Test Provider"),
+        ("PROVIDER_UNIT", "Test Unit"),
+        ("NAME", "André Test"),
         ("ADDRESS1", "1 No Place"),
         ("ADDRESS2", "Suite 2"),
-        ("POSTAL", "12345"),
+        ("CITY", "Test City"),
+        ("STATE", "Test State"),
+        ("COUNTRY", "Test Country"),
+        ("POSTAL", "123 45"),
+        ("EMAIL", "test@example.invalid"),
         ("QSO_NOT_AFTER", "2026-11-04"),
     ] {
         assert_eq!(records[0].text(&format!("TQSL_CRQ_{field}")), Some(value));
     }
     let csr = csr_in(generated.tq5());
     let common_name = csr.info.subject.0[1].0.iter().next().expect("CN");
-    assert_eq!(common_name.value.value(), latin1_utf8("André").as_bytes());
+    assert_eq!(
+        common_name.value.value(),
+        latin1_utf8("André Test").as_bytes()
+    );
     verify_csr(&csr);
 }
 
