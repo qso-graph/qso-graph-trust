@@ -77,6 +77,15 @@ class Published(unittest.TestCase):
 
 
 
+class FirstToken(unittest.TestCase):
+    def test_while_a_crate_is_new(self):
+        self.assertTrue(rc.first_token_allowed({"a": True, "b": True, "cli": False}))
+        self.assertTrue(rc.first_token_allowed({"a": False}))
+
+    def test_refused_once_every_crate_exists(self):
+        self.assertFalse(rc.first_token_allowed({"a": True, "b": True, "cli": True}))
+
+
 class Tag(unittest.TestCase):
     def test_absent(self):
         self.assertEqual(rc.tag_state("", "0.1.0", "abc"), "absent")

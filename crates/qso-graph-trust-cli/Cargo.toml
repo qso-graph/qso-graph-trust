@@ -1,14 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-only
 [package]
 name = "qso-graph-trust-cli"
-description = "QSO Graph Trust's command line for ARRL's Logbook of The World (LoTW); not yet published"
+description = "qg-trust: sign ADIF logs for ARRL's Logbook of The World (LoTW) from the command line"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-# Not on crates.io until it signs: a release publishes the library and its binding only.
-publish = false
+readme = "README.md"
+keywords = ["lotw", "arrl", "ham-radio", "amateur-radio", "tqsl"]
+categories = ["command-line-utilities"]
+# What the package holds, and nothing else. The tests read this repository's corpus.
+include = ["src/**/*.rs", "README.md", "LICENSE.md", "NOTICE.md", "AUTHORS.md"]
 
 # The command is qg-trust: QSO Graph's commands are qg-<word> (qg-trust, qg-rig,
 # qg-udp, qg-sim), never a short one that can collide, while every package a
@@ -18,10 +21,15 @@ name = "qg-trust"
 path = "src/main.rs"
 
 [dependencies]
-qso-graph-trust = { path = "../qso-graph-trust", version = "=0.1.0-beta.2" }
+qso-graph-trust = { path = "../qso-graph-trust", version = "=0.1.0-beta.3" }
 # Every block is wiped when it is freed, whichever library allocated it, so no key data is left
 # in freed memory (AGENTS.md; cargo xtask policy requires it in every program).
 zeroizing-alloc = { version = "=0.1.1", default-features = false }
+# Wipes the password buffer when it is dropped, beside the allocator's wiping of freed memory.
+zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
+# The key's password, asked for at the terminal with what is typed hidden. It sets the terminal
+# through the OS's own calls (libc on Unix, windows-sys on Windows) and holds no C.
+rpassword = { version = "=7.5.4", default-features = false }
 
 [lints]
 workspace = true

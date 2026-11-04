@@ -1,64 +1,54 @@
-# QSO Graph Trust (QGT)
+# QSO Graph Trust
 
-Sign ADIF logs for ARRL's Logbook of The World (LoTW). The goal: your private key kept by your
-computer's own credential store (macOS Keychain, Windows Credential Manager, the Linux Secret Service)
-rather than in a file, and the logs you sign uploaded to LoTW.
+Sign your ADIF logs for ARRL's [Logbook of The World](https://lotw.arrl.org) (LoTW). QSO Graph Trust is
+an alternative to TQSL: it reads the certificates and backups TQSL makes, and the logs it signs carry
+the same signed records TQSL's do, byte for byte.
 
-QGT is an alternative to TQSL, built on enterprise engineering practice: a memory-safe
-implementation, keys to be held by the OS, and every behaviour proved by tests against TQSL itself. It reads
-the certificates and files TQSL uses, and its command line is to take the options loggers give `tqsl`
-today.
+> **This is a beta.** Today it signs a log using your existing TQSL backup, from the command line. Still
+> to come: keeping your key in your computer's own credential store, uploading straight to LoTW,
+> requesting certificates, and signing inside [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop).
 
-> **Status: beta.** The library is on crates.io as
-> [`qso-graph-trust`](https://crates.io/crates/qso-graph-trust). It signs an ADIF log into the `.tq8`
-> LoTW accepts, with the certificate and key read from a TQSL backup (`.tbk`): the signed records and
-> their signatures are TQSL's, byte for byte; only the line naming the program differs. Keeping keys in the credential store, uploading, requesting certificates, the
-> command line and QSO Graph Desktop's extension are still to come, for QSO Graph Desktop 0.7.0; the
-> work and its gates are tracked in
-> [qso-graph-desktop#169](https://github.com/qso-graph/qso-graph-desktop/issues/169).
+## Sign a log
 
-## What it is
+1. **Have a TQSL backup.** In TQSL, *File → Backup Station Locations, Certificates, and Preferences…*
+   saves one. TQSL also saves one by itself, `tqslconfig.tbk`, each time it closes, unless that is
+   turned off in its Preferences.
+2. **Install `qg-trust`** (it needs [Rust](https://rustup.rs) for now; ready-made downloads come later):
 
-| Part | What it does | Where |
-| --- | --- | --- |
-| The library | Certificates, station locations, TQSL backups and signing today; the credential store, upload and duplicate tracking to come. Shared by everything below | [`crates/qso-graph-trust`](crates/qso-graph-trust), on crates.io |
-| The binding | LoTW's signature from AWS-LC, the one crate with `unsafe` code ([decision 0006](docs/decisions/0006-aws-lc-signs.md)) | [`crates/qso-graph-trust-awslc`](crates/qso-graph-trust-awslc), on crates.io |
-| `qg-trust`, the command line | To come: tqsl-compatible options, exit codes and status line, for loggers and scripts | [`crates/qso-graph-trust-cli`](crates/qso-graph-trust-cli) |
-| QSO Graph Desktop | QG Trust's interface: an extension, using the library ([decisions 0005](docs/decisions/0005-qso-graph-desktop-is-the-interface.md) and [0007](docs/decisions/0007-inside-the-credential-core.md)) | [qso-graph-desktop](https://github.com/qso-graph/qso-graph-desktop) |
+   ```sh
+   cargo install qso-graph-trust-cli
+   ```
 
-## How it is built
+3. **Sign**, naming the backup, the station location as TQSL calls it, and your log:
 
-| Phase | Done when | Status | Issue |
-| --- | --- | --- | --- |
-| 1 Foundation | CI green on Windows, macOS and Linux; the no-C and no-unsafe checks proved by planted cases | Done | [#170](https://github.com/qso-graph/qso-graph-desktop/issues/170) |
-| 2 Signing core | Byte-identical to tqsllib on LoTW's 1024-bit keys, with and without a password | Gate met: signing matches tqsllib byte for byte (issue still open) | [#171](https://github.com/qso-graph/qso-graph-desktop/issues/171) |
-| 3 The library | All 220 tqsllib functions mapped and tested; fuzzing clean; the key found nowhere it shouldn't be | In progress: TQSL backups read, keys wiped from freed memory | [#172](https://github.com/qso-graph/qso-graph-desktop/issues/172) |
-| 4 CLI tools | Loggers' real calls behave the same; LoTW processes the uploads | Not started | [#173](https://github.com/qso-graph/qso-graph-desktop/issues/173) |
-| 5 QSO Graph Desktop extension and packaging | Signed packages on three platforms | Not started | [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174) |
+   ```sh
+   qg-trust -i tqslconfig.tbk -l "Home" mylog.adi
+   ```
 
-What is done, planned and left out, feature by feature against TQSL:
-[`docs/FEATURE-PARITY.md`](docs/FEATURE-PARITY.md).
+   If your key has a password, `qg-trust` asks for it, with what you type hidden. It writes
+   `mylog.tq8` and tells you how many QSOs it signed. A QSO LoTW would refuse is left out and named,
+   with the reason.
+4. **Upload `mylog.tq8`** on LoTW's website, as you would one TQSL saved.
 
-## Using the library
+To sign only some dates, add `-b 2026-01-01` and `-e 2026-06-30`. `qg-trust --help` lists everything,
+and the [command line's page](crates/qso-graph-trust-cli/README.md) has every option and exit code.
+Loggers that run `tqsl` will find the same option letters, exit codes and final status line.
 
-```sh
-cargo add qso-graph-trust@0.1.0-beta.2 zeroize zeroizing-alloc@=0.1.1
-```
+## Your key stays yours
 
-`zeroize` and `zeroizing-alloc` are for your program: every program that signs installs the wiping
-allocator, as the example does.
+- Your key is only ever used to sign. It is never printed, logged or sent anywhere.
+- A password is never typed on the command line, and the program wipes the memory it frees, so no
+  key or password is left behind in it.
+- A backup's certificates are trusted only if they come from LoTW's own certificate authority.
 
-The library's [README](crates/qso-graph-trust/README.md) shows reading a TQSL backup and signing a log.
+More, and how to report a security problem: [SECURITY.md](SECURITY.md).
 
-## Building
+## For developers
 
-With Rust installed ([rustup](https://rustup.rs) installs the version `rust-toolchain.toml` names):
-
-```sh
-cargo test --workspace
-cargo xtask policy      # no C but AWS-LC, no unsafe code outside the binding
-cargo run -p qso-graph-trust-cli -- --version
-```
+The signing is a Rust library, [`qso-graph-trust`](https://crates.io/crates/qso-graph-trust), for your
+own programs; its [page](crates/qso-graph-trust/README.md) has an example. To work on QSO Graph Trust
+itself: [CONTRIBUTING.md](CONTRIBUTING.md). What it does, plans and leaves out, feature by feature
+against TQSL: [docs/FEATURE-PARITY.md](docs/FEATURE-PARITY.md).
 
 ## Credits
 
@@ -77,8 +67,8 @@ OpenSSL, without TQSL, and uploads it to LoTW, showing that LoTW accepts a log s
 
 ## Sources
 
-QG Trust is a ground-up rewrite in Rust, not a method-by-method port of TQSL. What it does was decided
-from these, and how is QG Trust's own:
+QSO Graph Trust is a ground-up rewrite in Rust, not a method-by-method port of TQSL. What it does was
+decided from these, and how is its own:
 
 - **ARRL's LoTW developer documentation:** [developer information](https://lotw.arrl.org/lotw-help/developer-information/),
   [the signed log, `.tq8`](https://lotw.arrl.org/lotw-help/developer-tq8/),
@@ -90,11 +80,10 @@ from these, and how is QG Trust's own:
   [LoTW Trusted Partners guidelines](https://www.arrl.org/files/file/LoTW_Developer/LoTW%20Trusted%20Partners-1_0.pdf).
 - **TrustedQSL:** [its source](https://git.code.sf.net/p/trustedqsl/tqsl) at v2.8.7, read for what LoTW
   receives; [tqsllib's API documentation](https://www.rickmurphy.net/lotw/doxygen/); and
-  [TQSL's change log](https://lotw.arrl.org/lotw-help/tqslchangelog/). QG Trust carries two things of
-  TQSL's, both ARRL's, under ARRL's terms: the TQSL configuration (`config.xml`), from which the LoTW
+  [TQSL's change log](https://lotw.arrl.org/lotw-help/tqslchangelog/). QSO Graph Trust carries two things
+  of TQSL's, both ARRL's, under ARRL's terms: the TQSL configuration (`config.xml`), from which its LoTW
   tables are generated, and ARRL's root and CA certificates as TQSL embeds them. TQSL 2.8.7, built from
-  its own source, is the reference QG Trust's signed records and signatures are tested against, byte
-  for byte.
+  its own source, is the reference its signed records and signatures are tested against, byte for byte.
 - **Other open-source projects:** qso-web, above, and a survey of 126 ham-radio Rust crates on crates.io,
   which found no other LoTW signing crate.
 - **Standards:** [ADIF 3.1.7](https://adif.org/317/ADIF_317.htm); RFC 5280 (X.509 certificates),
@@ -102,5 +91,6 @@ from these, and how is QG Trust's own:
 
 ## Licence
 
-GPL-3.0-only ([LICENSE](LICENSE)); see [NOTICE](NOTICE). QGT is not made or endorsed by ARRL.
-"Logbook of The World", "LoTW" and "TQSL" are ARRL's names, used here only to say what QGT works with.
+GPL-3.0-only ([LICENSE](LICENSE)); see [NOTICE](NOTICE). QSO Graph Trust is not made, affiliated with or
+endorsed by ARRL. "Logbook of The World", "LoTW" and "TQSL" are ARRL's names, used here only to say what it
+works with.

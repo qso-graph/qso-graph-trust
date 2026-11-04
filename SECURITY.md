@@ -29,5 +29,8 @@ QGT is in beta. The latest release on crates.io, beta or not, is supported; a fi
   library (`tbk::read` with `Trust::lotw()`), never to a root the backup brings with it. A certificate
   a program reads itself with `Certificate::from_pem_or_der` is checked only when the program calls
   `Certificate::verify`; `sign_log` checks the key, call, entity and dates, not the chain.
+- **A password is never taken from the command line.** `qg-trust` asks for it at the terminal with
+  what is typed hidden, or reads one line from standard input when there is no terminal, and never
+  prints it.
 - **To come:** the key held by the OS credential store, leaving it only as a signature or a backup QGT
   encrypts itself; and TLS verification never turned off when QGT uploads.

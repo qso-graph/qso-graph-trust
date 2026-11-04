@@ -13,6 +13,9 @@ test (scripts/test_release_check.py) with the cases it must refuse.
                                                 and fails if it holds anything else
     release_check.py tag REPO VERSION SHA       whether vVERSION is tagged: prints absent, or same if
                                                 the tag is on SHA, and fails if it is anywhere else
+    release_check.py exists CRATE               prints yes if CRATE is on crates.io, no if not
+    release_check.py first-token CRATE...       fails unless one of these crates is not on crates.io
+                                                yet: the only case a first-publish token is for
 
 A developer and CI tool only, never shipped; standard library and gh only.
 """
@@ -66,6 +69,13 @@ def published(crate, version, local_sha256, checksum_of):
     )
 
 
+def first_token_allowed(on_crates_io):
+    """Whether a first-publish token may be used: only while a crate this release publishes is not
+    on crates.io yet, because Trusted Publishing is set up on a crate that exists. `on_crates_io`
+    maps each crate to whether crates.io has it."""
+    return not all(on_crates_io.values())
+
+
 def tag_state(refs, version, sha):
     """Where vVERSION points, from `git ls-remote` output: "absent", or "same" if on SHA. A tag on
     any other commit is refused: a release is finished where it started, never moved. An annotated
@@ -94,6 +104,17 @@ def _gh(*args):
 
 def _tree_of(repo):
     return lambda sha: _gh("api", f"repos/{repo}/git/commits/{sha}", "--jq", ".tree.sha").strip()
+
+
+def _exists(crate):
+    request = urllib.request.Request(f"https://crates.io/api/v1/crates/{crate}", headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=30):
+            return True
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return False
+        raise SystemExit(f"crates.io could not be asked about {crate}: HTTP {error.code}")
 
 
 def _checksum_of(crate, version):
@@ -129,6 +150,16 @@ def main(argv):
         with open(path, "rb") as f:
             local = hashlib.sha256(f.read()).hexdigest()
         print(published(crate, version, local, _checksum_of))
+        return
+    if len(argv) == 2 and argv[0] == "exists":
+        print("yes" if _exists(argv[1]) else "no")
+        return
+    if len(argv) >= 2 and argv[0] == "first-token":
+        present = {crate: _exists(crate) for crate in argv[1:]}
+        if not first_token_allowed(present):
+            sys.exit("every crate is on crates.io: delete CRATES_IO_FIRST_PUBLISH from the crates-io "
+                     "Environment and set up Trusted Publishing")
+        print(", ".join(c for c, on in present.items() if not on))
         return
     if len(argv) == 4 and argv[0] == "tag":
         repo, version, sha = argv[1:]

@@ -5,8 +5,9 @@ Sign ADIF logs for ARRL's [Logbook of The World](https://lotw.arrl.org) (LoTW). 
 station location and QSOs, the signed records and their signatures are TQSL's, byte for byte; only the line naming the program
 that made the file differs.
 
-QSO Graph Trust is the library behind LoTW signing in [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop)
-and the `qg-trust` command line, both still to come, and it is for other people's programs too. Its parsers are safe Rust, and the library
+QSO Graph Trust is the library behind the [`qg-trust`](https://crates.io/crates/qso-graph-trust-cli)
+command line and, still to come, LoTW signing in [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop),
+and it is for other people's programs too. Its parsers are safe Rust, and the library
 forbids `unsafe` code. LoTW's signature is AWS-LC's, through one small binding, `qso-graph-trust-awslc`,
 the only crate here with `unsafe` code; a password-protected key is unlocked with RustCrypto.
 

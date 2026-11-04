@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PUBLISHED = ["crates/qso-graph-trust", "crates/qso-graph-trust-awslc"]
+PUBLISHED = ["crates/qso-graph-trust", "crates/qso-graph-trust-awslc", "crates/qso-graph-trust-cli"]
 FILES = {"LICENSE": "LICENSE.md", "NOTICE": "NOTICE.md", "AUTHORS": "AUTHORS.md"}
 
 

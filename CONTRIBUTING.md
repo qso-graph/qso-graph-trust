@@ -15,6 +15,19 @@ quickest start for anyone.
    crates.io would receive them.
 4. KI7MT merges. Releases are KI7MT's too: the Release workflow, run by hand (AGENTS.md).
 
+## Building
+
+With Rust installed ([rustup](https://rustup.rs) installs the version `rust-toolchain.toml` names):
+
+```sh
+cargo test --workspace
+cargo xtask policy      # no C but AWS-LC, no unsafe code outside the binding
+cargo run -p qso-graph-trust-cli -- --version
+```
+
+The full list of checks CI runs is in [AGENTS.md](AGENTS.md); the plan and its phases are tracked in
+[qso-graph-desktop#169](https://github.com/qso-graph/qso-graph-desktop/issues/169).
+
 ## Ground rules
 
 - **Test data only.** No real certificate, key, password or QSO log, ever, in code, tests, issues or

@@ -95,9 +95,9 @@ jobs:
       # The release's decisions, each with the cases it must refuse.
       - name: Release checks
         run: python3 scripts/test_release_check.py
-      # What crates.io would receive, built from the packages alone: the binding, then the library.
+      # What crates.io would receive, built from the packages alone, in publishing order.
       - name: cargo package
-        run: cargo package -p qso-graph-trust-awslc -p qso-graph-trust --locked
+        run: cargo package -p qso-graph-trust-awslc -p qso-graph-trust -p qso-graph-trust-cli --locked
       - name: canary
         run: cargo xtask canary
       # Every outside crate reviewed: audits recorded in supply-chain/, imported

@@ -5,6 +5,34 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0-beta.3] - 2026-11-04
+
+### Added
+
+- `qg-trust`, the command line, on crates.io as `qso-graph-trust-cli`: signs an ADIF log with the
+  certificate, key and station location from a TQSL backup (`-i`, `-l`), within a date range (`-b`,
+  `-e`, `YYYY-MM-DD` or `YYYYMMDD`), into the `.tq8` named by `-o` or beside the log. The signed records
+  and signatures are tqsllib's, byte for byte, for every location in the standard test set. A QSO
+  LoTW would refuse, or the certificate or station cannot sign, is left out and named with the
+  reason, and the rest are signed. TQSL's option letters, exit codes (0, 4, 6 to 10 and 15) and
+  `Final Status: <name>(<code>)` line; TQSL's options it does not do yet are refused with code 10.
+- The key's password is asked for at the terminal with what is typed hidden (`rpassword`), or read as
+  one line from standard input when there is no terminal; `-p` is refused, and the password is never
+  printed. The signed log is written whole or not at all.
+
+### Changed
+
+- The release publishes the command line after the binding and the library. A crate already on
+  crates.io publishes with Trusted Publishing, which each requires; a first-publish token is used
+  only for a crate new to crates.io, and refused once every crate exists.
+- This repository's crates are marked in cargo-vet as built from source, now that they are also
+  on crates.io.
+- The README is the product page, for the hams who use it: what it does, how to sign a log step by
+  step, what is still to come, how the key is kept safe, credits and sources. Building and the plan
+  move to `CONTRIBUTING.md`.
+- Supply chain: `rpassword` and `rtoolbox` audited (with their known Ctrl-C and buffer findings in the
+  notes); Microsoft's `windows-sys` added as a trusted publisher (decision 0004).
+
 ## [0.1.0-beta.2] - 2026-11-04
 
 Documentation only: no change to what the library does or signs.

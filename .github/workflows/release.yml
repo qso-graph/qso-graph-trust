@@ -1,17 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# Release: publish QSO Graph Trust's library and its binding on crates.io, then tag the commit.
+# Release: publish QSO Graph Trust's binding, library and command line on crates.io, then tag the
+# commit.
 # Run by hand (Actions -> Release -> Run workflow) from main, with the version main already says:
 # a release, X.Y.Z, or a beta, X.Y.Z-beta.N (decision 0007). It refuses, before anything is
 # published, unless main's files are exactly those a green pull request run checked. The tag is cut
-# only after crates.io has both crates, so a tag means published. A run that stopped halfway is
+# only after crates.io has every crate, so a tag means published. A run that stopped halfway is
 # finished by running it again: what is already published must be exactly this commit's package,
 # and a tag already cut must be on this commit. Each decision is scripts/release_check.py's, tested
 # by scripts/test_release_check.py.
 #
-# crates.io's Trusted Publishing gives this run a short-lived token for exactly these crates, so no
-# token is stored. A crate's very first publish cannot use it, because Trusted Publishing is set up
-# on a crate that exists: for that one run the crates-io Environment holds CRATES_IO_FIRST_PUBLISH,
-# a token scoped to these two crates, removed once Trusted Publishing is set up.
+# crates.io's Trusted Publishing gives this run a short-lived token for the crates set up for it, so
+# no token is stored. A crate's very first publish cannot use it, because Trusted Publishing is set
+# up on a crate that exists: for that one run the crates-io Environment holds CRATES_IO_FIRST_PUBLISH,
+# a token scoped to the new crate, used for it alone and removed once Trusted Publishing is set up.
 #
 # crates.io holds no signatures. What a download can be checked against: crates.io's index records
 # each version's SHA-256, Cargo refuses one that differs, and GitHub's attestation of the same files
@@ -28,6 +29,10 @@ on:
 
 permissions:
   contents: read
+
+env:
+  # What a release publishes, in order: each needs the one before it on crates.io.
+  CRATES: qso-graph-trust-awslc qso-graph-trust qso-graph-trust-cli
 
 concurrency:
   group: release
@@ -71,10 +76,9 @@ jobs:
           # A tag already there must be on this commit: a release half done is finished, never moved.
           python3 -I scripts/release_check.py tag "$REPO" "$VERSION" "$sha" >/dev/null
           # The first-publish token is for a crate's very first publish only. Left behind, it would
-          # quietly stand in for Trusted Publishing, so once the crates exist its presence fails.
+          # quietly stand in for Trusted Publishing, so once every crate exists its presence fails.
           if [ "$FIRST_PUBLISH" = true ]; then
-            code=$(curl -s -o /dev/null -w '%{http_code}' -A "qso-graph-trust release (https://github.com/${REPO})" https://crates.io/api/v1/crates/qso-graph-trust)
-            [ "$code" = 404 ] || fail "qso-graph-trust is on crates.io: delete CRATES_IO_FIRST_PUBLISH from the crates-io Environment and set up Trusted Publishing (HTTP ${code})."
+            python3 -I scripts/release_check.py first-token $CRATES
           fi
           # A merge runs no CI, so main's commit has none of its own: what proves it is a green pull
           # request run of this repository's CI whose own commit holds exactly main's files.
@@ -103,12 +107,15 @@ jobs:
           persist-credentials: false
       - name: Rust
         run: rustup show active-toolchain || rustup toolchain install
+      # Trusted Publishing's short-lived token, for every crate already on crates.io. A release whose
+      # crates are all new, the very first, has none to give, so a failure here is allowed: such a
+      # release publishes with the first-publish token alone.
       - id: trusted
         name: crates.io token (Trusted Publishing)
-        if: ${{ env.FIRST_PUBLISH != 'true' }}
+        continue-on-error: ${{ env.FIRST_PUBLISH == 'true' }}
         uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
-      - name: Package the binding and the library
-        run: cargo package -p qso-graph-trust-awslc -p qso-graph-trust --locked
+      - name: Package the binding, the library and the command line
+        run: cargo package -p qso-graph-trust-awslc -p qso-graph-trust -p qso-graph-trust-cli --locked
       # GitHub's signed statement, through Sigstore, that these exact .crate files were built by this
       # workflow from this commit. crates.io serves the same bytes, so anyone can check a download:
       #   gh attestation verify qso-graph-trust-<version>.crate -R qso-graph/qso-graph-trust
@@ -116,19 +123,27 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: target/package/*.crate
-      # One at a time, the binding first. A crate crates.io already has at this version is accepted
-      # only if it is exactly this commit's package, so a release that stopped halfway is finished
-      # by running it again.
-      - name: Publish the binding, then the library
+      # One at a time, in order. A crate crates.io already has at this version is accepted only if it
+      # is exactly this commit's package, so a release that stopped halfway is finished by running it
+      # again. A crate already on crates.io publishes with Trusted Publishing, which each one
+      # requires; only a crate not there yet takes the first-publish token.
+      - name: Publish the binding, the library, then the command line
         env:
           VERSION: ${{ inputs.version }}
-          CARGO_REGISTRY_TOKEN: ${{ steps.trusted.outputs.token || secrets.CRATES_IO_FIRST_PUBLISH }}
+          TRUSTED_TOKEN: ${{ steps.trusted.outputs.token }}
+          FIRST_TOKEN: ${{ secrets.CRATES_IO_FIRST_PUBLISH }}
         run: |
           set -euo pipefail
-          for crate in qso-graph-trust-awslc qso-graph-trust; do
+          for crate in $CRATES; do
             state=$(python3 -I scripts/release_check.py crate "$crate" "$VERSION" "target/package/${crate}-${VERSION}.crate")
             if [ "$state" = same ]; then echo "crates.io already has ${crate} ${VERSION}, exactly this package."; continue; fi
-            cargo publish -p "$crate" --locked
+            if [ "$(python3 -I scripts/release_check.py exists "$crate")" = yes ]; then
+              [ -n "$TRUSTED_TOKEN" ] || { echo "::error::${crate} is on crates.io, and Trusted Publishing gave no token."; exit 1; }
+              CARGO_REGISTRY_TOKEN="$TRUSTED_TOKEN" cargo publish -p "$crate" --locked
+            else
+              [ -n "$FIRST_TOKEN" ] || { echo "::error::${crate} is new to crates.io: its first publish needs CRATES_IO_FIRST_PUBLISH in the crates-io Environment."; exit 1; }
+              CARGO_REGISTRY_TOKEN="$FIRST_TOKEN" cargo publish -p "$crate" --locked
+            fi
           done
       - name: Tag the published commit
         env:

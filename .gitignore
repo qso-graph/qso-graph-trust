@@ -1,2 +1,4 @@
 # Cargo's output directory, at the root only: a source module may be called target.
 /target
+# Python's bytecode cache, written when the release checks' tests import the script.
+__pycache__/
