@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 [package]
 name = "qso-graph-trust"
-description = "Sign logs for ARRL's Logbook of The World (LoTW), byte for byte as TQSL signs them, from a TQSL backup"
+description = "Sign ADIF logs for ARRL's Logbook of The World (LoTW)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
