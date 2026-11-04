@@ -60,6 +60,28 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked
       - name: cargo test
         run: cargo test --workspace --all-features --locked
+      # The OS credential store itself, under the test service only: what keyring writes must be
+      # what presence and listing find. Linux gets a Secret Service of its own (gnome-keyring,
+      # unlocked with a throwaway password); macOS and Windows use the runner's own store.
+      - name: Secret Service (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gnome-keyring dbus-x11
+      - name: OS credential store round trip
+        shell: bash
+        env:
+          QGT_OS_KEYSTORE_TEST: '1'
+        run: |
+          test='store::tests::os::os_round_trip_uses_only_test_service_and_reports_lost_and_orphaned_keys'
+          run="cargo test -p qso-graph-trust --lib --all-features --locked $test -- --ignored --exact"
+          if [ "$RUNNER_OS" = Linux ]; then
+            dbus-run-session -- bash -c "echo -n ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null; $run" | tee "$RUNNER_TEMP/os.log"
+          else
+            $run | tee "$RUNNER_TEMP/os.log"
+          fi
+          # A filter that matched nothing would pass with 0 tests: the one test must have run.
+          grep -q 'test result: ok. 1 passed' "$RUNNER_TEMP/os.log"
       # In this job's own environment: a crate using unsafe code must be refused.
       - name: canary
         run: cargo xtask canary
