@@ -1,12 +1,36 @@
 # QSO Graph Trust
 
-QSO Graph Trust signs your ADIF logs with your LoTW certificate, so ARRL's
-[Logbook of The World](https://lotw.arrl.org) (LoTW) accepts them. It is QSO Graph's LoTW signing: a
-library, the `qg-trust` command line, and, to come, part of
-[QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop).
+QSO Graph Trust is the part of QSO Graph that signs your logs for ARRL's
+[Logbook of The World](https://lotw.arrl.org) (LoTW).
 
-> **This is a beta.** Still to come: keeping your key in your computer's own credential store,
-> uploading straight to LoTW, and requesting certificates.
+## Who it's for
+
+- **Hams** using [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop), who want to sign
+  and upload their QSOs to LoTW without leaving it.
+- **Authors of loggers and tools**, who want LoTW signing inside their own program, through the
+  library or the `qg-trust` command line.
+
+## What it does
+
+It takes your ADIF log and your LoTW callsign certificate, signs each QSO the way LoTW requires, and
+writes the `.tq8` file LoTW accepts. Uploading it, and looking after your certificates, come next.
+
+## How it's different
+
+- **Your key lives in your computer's own credential store**: the macOS Keychain, Windows Credential
+  Manager, or the Linux Secret Service. It is never a file on disk, and it leaves the store only to
+  sign. *(To come.)*
+- **It's a library first**, so LoTW signing can be part of the program you already use: QSO Graph
+  Desktop, another logger, a script, or a Python, .NET or Node program *(those bindings to come)*,
+  rather than a separate application to switch to.
+- **It's built for safety from the ground up**: memory-safe Rust, the key never printed or logged,
+  every block of memory wiped when it is freed, a certificate trusted only if it comes from LoTW's own
+  certificate authority, and every behaviour proved by tests. More, and how to report a security
+  problem: [SECURITY.md](SECURITY.md).
+- **It fits into QSO Graph Desktop**, so your certificates, station locations, signing and upload sit
+  beside the rest of your station. *(To come.)*
+
+> **This is a beta.** Signing works today, from the command line and the library.
 
 ## Sign a log
 
@@ -30,22 +54,12 @@ library, the `qg-trust` command line, and, to come, part of
 
 To sign only some dates, add `-b 2026-01-01` and `-e 2026-06-30`. `qg-trust --help` lists everything,
 and the [command line's page](crates/qso-graph-trust-cli/README.md) has every option and exit code.
-Loggers that run `tqsl` will find the same option letters, exit codes and final status line.
-
-## Your key stays yours
-
-- Your key is only ever used to sign. It is never printed, logged or sent anywhere.
-- A password is never typed on the command line, and the program wipes the memory it frees, so no
-  key or password is left behind in it.
-- A certificate is trusted only if it comes from LoTW's own certificate authority.
-
-More, and how to report a security problem: [SECURITY.md](SECURITY.md).
 
 ## For developers
 
-The signing is a Rust library, [`qso-graph-trust`](https://crates.io/crates/qso-graph-trust), for your
-own programs; its [page](crates/qso-graph-trust/README.md) has an example. To work on QSO Graph Trust
-itself: [CONTRIBUTING.md](CONTRIBUTING.md). What it does and plans, feature by feature:
+The library is [`qso-graph-trust`](https://crates.io/crates/qso-graph-trust); its
+[page](crates/qso-graph-trust/README.md) has an example. To work on QSO Graph Trust itself:
+[CONTRIBUTING.md](CONTRIBUTING.md). What it does and plans, feature by feature:
 [docs/FEATURE-PARITY.md](docs/FEATURE-PARITY.md).
 
 ## Credits
