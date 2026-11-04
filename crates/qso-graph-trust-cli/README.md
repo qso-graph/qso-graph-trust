@@ -8,8 +8,12 @@ Sign your ADIF logs with your LoTW certificate from the command line, so ARRL's
 cargo install qso-graph-trust-cli
 ```
 
-**This is a beta.** It signs your log with your LoTW certificate. Still to come: keeping keys in the
-operating system's credential store, uploading to LoTW, and the record of QSOs already signed.
+- **Works with your logger:** the same option letters, exit codes and final status line loggers
+  already use with the `tqsl` command line.
+- **Every QSO checked by ARRL's own rules** before it is signed; one LoTW would refuse is named, with
+  the reason, and the rest are signed.
+- **Your password stays private:** asked for with what you type hidden, never on the command line, and
+  wiped from memory with everything else the program frees.
 
 ## Signing a log
 
@@ -18,8 +22,8 @@ qg-trust -i tqslconfig.tbk -l "Home" log.adi
 ```
 
 writes `log.tq8`, which you upload on LoTW's website. If the key has a password, `qg-trust` asks for
-it at the terminal, with what you type hidden; with no terminal, as when a logger runs it, it reads
-one line from standard input. A password is never given on the command line.
+it at the terminal, with what you type hidden; when a logger runs it, it reads the password as one
+line from standard input.
 
 | Option | |
 |---|---|
@@ -31,8 +35,8 @@ one line from standard input. A password is never given on the command line.
 | `-x`, `-q`, `-d` | accepted and ignored; `qg-trust` always exits when done |
 | `-h`, `-v` | help, version |
 
-For loggers: the option letters, the exit codes and the last line written to standard error,
-`Final Status: <name>(<code>)`, are the ones the `tqsl` command line uses.
+For loggers, the last line written to standard error is `Final Status: <name>(<code>)`, with these
+codes:
 
 | Code | Meaning |
 |---|---|
@@ -44,12 +48,6 @@ For loggers: the option letters, the exit codes and the last line written to sta
 | 9 | Some QSOs not signed, each named with the reason; the rest are |
 | 10 | Command syntax: a missing or unknown option, an invalid date, a password given on the command line |
 | 15 | The password does not unlock the key: nothing is written |
-
-Other options (`-a`, `-c`, `-f`, `-n`, `-p`, `-s`, `-t`, `-u`, `-w`, `-z`) are refused with code 10,
-saying so. What `qg-trust` does and plans:
-[feature-parity list](https://github.com/qso-graph/qso-graph-trust/blob/main/docs/FEATURE-PARITY.md).
-
-The program wipes every block of memory it frees, so no key data or password is left there.
 
 GPL-3.0-only. QSO Graph Trust is not made, affiliated with or endorsed by ARRL; "Logbook of The World",
 "LoTW" and "TQSL" are ARRL's names, used here only to say what it works with. Credits, sources and the

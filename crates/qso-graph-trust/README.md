@@ -1,24 +1,21 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 # qso-graph-trust
 
-Sign ADIF logs with your LoTW certificate, so ARRL's [Logbook of The World](https://lotw.arrl.org)
-(LoTW) accepts them. This is QSO Graph Trust's library, for your own programs.
+LoTW signing for your own programs: sign ADIF logs with your LoTW certificate, so ARRL's
+[Logbook of The World](https://lotw.arrl.org) (LoTW) accepts them.
 
-QSO Graph Trust is the library behind the [`qg-trust`](https://crates.io/crates/qso-graph-trust-cli)
-command line and, still to come, LoTW signing in [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop),
-and it is for other people's programs too. Its parsers are safe Rust, and the library
-forbids `unsafe` code. LoTW's signature is AWS-LC's, through one small binding, `qso-graph-trust-awslc`,
-the only crate here with `unsafe` code; a password-protected key is unlocked with RustCrypto.
+- **Memory-safe Rust**, with signatures made by AWS-LC, Amazon's open-source cryptography library.
+- **Every QSO checked by ARRL's own rules** (bands, modes, DXCC entities, dates, satellites) before it
+  is signed; one LoTW would refuse is named, with the field and the reason.
+- **The key can only sign:** no function returns it, and it is never printed or logged.
 
-**This is a beta.** It signs your log with your LoTW certificate. Still to come: keeping keys in the operating system's credential
-store, uploading to LoTW, and requesting certificates. What it does and plans, feature by feature:
-[`docs/FEATURE-PARITY.md`](https://github.com/qso-graph/qso-graph-trust/blob/main/docs/FEATURE-PARITY.md).
+It is the library behind the [`qg-trust`](https://crates.io/crates/qso-graph-trust-cli) command line
+and QSO Graph Desktop's LoTW signing.
 
 ## Example
 
-This example signs an ADIF log with your LoTW certificate, read from the `.tbk` file TQSL saves, and
-writes the `.tq8`. It also uses two other crates, `zeroize` and
-`zeroizing-alloc` (`cargo add zeroize zeroizing-alloc@=0.1.1`):
+Sign an ADIF log with the certificate in a `.tbk` file, and write the `.tq8` LoTW accepts. The example
+also uses `zeroize` and `zeroizing-alloc` (`cargo add zeroize zeroizing-alloc@=0.1.1`):
 
 ```rust,no_run
 use std::time::SystemTime;

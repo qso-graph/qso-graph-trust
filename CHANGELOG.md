@@ -5,6 +5,18 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0-beta.4] - 2026-11-04
+
+Documentation only: the library and `qg-trust` sign exactly as beta.3 does.
+
+### Changed
+
+- The README says what QSO Graph Trust is, who it is for, what it does and how it is different.
+- The crates.io pages and `qg-trust --help` lead with what each does: memory-safe Rust with
+  signatures by AWS-LC, Amazon's open-source cryptography library; every QSO checked by ARRL's own
+  rules; the key can only sign; the password stays private; and the options, exit codes and final
+  status line loggers already use.
+
 ## [0.1.0-beta.3] - 2026-11-04
 
 ### Added

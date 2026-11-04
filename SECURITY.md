@@ -22,9 +22,10 @@ QGT is in beta. The latest release on crates.io, beta or not, is supported; a fi
   trace. Every QGT program wipes the memory it frees. The custody test, on Linux, signs with a key
   file, drops everything, and reads the program's whole memory: none of the key's numbers, its file or
   its password is left there. While a key signs it is in memory, as in every signer.
-- **The library's own code has no `unsafe`.** The one crate with `unsafe` code is the binding to
-  AWS-LC, `qso-graph-trust-awslc`, which makes LoTW's signature; AWS-LC is the only C in the library's
-  dependency tree (`cargo xtask policy`, decisions 0002 and 0006).
+- **Memory-safe Rust throughout.** Signatures are made by AWS-LC, Amazon's open-source cryptography
+  library, through one small crate, `qso-graph-trust-awslc`, whose every call into AWS-LC is checked
+  and documented. The policy tests prove nothing else in the library reaches outside Rust
+  (`cargo xtask policy`, decisions 0002 and 0006).
 - **A certificate is trusted only if it chains to LoTW's own root,** pinned in the
   library (`tbk::read` with `Trust::lotw()`), never to a root a file brings with it. A certificate
   a program reads itself with `Certificate::from_pem_or_der` is checked only when the program calls

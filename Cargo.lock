@@ -469,7 +469,7 @@ dependencies = [
 
 [[package]]
 name = "qso-graph-trust"
-version = "0.1.0-beta.3"
+version = "0.1.0-beta.4"
 dependencies = [
  "aes",
  "base64ct",
@@ -491,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "qso-graph-trust-awslc"
-version = "0.1.0-beta.3"
+version = "0.1.0-beta.4"
 dependencies = [
  "aws-lc-rs",
  "aws-lc-sys",
@@ -499,7 +499,7 @@ dependencies = [
 
 [[package]]
 name = "qso-graph-trust-cli"
-version = "0.1.0-beta.3"
+version = "0.1.0-beta.4"
 dependencies = [
  "qso-graph-trust",
  "rpassword",
@@ -509,7 +509,7 @@ dependencies = [
 
 [[package]]
 name = "qso-graph-trust-custody"
-version = "0.1.0-beta.3"
+version = "0.1.0-beta.4"
 dependencies = [
  "pkcs8",
  "qso-graph-trust",
@@ -887,7 +887,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0-beta.3"
+version = "0.1.0-beta.4"
 dependencies = [
  "proc-macro2",
  "serde_json",
