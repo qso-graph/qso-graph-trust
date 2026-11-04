@@ -76,6 +76,21 @@ removed (ARRL's [certificate security](https://lotw.arrl.org/lotw-help/certifica
   changes go in by pull request; branches are `feat-…`, `fix-…` or `docs-…`; match the code around you,
   and don't rename or reformat what your task doesn't need.
 
+## What an agent doesn't change unless its task names it
+
+- **`AUTHORS` lists people.** Never add a tool, a model or an agent to it, or to a copyright line.
+- **The READMEs are product pages:** the top-level one and each crate's, which crates.io shows. They say
+  what QG Trust is, who it is for and why it is better; they carry no design notes, caveats, test
+  counts or work in progress. That writing goes in `docs/decisions/`, `SECURITY.md` or this file.
+- **tqsllib and TQSL run only in the harness container**, started by `scripts/make-tqsl-corpus.sh`
+  (`podman run --network=none`). Never build or run them on the host, from a copy of the image's
+  files or any other way; a corpus made outside the container is not evidence.
+- **Nothing calls ARRL.** No test, tool or script connects to `lotw.arrl.org` or uploads anything.
+- **cargo-vet entries say why.** Prefer an audit the repo already imports; an exemption is at an exact
+  version. Adding a trusted publisher or an audit source is a decision: name it in your summary.
+- **A new decision takes the number your task gives it.** If the task gives none, use the next free
+  number and say so in your summary, because work on other branches may be using it.
+
 ## Build and check
 
 ```sh
