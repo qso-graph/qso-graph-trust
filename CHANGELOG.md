@@ -27,9 +27,6 @@ versions follow [Semantic Versioning](https://semver.org/).
   only for a crate new to crates.io, and refused once every crate exists.
 - This repository's crates are marked in cargo-vet as built from source, now that they are also
   on crates.io.
-- The `.tbk` reader's types say what they hold: `tbk::TbkFile`, `tbk::TbkCertificate`,
-  `tbk::TbkLocation` and `TbkError::NotATbkFile` (were `Backup`, `BackedUpCertificate`,
-  `BackedUpLocation` and `NotABackup`). Its messages and documentation call it the `.tbk` file.
 - The README is the product page, for the hams who use it: what it does, how to sign a log step by
   step, what is still to come, how the key is kept safe, credits and sources. Building and the plan
   move to `CONTRIBUTING.md`.
