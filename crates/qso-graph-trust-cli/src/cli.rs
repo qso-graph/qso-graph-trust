@@ -10,10 +10,14 @@
 //! TQSL writes to standard error and loggers read. `-i` differs: TQSL imports a file into its own
 //! store, and `qg-trust`, which has no store yet, reads the TQSL backup it names for this run.
 
+use std::fmt;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use anstyle::{AnsiColor, Style};
+use clap::{CommandFactory, Parser, error::ErrorKind};
+use clap_complete::Shell;
 use qso_graph_trust::certificate::Trust;
 use qso_graph_trust::qso::{Date, Qso};
 use qso_graph_trust::signed_log::{LogError, sign_log, tq8};
@@ -61,131 +65,253 @@ pub(crate) struct Env<'a> {
     pub now: SystemTime,
     /// Asks for a key's password, given the prompt.
     pub ask_password: &'a mut dyn FnMut(&str) -> io::Result<Zeroizing<Vec<u8>>>,
-    /// Standard output: help and the version.
+    /// Whether help, errors and messages use ANSI styling, decided by the caller.
+    pub color: bool,
+    /// Standard output: help, the version and shell completions.
     pub out: &'a mut dyn Write,
     /// Standard error: every message, and the final status line.
     pub err: &'a mut dyn Write,
 }
 
-const HELP: &str = "\
-qg-trust: QSO Graph Trust's command line. Signs your ADIF log with your LoTW certificate, for ARRL's
-Logbook of The World (LoTW).
-
-Usage: qg-trust -i CERTIFICATE.tbk -l LOCATION [-b DATE] [-e DATE] [-o OUTPUT.tq8] LOG.adi
-
-  -i, --import FILE      the file with your certificate (the .tbk TQSL saves)
-  -l, --location NAME    your station location, by name
-  -b, --begindate DATE   sign only QSOs on or after DATE (YYYY-MM-DD or YYYYMMDD)
-  -e, --enddate DATE     sign only QSOs on or before DATE
-  -o, --output FILE      where to write the signed log (default: LOG with .tq8)
-  -x, --batch            accepted for loggers that pass it; qg-trust always exits when done
-  -q, --quiet            the same as -x
-  -d, --nodate           accepted for loggers that pass it
-  -h, --help             this help
-  -v, --version          the version
-
+const AFTER_HELP: &str = "\
 The key's password is asked for when it is needed, with what you type hidden, or read as one line
 from standard input when a logger runs qg-trust. The last line on standard error is
 \"Final Status: <name>(<code>)\", as loggers expect.";
 
-/// The parsed command line.
-#[derive(Debug, Default)]
+/// The option names and letters stay in step with TQSL so loggers can call either program.
+#[derive(Debug, Parser)]
+#[command(
+    name = "qg-trust",
+    version = VERSION,
+    about = "Sign your ADIF log with your LoTW certificate for ARRL's Logbook of The World (LoTW).",
+    after_help = AFTER_HELP,
+    override_usage = "qg-trust -i <FILE> -l <NAME> [OPTIONS] <LOG.adi>\n       qg-trust --completions <SHELL>",
+    disable_version_flag = true,
+    disable_help_flag = true
+)]
 struct Options {
+    /// The file with your certificate (the .tbk TQSL saves).
+    #[arg(
+        short = 'i',
+        long = "import",
+        value_name = "FILE",
+        help_heading = "Signing",
+        required_unless_present = "completions"
+    )]
     backup: Option<PathBuf>,
+    /// Your station location, by name.
+    #[arg(
+        short = 'l',
+        long,
+        value_name = "NAME",
+        value_parser = clap::builder::NonEmptyStringValueParser::new(),
+        help_heading = "Signing",
+        required_unless_present = "completions"
+    )]
     location: Option<String>,
+    /// Sign only QSOs on or after DATE (YYYY-MM-DD or YYYYMMDD).
+    #[arg(short = 'b', long = "begindate", value_name = "DATE", help_heading = "Signing",
+          value_parser = |s: &str| date(s, "start"))]
     begin: Option<Date>,
+    /// Sign only QSOs on or before DATE (YYYY-MM-DD or YYYYMMDD).
+    #[arg(short = 'e', long = "enddate", value_name = "DATE", help_heading = "Signing",
+          value_parser = |s: &str| date(s, "end"))]
     end: Option<Date>,
+    /// Where to write the signed log (default: LOG with .tq8).
+    #[arg(short = 'o', long, value_name = "FILE", help_heading = "Signing")]
     output: Option<PathBuf>,
+    /// The ADIF log to sign.
+    #[arg(value_name = "LOG.adi", required_unless_present = "completions")]
     input: Option<PathBuf>,
-}
-
-enum Command {
-    Help,
-    Version,
-    Sign(Options),
+    /// qg-trust always exits when done.
+    #[arg(
+        short = 'x',
+        long,
+        help_heading = "Accepted for loggers that pass them"
+    )]
+    batch: bool,
+    /// The same as --batch.
+    #[arg(
+        short = 'q',
+        long,
+        help_heading = "Accepted for loggers that pass them"
+    )]
+    quiet: bool,
+    /// Accepted and ignored.
+    #[arg(
+        short = 'd',
+        long,
+        help_heading = "Accepted for loggers that pass them"
+    )]
+    nodate: bool,
+    /// Print the version.
+    #[arg(short = 'v', long, action = clap::ArgAction::Version, help_heading = "Other")]
+    version: Option<bool>,
+    /// Write a shell completion script for qg-trust.
+    #[arg(long, value_name = "SHELL", help_heading = "Other")]
+    completions: Option<Shell>,
+    /// Print this help.
+    #[arg(short = 'h', long, action = clap::ArgAction::Help, help_heading = "Other")]
+    help: Option<bool>,
 }
 
 /// Runs `qg-trust` with these arguments and returns its exit code.
 pub(crate) fn run(args: &[String], env: &mut Env<'_>) -> u8 {
-    let code = match parse(args) {
-        Ok(Command::Help) => {
-            let _ = writeln!(env.out, "{HELP}");
-            return 0;
-        }
-        Ok(Command::Version) => {
-            let _ = writeln!(env.out, "qg-trust {VERSION}");
-            return 0;
-        }
-        Ok(Command::Sign(options)) => sign(&options, env),
-        Err(message) => {
-            let _ = writeln!(
-                env.err,
-                "qg-trust: {message}; qg-trust --help says how it is used"
-            );
-            Exit::CommandError
+    let code = if let Some(message) = refused_option(args) {
+        syntax_error(env, &message)
+    } else {
+        match Options::try_parse_from(
+            std::iter::once("qg-trust").chain(args.iter().map(String::as_str)),
+        ) {
+            Ok(options) => {
+                if let Some(shell) = options.completions {
+                    // Completion scripts are source code, so they never receive styling.
+                    // Written whole from a buffer: clap_complete panics on a failed write, and a
+                    // reader that stops early (`| head`) is not a failure of qg-trust's.
+                    let mut script = Vec::new();
+                    clap_complete::generate(
+                        shell,
+                        &mut Options::command(),
+                        "qg-trust",
+                        &mut script,
+                    );
+                    let _ = env.out.write_all(&script);
+                    return 0;
+                }
+                if let (Some(begin), Some(end)) = (options.begin, options.end)
+                    && begin > end
+                {
+                    syntax_error(env, "the start date is after the end date")
+                } else {
+                    sign(&options, env)
+                }
+            }
+            Err(error) => {
+                let display = matches!(
+                    error.kind(),
+                    ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+                );
+                let writer = if display { &mut env.out } else { &mut env.err };
+                let rendered = error.render();
+                if env.color {
+                    let _ = write!(writer, "{}", rendered.ansi());
+                } else {
+                    let _ = write!(writer, "{rendered}");
+                }
+                if display {
+                    return 0;
+                }
+                Exit::CommandError
+            }
         }
     };
     let _ = writeln!(env.err, "Final Status: {}({})", code.name(), code as u8);
     code as u8
 }
 
-fn parse(args: &[String]) -> Result<Command, String> {
-    let mut options = Options::default();
+fn syntax_error(env: &mut Env<'_>, message: &str) -> Exit {
+    env.message(
+        Tone::Error,
+        format_args!("{message}; qg-trust --help says how it is used"),
+    );
+    Exit::CommandError
+}
+
+/// Refuse unsupported TQSL options before clap can include a password in a diagnostic. Values
+/// belong to the option before them, and `--` makes the remaining words file names.
+fn refused_option(args: &[String]) -> Option<String> {
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
-        let (flag, inline) = match arg.split_once('=') {
-            Some((f, v)) if f.starts_with("--") => (f, Some(v.to_string())),
-            _ => (arg.as_str(), None),
-        };
-        let mut value = |name: &str| -> Result<String, String> {
-            match inline.clone().or_else(|| rest.next().cloned()) {
-                Some(v) if !v.is_empty() => Ok(v),
-                _ => Err(format!("{name} needs a value")),
+        if arg == "--" {
+            break;
+        }
+        if arg.starts_with("--") {
+            let (flag, inline) = arg
+                .split_once('=')
+                .map_or((arg.as_str(), false), |(f, _)| (f, true));
+            if let Some(message) = refusal(flag) {
+                return Some(message);
             }
-        };
-        match flag {
-            "-h" | "--help" => return Ok(Command::Help),
-            "-v" | "--version" => return Ok(Command::Version),
-            "-i" | "--import" => options.backup = Some(PathBuf::from(value("-i")?)),
-            "-l" | "--location" => options.location = Some(value("-l")?),
-            "-b" | "--begindate" => options.begin = Some(date(&value("-b")?, "start")?),
-            "-e" | "--enddate" => options.end = Some(date(&value("-e")?, "end")?),
-            "-o" | "--output" => options.output = Some(PathBuf::from(value("-o")?)),
-            "-x" | "--batch" | "-q" | "--quiet" | "-d" | "--nodate" => {}
-            "-p" | "--password" => {
-                return Err(
-                    "a password is never given on the command line: qg-trust asks for \
-                            the key's password when it needs it"
-                        .to_string(),
-                );
+            if !inline
+                && matches!(
+                    flag,
+                    "--import"
+                        | "--location"
+                        | "--begindate"
+                        | "--enddate"
+                        | "--output"
+                        | "--completions"
+                )
+                && rest
+                    .clone()
+                    .next()
+                    .is_some_and(|value| !value.starts_with('-'))
+            {
+                // A following option is not a value in clap; it must still be checked.
+                rest.next();
             }
-            "-a" | "--action" | "-c" | "--callsign" | "-f" | "--verify" | "-n" | "--updates"
-            | "-s" | "--editlocation" | "-t" | "--diagnose" | "-u" | "--upload" | "-w"
-            | "--wipe" | "-z" | "--test-sign" => {
-                return Err(format!("{flag} is not supported yet"));
+        } else if let Some(shorts) = arg.strip_prefix('-') {
+            for (index, short) in shorts.char_indices() {
+                let flag = format!("-{short}");
+                if let Some(message) = refusal(&flag) {
+                    return Some(message);
+                }
+                if matches!(short, 'i' | 'l' | 'b' | 'e' | 'o') {
+                    if index + short.len_utf8() == shorts.len()
+                        && rest
+                            .clone()
+                            .next()
+                            .is_some_and(|value| !value.starts_with('-'))
+                    {
+                        rest.next();
+                    }
+                    break;
+                }
             }
-            _ if flag.starts_with('-') && flag.len() > 1 => {
-                return Err(format!("{flag} is not an option qg-trust knows"));
-            }
-            _ if options.input.is_some() => return Err("give one log to sign".to_string()),
-            _ => options.input = Some(PathBuf::from(arg)),
         }
     }
-    if options.input.is_none() {
-        return Err("give the log to sign".to_string());
+    None
+}
+
+fn refusal(flag: &str) -> Option<String> {
+    match flag {
+        "-p" | "--password" => Some(
+            "a password is never given on the command line: qg-trust asks for \
+             the key's password when it needs it"
+                .to_string(),
+        ),
+        "-a" | "--action" | "-c" | "--callsign" | "-f" | "--verify" | "-n" | "--updates" | "-s"
+        | "--editlocation" | "-t" | "--diagnose" | "-u" | "--upload" | "-w" | "--wipe" | "-z"
+        | "--test-sign" => Some(format!("{flag} is not supported yet")),
+        _ => None,
     }
-    if options.backup.is_none() {
-        return Err("-i names the file with your certificate".to_string());
+}
+
+#[derive(Clone, Copy)]
+enum Tone {
+    Error,
+    Warning,
+    Success,
+}
+
+impl Env<'_> {
+    /// Keep the words identical for loggers, and reset styling before the final status line.
+    fn message(&mut self, tone: Tone, message: fmt::Arguments<'_>) {
+        if !self.color {
+            let _ = writeln!(self.err, "qg-trust: {message}");
+            return;
+        }
+        let program = Style::new().bold();
+        let style = match tone {
+            Tone::Error => AnsiColor::Red.on_default(),
+            Tone::Warning => AnsiColor::Yellow.on_default(),
+            Tone::Success => AnsiColor::Green.on_default(),
+        };
+        let _ = writeln!(
+            self.err,
+            "{program}qg-trust:{program:#} {style}{message}{style:#}"
+        );
     }
-    if options.location.is_none() {
-        return Err("-l names the station location to sign for".to_string());
-    }
-    if let (Some(b), Some(e)) = (options.begin, options.end)
-        && b > e
-    {
-        return Err("the start date is after the end date".to_string());
-    }
-    Ok(Command::Sign(options))
 }
 
 /// A date as TQSL takes one on its command line: YYYY-MM-DD or YYYYMMDD.
@@ -205,25 +331,27 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
         Ok(bytes) => match tbk::read(&bytes, env.trust) {
             Ok(backup) => backup,
             Err(e) => {
-                let _ = writeln!(env.err, "qg-trust: {}: {e}", backup_path.display());
+                env.message(Tone::Error, format_args!("{}: {e}", backup_path.display()));
                 return Exit::InputError;
             }
         },
         Err(e) => {
-            let _ = writeln!(env.err, "qg-trust: {}: {e}", backup_path.display());
+            env.message(Tone::Error, format_args!("{}: {e}", backup_path.display()));
             return Exit::InputError;
         }
     };
     let Some(location) = backup.locations.iter().find(|l| l.name == *name) else {
         let names: Vec<&str> = backup.locations.iter().map(|l| l.name.as_str()).collect();
-        let _ = writeln!(
-            env.err,
-            "qg-trust: there is no station location named {name:?}; there are: {}",
-            if names.is_empty() {
-                "none".to_string()
-            } else {
-                names.join(", ")
-            }
+        env.message(
+            Tone::Error,
+            format_args!(
+                "there is no station location named {name:?}; there are: {}",
+                if names.is_empty() {
+                    "none".to_string()
+                } else {
+                    names.join(", ")
+                }
+            ),
         );
         return Exit::CommandError;
     };
@@ -235,11 +363,13 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
         station.dxcc(),
         env.now,
     ) else {
-        let _ = writeln!(
-            env.err,
-            "qg-trust: there is no certificate for {} (DXCC {}) in force now, with its key",
-            station.call(),
-            station.dxcc()
+        env.message(
+            Tone::Error,
+            format_args!(
+                "there is no certificate for {} (DXCC {}) in force now, with its key",
+                station.call(),
+                station.dxcc()
+            ),
         );
         return Exit::TqslError;
     };
@@ -251,7 +381,10 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
         let password = match (env.ask_password)(&prompt) {
             Ok(p) => p,
             Err(e) => {
-                let _ = writeln!(env.err, "qg-trust: the password could not be read: {e}");
+                env.message(
+                    Tone::Error,
+                    format_args!("the password could not be read: {e}"),
+                );
                 return Exit::BadPassphrase;
             }
         };
@@ -262,15 +395,14 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
     let key = match key {
         Ok(key) => key,
         Err(KeyError::WrongPassword | KeyError::PasswordNeeded) => {
-            let _ = writeln!(
-                env.err,
-                "qg-trust: that password does not unlock {}'s key",
-                entry.callsign
+            env.message(
+                Tone::Error,
+                format_args!("that password does not unlock {}'s key", entry.callsign),
             );
             return Exit::BadPassphrase;
         }
         Err(e) => {
-            let _ = writeln!(env.err, "qg-trust: {}'s key: {e}", entry.callsign);
+            env.message(Tone::Error, format_args!("{}'s key: {e}", entry.callsign));
             return Exit::TqslError;
         }
     };
@@ -281,7 +413,7 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
     {
         Ok(records) => records,
         Err(e) => {
-            let _ = writeln!(env.err, "qg-trust: {}: {e}", input.display());
+            env.message(Tone::Error, format_args!("{}: {e}", input.display()));
             return Exit::InputError;
         }
     };
@@ -303,11 +435,9 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
                 qsos.push(qso);
             }
             Err(e) => {
-                let _ = writeln!(
-                    env.err,
-                    "qg-trust: {} QSO {}: not signed: {e}",
-                    input.display(),
-                    i + 1
+                env.message(
+                    Tone::Warning,
+                    format_args!("{} QSO {}: not signed: {e}", input.display(), i + 1),
                 );
                 refused += 1;
             }
@@ -324,18 +454,23 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
     // A QSO the certificate or station cannot sign is left out, said so, and the rest are signed.
     let signed = loop {
         if qsos.is_empty() {
-            let _ = writeln!(env.err, "qg-trust: {}: no QSOs to sign", input.display());
+            env.message(
+                Tone::Error,
+                format_args!("{}: no QSOs to sign", input.display()),
+            );
             return Exit::NoQsos;
         }
         match sign_log(certificate, &key, station, &qsos, env.now) {
             Ok(signed) => break signed,
             Err(LogError::QsoOutsideCertificate { index }) => {
-                let _ = writeln!(
-                    env.err,
-                    "qg-trust: {} QSO {}: not signed: outside the QSO dates {}'s certificate covers",
-                    input.display(),
-                    numbers[index],
-                    entry.callsign
+                env.message(
+                    Tone::Warning,
+                    format_args!(
+                        "{} QSO {}: not signed: outside the QSO dates {}'s certificate covers",
+                        input.display(),
+                        numbers[index],
+                        entry.callsign
+                    ),
                 );
                 numbers.remove(index);
                 qsos.remove(index);
@@ -346,19 +481,21 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
                 field,
                 value,
             }) => {
-                let _ = writeln!(
-                    env.err,
-                    "qg-trust: {} QSO {}: not signed: its {field} is {value:?}, not this station \
+                env.message(
+                    Tone::Warning,
+                    format_args!(
+                        "{} QSO {}: not signed: its {field} is {value:?}, not this station \
                      location's",
-                    input.display(),
-                    numbers[index]
+                        input.display(),
+                        numbers[index]
+                    ),
                 );
                 numbers.remove(index);
                 qsos.remove(index);
                 refused += 1;
             }
             Err(e) => {
-                let _ = writeln!(env.err, "qg-trust: {}: {e}", input.display());
+                env.message(Tone::Error, format_args!("{}: {e}", input.display()));
                 return Exit::TqslError;
             }
         }
@@ -369,15 +506,17 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
         .clone()
         .unwrap_or_else(|| input.with_extension("tq8"));
     if let Err(e) = write_whole(&output, &tq8(&signed)) {
-        let _ = writeln!(env.err, "qg-trust: {}: {e}", output.display());
+        env.message(Tone::Error, format_args!("{}: {e}", output.display()));
         return Exit::OutputError;
     }
-    let _ = writeln!(
-        env.err,
-        "qg-trust: signed {} QSO{} for {name} into {}",
-        qsos.len(),
-        if qsos.len() == 1 { "" } else { "s" },
-        output.display()
+    env.message(
+        Tone::Success,
+        format_args!(
+            "signed {} QSO{} for {name} into {}",
+            qsos.len(),
+            if qsos.len() == 1 { "" } else { "s" },
+            output.display()
+        ),
     );
     if refused > 0 || out_of_range > 0 {
         Exit::QsosSuppressed

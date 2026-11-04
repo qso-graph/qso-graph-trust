@@ -61,6 +61,16 @@ fn qg_trust(args: &[&str], password: Option<&[u8]>) -> Ran {
 }
 
 fn run_at(args: &[&str], password: Option<&[u8]>, trust: &Trust, now: SystemTime) -> Ran {
+    run_with_color(args, password, trust, now, false)
+}
+
+fn run_with_color(
+    args: &[&str],
+    password: Option<&[u8]>,
+    trust: &Trust,
+    now: SystemTime,
+    color: bool,
+) -> Ran {
     let mut prompts = Vec::new();
     let mut ask = |prompt: &str| -> io::Result<Zeroizing<Vec<u8>>> {
         prompts.push(prompt.to_string());
@@ -75,6 +85,7 @@ fn run_at(args: &[&str], password: Option<&[u8]>, trust: &Trust, now: SystemTime
         &mut Env {
             trust,
             now,
+            color,
             ask_password: &mut ask,
             out: &mut out,
             err: &mut err,
@@ -450,11 +461,217 @@ fn help_and_version_print_and_exit_zero() {
     );
     let ran = qg_trust(&["-h"], None);
     assert_eq!(ran.code, 0);
-    assert!(
-        ran.out
-            .contains("Usage: qg-trust -i CERTIFICATE.tbk -l LOCATION")
-    );
+    assert!(ran.out.contains("Usage: qg-trust"), "{}", ran.out);
+    assert!(ran.out.contains("--import <FILE>"), "{}", ran.out);
+    assert!(ran.out.contains("--location <NAME>"), "{}", ran.out);
     assert!(ran.err.is_empty());
+}
+
+#[test]
+fn clap_errors_keep_the_syntax_code_and_final_status() {
+    for args in [
+        vec!["--bogus"],
+        vec!["-i"],
+        vec!["--location="],
+        vec!["--import="],
+        vec!["--completions", "unknown-shell"],
+        vec!["-V"],
+    ] {
+        let ran = qg_trust(&args, None);
+        assert_eq!(ran.code, Exit::CommandError as u8, "{args:?}: {}", ran.err);
+        assert!(ran.err.starts_with("error:"), "{}", ran.err);
+        assert_eq!(final_status(&ran), "Final Status: Command Syntax Error(10)");
+        assert!(ran.out.is_empty());
+        assert!(ran.prompts.is_empty());
+    }
+}
+
+#[test]
+fn completions_name_the_program_and_never_use_color_or_a_status_line() {
+    let trust = Trust::lotw();
+    for color in [false, true] {
+        for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
+            let ran = run_with_color(
+                &["--completions", shell],
+                None,
+                &trust,
+                SystemTime::now(),
+                color,
+            );
+            assert_eq!(ran.code, 0, "{shell}: {}", ran.err);
+            assert!(ran.out.contains("qg-trust"), "{shell}: {}", ran.out);
+            assert!(!ran.out.contains("Final Status:"));
+            assert!(!ran.out.contains('\x1b'), "{shell}: {}", ran.out);
+            assert!(ran.err.is_empty(), "{shell}: {}", ran.err);
+            assert!(ran.prompts.is_empty());
+        }
+    }
+}
+
+#[test]
+fn help_version_and_parse_errors_follow_the_color_choice() {
+    let trust = Trust::lotw();
+    for color in [false, true] {
+        for flag in ["-h", "--help", "-v", "--version", "--bogus"] {
+            let ran = run_with_color(&[flag], None, &trust, SystemTime::now(), color);
+            if flag == "--bogus" {
+                assert_eq!(ran.code, Exit::CommandError as u8);
+                assert_eq!(ran.err.contains('\x1b'), color, "{}", ran.err);
+                assert_eq!(final_status(&ran), "Final Status: Command Syntax Error(10)");
+            } else {
+                assert_eq!(ran.code, 0);
+                assert!(ran.err.is_empty());
+                if matches!(flag, "-h" | "--help") {
+                    assert_eq!(ran.out.contains('\x1b'), color, "{}", ran.out);
+                    assert!(ran.out.contains("Signing:"));
+                    assert!(ran.out.contains("Accepted for loggers that pass them:"));
+                    assert!(ran.out.contains("--completions <SHELL>"));
+                    assert!(ran.out.contains("The key's password is asked for"));
+                }
+            }
+            if !color {
+                assert!(!ran.out.contains('\x1b') && !ran.err.contains('\x1b'));
+            }
+        }
+    }
+}
+
+#[test]
+fn signing_messages_follow_the_color_choice_and_leave_the_status_plain() {
+    let trust = Trust::with_roots(&[&read("pki/root.pem")]).expect("the test root");
+    let backup = tbk::read(&read("standard.tbk"), &trust).expect("the backup");
+    let now = backup
+        .certificates
+        .iter()
+        .find(|entry| entry.callsign == "W4W")
+        .expect("W4W")
+        .certificate
+        .as_ref()
+        .expect("W4W's")
+        .validity()
+        .0
+        + Duration::from_secs(3600);
+    let dir = scratch();
+    let mixed = dir.join("mixed.adi");
+    let mut log = read("adif/KN4YU-CLUB.adi");
+    log.extend_from_slice(
+        b"<CALL:5>M0EHA <QSO_DATE:8>20261103 <TIME_ON:4>0100 <BAND:4>99mm <MODE:2>CW <EOR>\n",
+    );
+    std::fs::write(&mixed, log).expect("write");
+    for color in [false, true] {
+        for (input, code, status) in [
+            (
+                set("adif/KN4YU-CLUB.adi"),
+                Exit::Success,
+                "Final Status: Success(0)",
+            ),
+            (
+                mixed.clone(),
+                Exit::QsosSuppressed,
+                "Final Status: Some QSOs not processed(9)",
+            ),
+        ] {
+            let output = dir.join("signed.tq8");
+            let ran = run_with_color(
+                &[
+                    "-i",
+                    path(&set("standard.tbk")),
+                    "-l",
+                    "KN4YU-CLUB",
+                    "-o",
+                    path(&output),
+                    "-x",
+                    "-q",
+                    "-d",
+                    path(&input),
+                ],
+                None,
+                &trust,
+                now,
+                color,
+            );
+            assert_eq!(ran.code, code as u8, "{}", ran.err);
+            assert_eq!(final_status(&ran), status);
+            let signed = ran
+                .err
+                .lines()
+                .find(|line| line.contains("signed 3 QSOs"))
+                .expect("signed");
+            assert_eq!(signed.contains("\x1b[32m"), color, "{signed}");
+            if code == Exit::QsosSuppressed {
+                let warning = ran
+                    .err
+                    .lines()
+                    .find(|line| line.contains("not signed:"))
+                    .expect("left out");
+                assert_eq!(warning.contains("\x1b[33m"), color, "{warning}");
+            }
+            assert!(!final_status(&ran).contains('\x1b'));
+            if !color {
+                assert!(!ran.out.contains('\x1b') && !ran.err.contains('\x1b'));
+            }
+        }
+    }
+}
+
+#[test]
+fn unsupported_tqsl_options_are_refused_on_sight() {
+    for flag in [
+        "-a",
+        "--action",
+        "-c",
+        "--callsign",
+        "-f",
+        "--verify",
+        "-n",
+        "--updates",
+        "-s",
+        "--editlocation",
+        "-t",
+        "--diagnose",
+        "-u",
+        "--upload",
+        "-w",
+        "--wipe",
+        "-z",
+        "--test-sign",
+    ] {
+        for args in [vec![flag], vec![flag, "unused-value"]] {
+            let ran = qg_trust(&args, None);
+            assert_eq!(ran.code, Exit::CommandError as u8);
+            assert_eq!(
+                ran.err,
+                format!(
+                    "qg-trust: {flag} is not supported yet; qg-trust --help says how it is used\n\
+                 Final Status: Command Syntax Error(10)\n"
+                )
+            );
+            assert!(ran.prompts.is_empty());
+        }
+    }
+}
+
+#[test]
+fn password_options_are_never_echoed_even_beside_a_parse_error() {
+    for args in [
+        vec!["--password=hunter2"],
+        vec!["--password", "hunter2"],
+        vec!["-phunter2"],
+        vec!["-xqp", "hunter2"],
+        vec!["--bogus", "--password=hunter2"],
+        vec!["-i", "--password=hunter2"],
+    ] {
+        let ran = qg_trust(&args, None);
+        assert_eq!(ran.code, Exit::CommandError as u8);
+        assert_eq!(
+            ran.err,
+            "qg-trust: a password is never given on the command line: \
+            qg-trust asks for the key's password when it needs it; \
+            qg-trust --help says how it is used\nFinal Status: Command Syntax Error(10)\n"
+        );
+        assert!(!ran.out.contains("hunter2") && !ran.err.contains("hunter2"));
+        assert!(ran.prompts.is_empty());
+    }
 }
 
 fn strs(v: &[String]) -> Vec<&str> {

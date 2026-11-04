@@ -34,6 +34,14 @@ line from standard input.
 | `-o`, `--output FILE` | where to write the signed log (default: the log's name with `.tq8`) |
 | `-x`, `-q`, `-d` | accepted and ignored; `qg-trust` always exits when done |
 | `-h`, `-v` | help, version |
+| `--completions SHELL` | write shell completions (bash, zsh, fish, powershell, elvish) |
+
+For example, `qg-trust --completions bash > qg-trust.bash` writes a script you can source in bash.
+Help, version and completions exit successfully without a Final Status line. Completion scripts
+never contain color codes.
+
+Messages use color at a terminal. `NO_COLOR` or `CLICOLOR=0` disables it; `CLICOLOR_FORCE` enables
+color when output is redirected. The Final Status line is always plain text.
 
 For loggers, the last line written to standard error is `Final Status: <name>(<code>)`, with these
 codes:

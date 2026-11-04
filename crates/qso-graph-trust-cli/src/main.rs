@@ -26,13 +26,16 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let trust = Trust::lotw();
     let mut ask = ask_password;
-    let mut out = std::io::stdout().lock();
-    let mut err = std::io::stderr().lock();
+    let choice = anstream::AutoStream::choice(&std::io::stderr());
+    let color = choice != anstream::ColorChoice::Never;
+    let mut out = anstream::AutoStream::new(std::io::stdout().lock(), choice);
+    let mut err = anstream::AutoStream::new(std::io::stderr().lock(), choice);
     let code = cli::run(
         &args,
         &mut cli::Env {
             trust: &trust,
             now: SystemTime::now(),
+            color,
             ask_password: &mut ask,
             out: &mut out,
             err: &mut err,
