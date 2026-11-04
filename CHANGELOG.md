@@ -5,6 +5,12 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Library-side encrypted LoTW store exports: a generated 20-character password, AES-256-GCM and
+  PBKDF2-HMAC-SHA-256 at 600,000 iterations. Restore authenticates and checks every certificate, key
+  and station location before replacing the store; private key bytes stay inside the library.
+
 ## [0.1.0-beta.4] - 2026-11-04
 
 Documentation only: the library and `qg-trust` sign exactly as beta.3 does.
