@@ -9,8 +9,9 @@ its `qg-trust` command line and other people's programs. Its parsers are safe Ru
 forbids `unsafe` code. LoTW's signature is AWS-LC's, through one small binding, `qso-graph-trust-awslc`,
 the only crate here with `unsafe` code; a password-protected key is unlocked with RustCrypto.
 
-**This is a beta.** It signs from a TQSL backup (`.tbk`) and the key's password. Keeping keys in the
-operating system's credential store, uploading to LoTW and requesting certificates are still to come.
+**This is a beta.** For now it reads your certificate and key from a TQSL backup (`.tbk`), with the
+key's password. Still to come: keeping keys in the operating system's credential store, uploading to
+LoTW, and requesting certificates.
 
 ## Example
 
