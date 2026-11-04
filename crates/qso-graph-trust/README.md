@@ -17,8 +17,9 @@ TQSL: [`docs/FEATURE-PARITY.md`](https://github.com/qso-graph/qso-graph-trust/bl
 
 ## Example
 
-Read a TQSL backup, then sign an ADIF log for one of its station locations. Beside this crate, the
-example uses `zeroize` and `zeroizing-alloc` (`cargo add zeroize zeroizing-alloc@=0.1.1`):
+This example takes the certificate, the key and a station location from a TQSL backup, then signs an
+ADIF log with them and writes the `.tq8`. It also uses two other crates, `zeroize` and
+`zeroizing-alloc` (`cargo add zeroize zeroizing-alloc@=0.1.1`):
 
 ```rust,no_run
 use std::time::SystemTime;
