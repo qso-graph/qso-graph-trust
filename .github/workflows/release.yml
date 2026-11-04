@@ -12,6 +12,10 @@
 # token is stored. A crate's very first publish cannot use it, because Trusted Publishing is set up
 # on a crate that exists: for that one run the crates-io Environment holds CRATES_IO_FIRST_PUBLISH,
 # a token scoped to these two crates, removed once Trusted Publishing is set up.
+#
+# crates.io holds no signatures. What a download can be checked against: crates.io's index records
+# each version's SHA-256, Cargo refuses one that differs, and GitHub's attestation of the same files
+# says this workflow built them from this commit.
 name: Release
 
 on:
@@ -88,6 +92,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      attestations: write
     env:
       # Whether this is a crate's first publish, set by the Environment's secret; never the token itself.
       FIRST_PUBLISH: ${{ secrets.CRATES_IO_FIRST_PUBLISH != '' }}
@@ -104,6 +109,13 @@ jobs:
         uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
       - name: Package the binding and the library
         run: cargo package -p qso-graph-trust-awslc -p qso-graph-trust --locked
+      # GitHub's signed statement, through Sigstore, that these exact .crate files were built by this
+      # workflow from this commit. crates.io serves the same bytes, so anyone can check a download:
+      #   gh attestation verify qso-graph-trust-<version>.crate -R qso-graph/qso-graph-trust
+      - name: Attest the packages
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: target/package/*.crate
       # One at a time, the binding first. A crate crates.io already has at this version is accepted
       # only if it is exactly this commit's package, so a release that stopped halfway is finished
       # by running it again.

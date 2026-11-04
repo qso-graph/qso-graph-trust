@@ -59,6 +59,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 The `.tq8` is what LoTW accepts: upload it on LoTW's website.
 
+## Checking a download
+
+Each release is published by this repository's release workflow, which GitHub attests: a signed
+statement that the `.crate` file was built by that workflow from that commit. With the GitHub CLI:
+
+```sh
+gh attestation verify qso-graph-trust-0.1.0-beta.1.crate -R qso-graph/qso-graph-trust
+```
+
 ## Credits
 
 QSO Graph Trust stands on other people's work.
