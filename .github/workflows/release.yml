@@ -61,8 +61,7 @@ jobs:
           python3 scripts/package-files.py --check
           sha=$(git rev-parse HEAD)
           # A tag already there must be on this commit: a release half done is finished, never moved.
-          tagged=$(git ls-remote "https://github.com/${REPO}.git" "refs/tags/v${VERSION}" | cut -f1)
-          [ -z "$tagged" ] || [ "$tagged" = "$sha" ] || fail "v${VERSION} is already tagged, on ${tagged}, not ${sha}."
+          python3 scripts/release_check.py tag "$REPO" "$VERSION" "$sha" >/dev/null
           # A merge runs no CI, so main's commit has none of its own: what proves it is a green pull
           # request run of this repository's CI whose own commit holds exactly main's files.
           proved=$(python3 scripts/release_check.py proving-run "$REPO" "$(git rev-parse 'HEAD^{tree}')")
@@ -117,9 +116,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [ -n "$(git ls-remote "https://github.com/${REPO}.git" "refs/tags/v${VERSION}")" ]; then
-            echo "v${VERSION} is already tagged on ${SHA}."
-          else
+          # Asked again here, not trusted from the check job: a tag made meanwhile, anywhere but this
+          # commit, fails the release rather than being reported as this one.
+          if [ "$(python3 scripts/release_check.py tag "$REPO" "$VERSION" "$SHA")" = absent ]; then
             gh api "repos/${REPO}/git/refs" -f "ref=refs/tags/v${VERSION}" -f "sha=${SHA}" >/dev/null
           fi
+          [ "$(python3 scripts/release_check.py tag "$REPO" "$VERSION" "$SHA")" = same ]
           echo "Published ${VERSION} on crates.io and tagged v${VERSION} at ${SHA}."

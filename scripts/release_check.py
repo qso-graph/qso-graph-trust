@@ -11,6 +11,8 @@ test (scripts/test_release_check.py) with the cases it must refuse.
     release_check.py crate CRATE VERSION FILE   whether crates.io has CRATE VERSION: prints absent, or
                                                 same if it is exactly FILE (a .crate cargo packaged),
                                                 and fails if it holds anything else
+    release_check.py tag REPO VERSION SHA       whether vVERSION is tagged: prints absent, or same if
+                                                the tag is on SHA, and fails if it is anywhere else
 
 A developer and CI tool only, never shipped; standard library and gh only.
 """
@@ -64,6 +66,28 @@ def published(crate, version, local_sha256, checksum_of):
     )
 
 
+def tag_state(refs, version, sha):
+    """Where vVERSION points, from `git ls-remote` output: "absent", or "same" if on SHA. A tag on
+    any other commit is refused: a release is finished where it started, never moved. An annotated
+    tag is judged by the commit it peels to."""
+    name = f"refs/tags/v{version}"
+    target = None
+    for line in refs.splitlines():
+        if "\t" not in line:
+            continue
+        object_id, ref = line.split("\t", 1)
+        if ref == name + "^{}":
+            target = object_id
+            break
+        if ref == name:
+            target = object_id
+    if target is None:
+        return "absent"
+    if target == sha:
+        return "same"
+    raise SystemExit(f"v{version} is tagged on {target}, not {sha}")
+
+
 def _gh(*args):
     return subprocess.run(["gh", *args], check=True, capture_output=True, text=True).stdout
 
@@ -105,6 +129,14 @@ def main(argv):
         with open(path, "rb") as f:
             local = hashlib.sha256(f.read()).hexdigest()
         print(published(crate, version, local, _checksum_of))
+        return
+    if len(argv) == 4 and argv[0] == "tag":
+        repo, version, sha = argv[1:]
+        refs = subprocess.run(
+            ["git", "ls-remote", f"https://github.com/{repo}.git", f"refs/tags/v{version}", f"refs/tags/v{version}^{{}}"],
+            check=True, capture_output=True, text=True,
+        ).stdout
+        print(tag_state(refs, version, sha))
         return
     sys.exit(__doc__)
 

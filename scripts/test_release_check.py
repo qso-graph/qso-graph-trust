@@ -76,5 +76,25 @@ class Published(unittest.TestCase):
             rc.published("c", "0.1.0", "aa", lambda c, v: "bb")
 
 
+
+class Tag(unittest.TestCase):
+    def test_absent(self):
+        self.assertEqual(rc.tag_state("", "0.1.0", "abc"), "absent")
+        self.assertEqual(rc.tag_state("abc\trefs/tags/v0.1.0-beta.1\n", "0.1.0", "abc"), "absent")
+
+    def test_on_this_commit(self):
+        self.assertEqual(rc.tag_state("abc\trefs/tags/v0.1.0\n", "0.1.0", "abc"), "same")
+
+    def test_annotated_on_this_commit(self):
+        refs = "tagobj\trefs/tags/v0.1.0\nabc\trefs/tags/v0.1.0^{}\n"
+        self.assertEqual(rc.tag_state(refs, "0.1.0", "abc"), "same")
+
+    def test_on_another_commit(self):
+        with self.assertRaises(SystemExit):
+            rc.tag_state("def\trefs/tags/v0.1.0\n", "0.1.0", "abc")
+        with self.assertRaises(SystemExit):
+            rc.tag_state("abc\trefs/tags/v0.1.0\ndef\trefs/tags/v0.1.0^{}\n", "0.1.0", "abc")
+
+
 if __name__ == "__main__":
     unittest.main()

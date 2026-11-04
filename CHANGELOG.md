@@ -19,8 +19,10 @@ versions follow [Semantic Versioning](https://semver.org/).
   `.github/workflows/release.yml` publishes them from main with Trusted Publishing, then tags the
   commit; a run that stopped halfway finishes when run again. Its decisions are
   `scripts/release_check.py`'s, each tested with the cases it must refuse.
-- Credits: TrustedQSL's contributors, as its `AUTHORS.txt` lists them, in the README, the library's
-  README and `NOTICE`, with what QG Trust carries of TQSL's and under which terms.
+- Credits and Sources, in the README and the library's README: TrustedQSL's contributors, as its
+  `AUTHORS.txt` lists them, ARRL, and rfrht's qso-web; and what QG Trust was built from, ARRL's LoTW
+  developer documentation, TrustedQSL's source and API documentation, other projects and the
+  standards, with what it carries of TQSL's and under which terms (also in `NOTICE`).
 - The repository: the library (`qso-graph-trust`) and command line (`qso-graph-trust-cli`, the `qg-trust` command) crates, CI on Windows, macOS
   and Linux, and the policy checks that fail the build on C in the library or unsafe code, each proved
   by a planted case (qso-graph-desktop#170).
