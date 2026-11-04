@@ -6,8 +6,6 @@
 //! input, bag count, nesting, salts, iterations and total derivation work are bounded separately.
 //! Every owned password, plaintext and derived-key buffer is wiped on success and error paths.
 
-use pkcs8::der::Decode;
-use pkcs8::pkcs5::{EncryptionScheme, pbes2};
 use qso_graph_trust_awslc::{ImportDigest, import_digest, import_hmac_verify};
 use zeroize::Zeroizing;
 
@@ -15,6 +13,7 @@ use crate::certificate::{Certificate, MAX_CERTIFICATE_LEN, Trust};
 use crate::import::{
     self, ImportError, MAX_IMPORT_ITEMS, MAX_IMPORT_LEN, MAX_ITERATIONS, MAX_PASSWORD_LEN,
 };
+use crate::protected_key::Parameters;
 use crate::signing;
 use crate::store::MAX_KEY_LEN;
 
@@ -234,21 +233,14 @@ fn decrypt(
     let oid = alg.value(6)?;
     match oid {
         PBES2 => {
-            let params = pbes2::Parameters::from_der(alg.0)
-                .map_err(|_| ImportError::UnsupportedProtection)?;
-            let scheme = EncryptionScheme::Pbes2(params);
-            let EncryptionScheme::Pbes2(params) = &scheme else {
-                unreachable!()
-            };
-            let pbes2::Kdf::Pbkdf2(kdf) = &params.kdf else {
-                return Err(ImportError::UnsupportedProtection);
-            };
-            salt(kdf.salt)?;
-            work(kdf.iteration_count, 2, budget)?;
-            if !signing::accepted(&scheme) {
+            let params =
+                Parameters::from_der(alg.0).map_err(|_| ImportError::UnsupportedProtection)?;
+            salt(params.salt)?;
+            work(params.iteration_count, 2, budget)?;
+            if !params.accepted() {
                 return Err(ImportError::UnsupportedProtection);
             }
-            signing::decrypt(params, password, ciphertext).map_err(ImportError::Key)
+            signing::decrypt(&params, password, ciphertext).map_err(ImportError::Key)
         }
         PBE_3DES => {
             let mut params = sequence(alg.0)?;

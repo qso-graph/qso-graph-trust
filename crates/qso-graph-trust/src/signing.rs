@@ -16,12 +16,11 @@
 use std::fmt;
 
 use base64ct::{Base64, Encoding};
-use pkcs8::pkcs5::EncryptionScheme;
-use pkcs8::pkcs5::pbes2::{self, Kdf, Pbkdf2Prf};
-use pkcs8::{EncryptedPrivateKeyInfo, der::Decode};
+use pkcs8::der::Decode;
 use qso_graph_trust_awslc::RsaKey;
 use zeroize::Zeroizing;
 
+use crate::protected_key::{Envelope, Parameters};
 use crate::records::{self, Record, RecordError};
 
 /// One key from a tqsllib key file, still locked: its call and public key, and the private key as
@@ -115,77 +114,30 @@ const ENCRYPTED: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----";
 /// The largest key file read: one key file holds a key per certificate request, each a few KiB.
 pub const MAX_KEY_FILE_LEN: usize = 1024 * 1024;
 
-/// A protected key's PKCS#8 bytes: PBKDF2 then CBC decryption, done here rather than in pkcs5,
-/// whose derived key sits in a buffer it never wipes (found by Codex review). CBC runs through
-/// AWS-LC's safe API via the binding; the derived key, provider key schedule and plaintext are all
-/// wiped when dropped, on success or failure. `accepted` has already bounded the parameters.
+/// PBKDF2 and CBC through the binding's AWS-LC API. Parameters are bounded before any
+/// provider work; derived keys, provider key schedules and plaintext are wiped when dropped.
 pub(crate) fn decrypt(
-    params: &pbes2::Parameters<'_>,
+    params: &Parameters<'_>,
     password: &[u8],
     ciphertext: &[u8],
 ) -> Result<Zeroizing<Vec<u8>>, KeyError> {
-    use qso_graph_trust_awslc::{ImportCipher, import_cbc_decrypt};
-    let Kdf::Pbkdf2(kdf) = &params.kdf else {
-        return Err(KeyError::UnsupportedProtection);
-    };
-    let key_len = match params.encryption {
-        pbes2::EncryptionScheme::DesEde3Cbc { .. } => 24,
-        pbes2::EncryptionScheme::Aes128Cbc { .. } => 16,
-        pbes2::EncryptionScheme::Aes256Cbc { .. } => 32,
-        _ => return Err(KeyError::UnsupportedProtection),
-    };
-    if kdf.key_length.is_some_and(|l| usize::from(l) != key_len) {
+    if !params.accepted() {
         return Err(KeyError::UnsupportedProtection);
     }
-    let algorithm = match kdf.prf {
-        Pbkdf2Prf::HmacWithSha1 => qso_graph_trust_awslc::ImportDigest::Sha1,
-        Pbkdf2Prf::HmacWithSha256 => qso_graph_trust_awslc::ImportDigest::Sha256,
-        _ => return Err(KeyError::UnsupportedProtection),
-    };
     let key = qso_graph_trust_awslc::import_pbkdf2(
-        algorithm,
+        params.digest,
         password,
-        kdf.salt,
-        std::num::NonZeroU32::new(kdf.iteration_count).ok_or(KeyError::UnsupportedProtection)?,
-        key_len,
+        params.salt,
+        std::num::NonZeroU32::new(params.iteration_count).ok_or(KeyError::UnsupportedProtection)?,
+        params.key_len,
     );
-    let (cipher, iv): (_, &[u8]) = match params.encryption {
-        pbes2::EncryptionScheme::DesEde3Cbc { iv } => (ImportCipher::DesEde3, iv),
-        pbes2::EncryptionScheme::Aes128Cbc { iv } => (ImportCipher::Aes128, iv),
-        pbes2::EncryptionScheme::Aes256Cbc { iv } => (ImportCipher::Aes256, iv),
-        _ => return Err(KeyError::UnsupportedProtection),
-    };
-    import_cbc_decrypt(cipher, &key, iv, ciphertext).map_err(|_| KeyError::WrongPassword)
+    qso_graph_trust_awslc::import_cbc_decrypt(params.cipher, &key, params.iv, ciphertext)
+        .map_err(|_| KeyError::WrongPassword)
 }
 
 /// The most PBKDF2 iterations accepted. tqsllib 2.8.7 writes 2,048 (OpenSSL's default); a million
 /// takes well under a second, so a crafted file cannot make unlocking take unbounded time.
 pub const MAX_PBKDF2_ITERATIONS: u32 = 1_000_000;
-
-/// Whether a protected key's encryption is one QG Trust accepts, decided before any work is done
-/// with the password: PBES2 with PBKDF2 (never scrypt, whose memory a file could set without bound),
-/// HMAC-SHA1 or HMAC-SHA256, at most [`MAX_PBKDF2_ITERATIONS`], and 3DES or AES-CBC. tqsllib 2.8.7
-/// writes PBES2, PBKDF2, HMAC-SHA256, 2,048 iterations and 3DES-CBC.
-pub(crate) fn accepted(scheme: &EncryptionScheme<'_>) -> bool {
-    let EncryptionScheme::Pbes2(params) = scheme else {
-        return false;
-    };
-    let kdf_ok = match &params.kdf {
-        Kdf::Pbkdf2(p) => {
-            (1..=MAX_PBKDF2_ITERATIONS).contains(&p.iteration_count)
-                && matches!(p.prf, Pbkdf2Prf::HmacWithSha1 | Pbkdf2Prf::HmacWithSha256)
-        }
-        // scrypt, and any kind a later pkcs5 adds: refused.
-        _ => false,
-    };
-    let cipher_ok = matches!(
-        params.encryption,
-        pbes2::EncryptionScheme::DesEde3Cbc { .. }
-            | pbes2::EncryptionScheme::Aes128Cbc { .. }
-            | pbes2::EncryptionScheme::Aes256Cbc { .. }
-    );
-    kdf_ok && cipher_ok
-}
 
 impl KeyEntry {
     /// Every key in a tqsllib key file, in the order written: one per certificate request made.
@@ -284,8 +236,11 @@ impl KeyEntry {
         if label != "ENCRYPTED PRIVATE KEY" {
             return Err(KeyError::NotAKey);
         }
-        let envelope = EncryptedPrivateKeyInfo::from_der(der).map_err(|_| KeyError::NotAKey)?;
-        if !accepted(&envelope.encryption_algorithm) {
+        let envelope = Envelope::from_der(der).map_err(|_| KeyError::NotAKey)?;
+        let params = envelope
+            .parameters()
+            .map_err(|_| KeyError::UnsupportedProtection)?;
+        if !params.accepted() {
             return Err(KeyError::UnsupportedProtection);
         }
         Ok(())
@@ -328,14 +283,11 @@ impl KeyEntry {
         match label {
             "ENCRYPTED PRIVATE KEY" => {
                 let password = password.ok_or(KeyError::PasswordNeeded)?;
-                let info = EncryptedPrivateKeyInfo::from_der(der).map_err(|_| KeyError::NotAKey)?;
-                if !accepted(&info.encryption_algorithm) {
-                    return Err(KeyError::UnsupportedProtection);
-                }
-                let EncryptionScheme::Pbes2(params) = &info.encryption_algorithm else {
-                    return Err(KeyError::UnsupportedProtection);
-                };
-                decrypt(params, password, info.encrypted_data)
+                let info = Envelope::from_der(der).map_err(|_| KeyError::NotAKey)?;
+                let params = info
+                    .parameters()
+                    .map_err(|_| KeyError::UnsupportedProtection)?;
+                decrypt(&params, password, info.ciphertext)
             }
             "PRIVATE KEY" => Ok(Zeroizing::new(der.to_vec())),
             _ => Err(KeyError::NotAKey),
@@ -396,6 +348,10 @@ pub fn tqsl_base64(signature: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pkcs8::{
+        EncryptedPrivateKeyInfo,
+        pkcs5::{EncryptionScheme, pbes2},
+    };
     use rsa::RsaPrivateKey;
     use rsa::pkcs8::DecodePrivateKey;
 
@@ -491,7 +447,13 @@ mod tests {
         // At the limit it is accepted: what is left to fail is only the password.
         let ok = pbes2::Parameters::pbkdf2_sha256_aes256cbc(MAX_PBKDF2_ITERATIONS, &salt, &iv)
             .expect("pbkdf2");
-        assert!(accepted(&EncryptionScheme::Pbes2(ok)));
+        use pkcs8::der::Encode;
+        let encoded = ok.to_der().expect("parameters");
+        assert!(
+            Parameters::from_der(&encoded)
+                .expect("parameters")
+                .accepted()
+        );
     }
 
     /// The test key's public half, as a key file states it.

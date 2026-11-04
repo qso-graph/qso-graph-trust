@@ -15,6 +15,7 @@ pub mod import;
 mod lotw;
 mod memory;
 mod pkcs12;
+mod protected_key;
 pub mod qso;
 pub mod records;
 pub mod request;

@@ -47,10 +47,11 @@ buffer were not covered by wiping only the final output. Every derived key, KDF 
 returned digest now owns wiped heap storage; no binding helper returns an inline secret array.
 The provider's digest API itself returns inline temporary output, so changing providers alone does
 not establish stack erasure. Unused direct `pbkdf2`, `cbc`, `aes` and `des` dependencies are removed;
-`sha2` is now a direct test dependency only. `pkcs8`/`pkcs5` only parse parameters in shipped code.
-Their `3des` feature exposes the legacy parameter variant and transitively enables crypto code;
-none of those derivation/decryption functions is called. Independent test oracles still use it.
-`Cargo.lock` reflects these changes; the existing vet audits/exemptions still cover the graph.
+`sha2` is now a direct test dependency only. EncryptedPrivateKeyInfo and PBES2 parameters are
+parsed locally with `der`, borrowed and at fixed depth, accepting only the algorithms above.
+The normal `pkcs8` dependency enables only `std`/`pem`; its crypto-enabled features remain in
+dev-dependencies for independent test oracles. The library's normal dependency tree contains no
+RustCrypto cipher or KDF crates. The existing vet audits/exemptions still cover the graph.
 
 AWS-LC has a remaining source-level fallback temporary: `aws-lc-sys` 0.45.0's
 `aws-lc/crypto/fipsmodule/aes/mode_wrappers.c:92–102` selects `CRYPTO_cbc128_decrypt` for VPAES
