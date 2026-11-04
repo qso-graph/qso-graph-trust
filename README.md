@@ -4,13 +4,13 @@ Sign your ADIF logs for ARRL's [Logbook of The World](https://lotw.arrl.org) (Lo
 an alternative to TQSL: it reads the certificates and backups TQSL makes, and the logs it signs carry
 the same signed records TQSL's do, byte for byte.
 
-> **This is a beta.** Today it signs a log using your existing TQSL backup, from the command line. Still
-> to come: keeping your key in your computer's own credential store, uploading straight to LoTW,
+> **This is a beta.** It signs your log with your LoTW certificate, from the command line. For now it
+> gets your certificate from the backup file TQSL saves. Still to come: keeping your key in your computer's own credential store, uploading straight to LoTW,
 > requesting certificates, and signing inside [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop).
 
 ## Sign a log
 
-1. **Have a TQSL backup.** In TQSL, *File → Backup Station Locations, Certificates, and Preferences…*
+1. **Find TQSL's backup file.** That's where `qg-trust` gets your certificate for now. In TQSL, *File → Backup Station Locations, Certificates, and Preferences…*
    saves one. TQSL also saves one by itself, `tqslconfig.tbk`, each time it closes, unless that is
    turned off in its Preferences.
 2. **Install `qg-trust`** (it needs [Rust](https://rustup.rs) for now; ready-made downloads come later):
@@ -19,7 +19,7 @@ the same signed records TQSL's do, byte for byte.
    cargo install qso-graph-trust-cli
    ```
 
-3. **Sign**, naming the backup, the station location as TQSL calls it, and your log:
+3. **Sign**, naming TQSL's backup file, your station location as TQSL calls it, and your log:
 
    ```sh
    qg-trust -i tqslconfig.tbk -l "Home" mylog.adi

@@ -68,12 +68,12 @@ pub(crate) struct Env<'a> {
 }
 
 const HELP: &str = "\
-qg-trust: QSO Graph Trust's command line. Signs an ADIF log for ARRL's Logbook of The World (LoTW),
-with the certificate, key and station location taken from a TQSL backup.
+qg-trust: QSO Graph Trust's command line. Signs your ADIF log with your LoTW certificate, for ARRL's
+Logbook of The World (LoTW). For now it gets the certificate from the backup file TQSL saves.
 
 Usage: qg-trust -i BACKUP.tbk -l LOCATION [-b DATE] [-e DATE] [-o OUTPUT.tq8] LOG.adi
 
-  -i, --import FILE      the TQSL backup (.tbk) to read the certificate, key and location from
+  -i, --import FILE      TQSL's backup file (.tbk), where it gets your certificate and location
   -l, --location NAME    the station location to sign for, by its name in the backup
   -b, --begindate DATE   sign only QSOs on or after DATE (YYYY-MM-DD or YYYYMMDD)
   -e, --enddate DATE     sign only QSOs on or before DATE
@@ -175,7 +175,9 @@ fn parse(args: &[String]) -> Result<Command, String> {
         return Err("give the log to sign".to_string());
     }
     if options.backup.is_none() {
-        return Err("-i names the TQSL backup to sign with".to_string());
+        return Err(
+            "-i names TQSL's backup file, where qg-trust gets your certificate".to_string(),
+        );
     }
     if options.location.is_none() {
         return Err("-l names the station location to sign for".to_string());
