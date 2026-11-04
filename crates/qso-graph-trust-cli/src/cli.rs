@@ -69,7 +69,7 @@ pub(crate) struct Env<'a> {
 
 const HELP: &str = "\
 qg-trust: QSO Graph Trust's command line. Signs your ADIF log with your LoTW certificate, for ARRL's
-Logbook of The World (LoTW). For now it gets the certificate from the backup file TQSL saves.
+Logbook of The World (LoTW).
 
 Usage: qg-trust -i BACKUP.tbk -l LOCATION [-b DATE] [-e DATE] [-o OUTPUT.tq8] LOG.adi
 

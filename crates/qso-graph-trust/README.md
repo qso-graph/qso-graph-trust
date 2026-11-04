@@ -11,9 +11,9 @@ and it is for other people's programs too. Its parsers are safe Rust, and the li
 forbids `unsafe` code. LoTW's signature is AWS-LC's, through one small binding, `qso-graph-trust-awslc`,
 the only crate here with `unsafe` code; a password-protected key is unlocked with RustCrypto.
 
-**This is a beta.** It signs your log with your LoTW certificate. For now your program gets the
-certificate from the backup file TQSL saves (`.tbk`), with the key's password. Still to come: keeping keys in the operating system's credential store, uploading to
-LoTW, and requesting certificates. What is done, planned and left out, feature by feature against
+**This is a beta.** It signs your log with your LoTW certificate, which your program gets from the
+backup file TQSL saves (`.tbk`). Still to come: keeping keys in the operating system's credential
+store, uploading to LoTW, and requesting certificates. What is done, planned and left out, feature by feature against
 TQSL: [`docs/FEATURE-PARITY.md`](https://github.com/qso-graph/qso-graph-trust/blob/main/docs/FEATURE-PARITY.md).
 
 ## Example

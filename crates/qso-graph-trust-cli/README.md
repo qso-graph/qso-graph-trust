@@ -10,9 +10,8 @@ program that made the file differs.
 cargo install qso-graph-trust-cli
 ```
 
-**This is a beta.** It signs your log with your LoTW certificate. For now it gets the certificate, and
-your station location, from the backup file TQSL saves (`.tbk`), and asks for the key's password. Keeping keys in the operating system's credential store,
-uploading to LoTW and the record of QSOs already signed are still to come.
+**This is a beta.** It signs your log with your LoTW certificate. Still to come: keeping keys in the
+operating system's credential store, uploading to LoTW, and the record of QSOs already signed.
 
 ## Signing a log
 
