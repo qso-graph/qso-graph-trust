@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# Release: publish QSO Graph Trust's binding, library and command line on crates.io, then tag the
-# commit.
+# Release: build and sign qg-trust for each platform, publish QSO Graph Trust's binding, library and
+# command line on crates.io, tag the commit, and put the programs on the GitHub Release.
 # Run by hand (Actions -> Release -> Run workflow) from main, with the version main already says:
 # a release, X.Y.Z, or a beta, X.Y.Z-beta.N (decision 0007). It refuses, before anything is
 # published, unless main's files are exactly those a green pull request run checked. The tag is cut
@@ -13,6 +13,10 @@
 # no token is stored. A crate's very first publish cannot use it, because Trusted Publishing is set
 # up on a crate that exists: for that one run the crates-io Environment holds CRATES_IO_FIRST_PUBLISH,
 # a token scoped to the new crate, used for it alone and removed once Trusted Publishing is set up.
+#
+# The programs (binaries.yml) are built and signed before anything is published, so a release whose
+# programs fail publishes nothing. The GitHub Release is made last, on the tag: a beta's is a
+# pre-release.
 #
 # crates.io holds no signatures. What a download can be checked against: crates.io's index records
 # each version's SHA-256, Cargo refuses one that differs, and GitHub's attestation of the same files
@@ -86,9 +90,23 @@ jobs:
           echo "main ${sha} holds exactly what pull request run of ${proved} checked."
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
+  # qg-trust for each platform, signed and notarized, before anything is published.
+  binaries:
+    name: binaries
+    needs: [check]
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/binaries.yml
+    with:
+      sha: ${{ needs.check.outputs.sha }}
+      sign: true
+    secrets: inherit
+
   publish:
     name: publish
-    needs: [check]
+    needs: [check, binaries]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # The Environment admits main only; it, not this file, is the lock.
@@ -160,3 +178,71 @@ jobs:
           fi
           [ "$(python3 -I scripts/release_check.py tag "$REPO" "$VERSION" "$SHA")" = same ]
           echo "Published ${VERSION} on crates.io and tagged v${VERSION} at ${SHA}."
+
+  # The GitHub Release, on the tag just cut: each platform's program, and SHA256SUMS.txt.
+  github-release:
+    name: GitHub Release
+    needs: [check, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: qg-trust-*
+          path: dist
+          merge-multiple: true
+      # Every program was built and attested by binaries.yml in this run, before it is put up.
+      - name: Provenance verifies
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          n=0
+          for file in dist/*; do
+            gh attestation verify "$file" -R "$REPO" --signer-workflow "${REPO}/.github/workflows/binaries.yml" >/dev/null
+            echo "verified $(basename "$file")"; n=$((n + 1))
+          done
+          [ "$n" -eq 4 ] || { echo "::error::Expected the 4 platforms' programs; found ${n}."; exit 1; }
+      - name: SHA256SUMS.txt
+        run: (cd dist && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+      # Made here, so its provenance is this job's.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/SHA256SUMS.txt
+      # A run that stopped after this is finished by running it again: a Release already on the tag
+      # gets the files again, replacing those of the same name.
+      - name: Publish the Release
+        env:
+          VERSION: ${{ inputs.version }}
+          SHA: ${{ needs.check.outputs.sha }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="v${VERSION}"
+          pre=(); [[ $VERSION == *-beta.* ]] && pre=(--prerelease)
+          {
+            echo "**qg-trust ${VERSION}**: sign your ADIF log with your LoTW certificate, for ARRL's Logbook of The World."
+            echo
+            echo "Download the file for your computer, unpack it, and run \`qg-trust --help\`. Nothing else needs installing."
+            echo
+            echo "- **macOS** (Apple silicon): signed by Greg Beam (KI7MT) with an Apple Developer ID, and notarized by Apple."
+            echo "- **Windows** (x86_64): signed by Gregory Beam (KI7MT)."
+            echo "- **Linux** (x86_64, arm64): one program for every distribution."
+            echo
+            echo "Also on crates.io: \`cargo install qso-graph-trust-cli\`, and the library, [qso-graph-trust](https://crates.io/crates/qso-graph-trust/${VERSION})."
+            echo
+            echo "Check a download against **SHA256SUMS.txt**. Every file here was built by this repository's workflow, and GitHub signs that it was: \`gh attestation verify <file> -R ${REPO}\`."
+          } > notes.md
+          if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$tag" --repo "$REPO" --clobber -- dist/*
+          else
+            gh release create "$tag" --repo "$REPO" --verify-tag "${pre[@]}" \
+              --title "QSO Graph Trust ${VERSION}" --notes-file notes.md -- dist/*
+          fi
+          echo "Released ${tag}:"; (cd dist && printf '  %s\n' *)
