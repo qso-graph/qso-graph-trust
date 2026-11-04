@@ -11,8 +11,9 @@
 //! - **No unsafe code** (AGENTS.md): the workspace forbids `unsafe_code`, every
 //!   member takes the workspace's lints, and every crate root says
 //!   `#![forbid(unsafe_code)]` where the compiler reads it.
-//! - **No networking in the library or binding**: every source file is read as
-//!   tokens, whatever its cfg; the caller supplies upload's TLS connection.
+//! - **No networking in the library's workspace dependency graph**: every source
+//!   file is read as tokens, whatever its cfg; the caller supplies upload's TLS
+//!   connection. The binding may use only [`BINDING_AWS_LC_ALLOWED`].
 //!
 //! - **No key data in freed memory** (AGENTS.md): every program
 //!   a workspace crate builds (a binary, or a library another language loads)
@@ -55,6 +56,50 @@ pub const CRYPTO_PROVIDERS: &[&str] = &["aws-lc-sys", "aws-lc-rs"];
 /// [`CRYPTO_PROVIDERS`] crate: QG Trust's binding to AWS-LC. Instead of the workspace's lints it must
 /// carry exactly [`BINDING_LINTS`] (docs/decisions/0006).
 pub const UNSAFE_BINDING: &str = "qso-graph-trust-awslc";
+
+/// AWS-LC's entire raw API surface used by the binding, including types and
+/// constants. Adding an item requires reviewing its purpose here; socket BIOs
+/// and other provider APIs are refused even when Rust's networking is absent.
+pub const BINDING_AWS_LC_ALLOWED: &[&str] = &[
+    "BIGNUM",                  // integers
+    "BN_CTX_free",             // cleanup
+    "BN_CTX_new",              // allocation
+    "BN_cmp",                  // comparison
+    "BN_free",                 // cleanup
+    "BN_is_word",              // exponent
+    "BN_new",                  // allocation
+    "BN_num_bits",             // sizing
+    "BN_primality_test",       // primality
+    "BN_set_word",             // exponent
+    "CBB",                     // marshalling
+    "CBB_cleanup",             // cleanup
+    "CBB_init_fixed",          // marshalling
+    "CBB_len",                 // sizing
+    "CBS",                     // parsing
+    "CBS_init",                // parsing
+    "EVP_PKEY",                // keys
+    "EVP_PKEY_free",           // cleanup
+    "EVP_PKEY_get1_RSA",       // extraction
+    "EVP_PKEY_new",            // allocation
+    "EVP_PKEY_set1_RSA",       // assignment
+    "EVP_marshal_private_key", // marshalling
+    "EVP_marshal_public_key",  // marshalling
+    "EVP_parse_private_key",   // parsing
+    "EVP_parse_public_key",    // parsing
+    "NID_sha1",                // signing
+    "NID_sha256",              // signing
+    "RSA",                     // keys
+    "RSA_bits",                // sizing
+    "RSA_free",                // cleanup
+    "RSA_generate_key_ex",     // generation
+    "RSA_get0_e",              // exponent
+    "RSA_get0_factors",        // factors
+    "RSA_get0_n",              // modulus
+    "RSA_new",                 // allocation
+    "RSA_sign",                // signing
+    "RSA_size",                // sizing
+    "SHA1",                    // hashing
+];
 
 /// The binding's own lints, exactly: unsafe denied unless allowed block by block, unsafe operations
 /// marked even inside unsafe functions, every unsafe block documented with its SAFETY reason, one
@@ -816,29 +861,182 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
     source_tokens_in(dir, skip, unsafe_tokens)
 }
 
-/// Networking in the library and its binding, sorted; empty passes. The CLI
-/// supplies TLS and is deliberately outside this rule. Scan all Rust sources,
-/// including tests and modules disabled by cfg, using the unsafe check's walker.
+/// Networking in every workspace crate in the library's normal dependency
+/// graph, sorted; empty passes. Metadata enables every feature, and policy runs
+/// this for every shipping target. Walk through outside crates too, but scan only
+/// workspace sources: outside crates are reviewed through cargo-vet. The CLI's
+/// own dependencies are outside this rule. Scan tests and cfg-disabled modules
+/// too, using the unsafe check's walker.
 pub fn no_network(meta: &Value) -> Vec<String> {
     let workspace = members(meta);
     let skip = source_scan_skips(meta);
     let mut found = Vec::new();
+    let packages: HashMap<&str, &Value> = meta["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| Some((p["id"].as_str()?, p)))
+        .collect();
+    let nodes: HashMap<&str, &Value> = meta["resolve"]["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|n| Some((n["id"].as_str()?, n)))
+        .collect();
+    let mut queue = VecDeque::new();
+    for want in PROTECTED {
+        let roots: Vec<_> = packages
+            .iter()
+            .filter(|(id, p)| workspace.contains(*id) && p["name"] == *want)
+            .map(|(id, _)| *id)
+            .collect();
+        if roots.is_empty() {
+            found.push(format!("protected crate {want} is not a workspace member"));
+        }
+        queue.extend(roots);
+    }
+    let mut seen = BTreeSet::new();
+    while let Some(id) = queue.pop_front() {
+        if !seen.insert(id) {
+            continue;
+        }
+        match nodes.get(id) {
+            Some(node) => {
+                for dep in node["deps"].as_array().into_iter().flatten() {
+                    // A normal edge can share a package with a build/dev edge.
+                    if dep["dep_kinds"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|kind| kind["kind"].is_null())
+                        && let Some(dep_id) = dep["pkg"].as_str()
+                    {
+                        queue.push_back(dep_id);
+                    }
+                }
+            }
+            None => found.push(format!("{id} has no dependency node")),
+        }
+    }
     for pkg in meta["packages"].as_array().into_iter().flatten() {
         let name = pkg["name"].as_str().unwrap_or("?");
-        if !pkg["id"].as_str().is_some_and(|id| workspace.contains(id))
-            || !(PROTECTED.contains(&name) || name == UNSAFE_BINDING)
+        if !pkg["id"]
+            .as_str()
+            .is_some_and(|id| workspace.contains(id) && seen.contains(id))
         {
             continue;
+        }
+        if name == UNSAFE_BINDING {
+            // Cargo can rename the provider before Rust's imports are scanned.
+            // Keep every raw provider reference under one of the checked names.
+            for dep in pkg["dependencies"].as_array().into_iter().flatten() {
+                if dep["name"] == "aws-lc-sys"
+                    && let Some(alias) = dep["rename"].as_str()
+                    && !["aws_lc_sys", "sys"].contains(&alias.replace('-', "_").as_str())
+                {
+                    found.push(format!(
+                        "{name} renames aws-lc-sys to {alias}: only aws_lc_sys or sys are checked"
+                    ));
+                }
+            }
         }
         match pkg["manifest_path"]
             .as_str()
             .and_then(|m| Path::new(m).parent())
         {
-            Some(dir) => found.extend(source_tokens_in(dir, &skip, network_tokens)),
+            Some(dir) => {
+                found.extend(source_tokens_in(dir, &skip, network_tokens));
+                if name == UNSAFE_BINDING {
+                    found.extend(source_tokens_in(dir, &skip, binding_tokens));
+                }
+            }
             None => found.push(format!("{name} has no manifest directory")),
         }
     }
     found.sort();
+    found
+}
+
+/// The binding can use unsafe blocks, but cannot load unscanned code or define
+/// macros. Raw AWS-LC items must be named explicitly, either through
+/// `aws_lc_sys` or its sole namespace alias `use aws_lc_sys as sys;`. Individual
+/// allowed items may be renamed; namespace re-exports and glob imports cannot
+/// hide which provider API is used. All groups are scanned, whatever their cfg.
+pub fn binding_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
+    use proc_macro2::TokenTree;
+
+    fn ident(tree: Option<&TokenTree>, want: &str) -> bool {
+        matches!(tree, Some(TokenTree::Ident(id))
+            if id.to_string().trim_start_matches("r#") == want)
+    }
+
+    fn allowed(name: &proc_macro2::Ident) -> bool {
+        BINDING_AWS_LC_ALLOWED.contains(&name.to_string().trim_start_matches("r#"))
+    }
+
+    fn imports(tree: &syn::UseTree) -> bool {
+        match tree {
+            syn::UseTree::Name(n) => allowed(&n.ident),
+            syn::UseTree::Rename(n) => allowed(&n.ident),
+            syn::UseTree::Group(g) => g.items.iter().all(imports),
+            // No submodules or globs in the provider's allowed surface.
+            _ => false,
+        }
+    }
+
+    fn scan(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
+        let trees: Vec<_> = tokens.into_iter().collect();
+        let mut found = Vec::new();
+        let colon =
+            |i: usize| matches!(trees.get(i), Some(TokenTree::Punct(p)) if p.as_char() == ':');
+        for (i, tree) in trees.iter().enumerate() {
+            match tree {
+                TokenTree::Ident(_) => {
+                    if ident(Some(tree), "include_str") || ident(Some(tree), "include_bytes") {
+                        found.push(
+                            "loads a file through include_str or include_bytes in the binding",
+                        );
+                    }
+                    if !ident(Some(tree), "aws_lc_sys") && !ident(Some(tree), "sys") {
+                        continue;
+                    }
+                    // The one namespace import, with raw spellings accepted.
+                    let namespace_import = |start: usize| {
+                        ident(trees.get(start), "use")
+                            && ident(trees.get(start + 1), "aws_lc_sys")
+                            && ident(trees.get(start + 2), "as")
+                            && ident(trees.get(start + 3), "sys")
+                            && matches!(trees.get(start + 4), Some(TokenTree::Punct(p)) if p.as_char() == ';')
+                    };
+                    if (i >= 1 && namespace_import(i - 1)) || (i >= 3 && namespace_import(i - 3)) {
+                        continue;
+                    }
+                    let permitted = colon(i + 1)
+                        && colon(i + 2)
+                        && match trees.get(i + 3) {
+                            Some(TokenTree::Ident(item)) => allowed(item),
+                            Some(TokenTree::Group(g)) => {
+                                syn::parse2::<syn::UseTree>(TokenTree::Group(g.clone()).into())
+                                    .is_ok_and(|tree| imports(&tree))
+                            }
+                            _ => false,
+                        };
+                    if !permitted {
+                        found.push("uses AWS-LC outside BINDING_AWS_LC_ALLOWED (no namespace aliases or glob imports)");
+                    }
+                }
+                TokenTree::Group(g) => found.extend(scan(g.stream())),
+                _ => {}
+            }
+        }
+        found
+    }
+
+    let mut found: Vec<_> = unsafe_tokens(tokens.clone())
+        .into_iter()
+        .filter(|what| *what != "uses unsafe")
+        .collect();
+    found.extend(scan(tokens));
     found
 }
 

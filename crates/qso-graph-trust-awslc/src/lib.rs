@@ -404,8 +404,7 @@ mod tests {
 
     #[test]
     fn a_key_prints_nothing_of_itself() {
-        let pem = include_str!("../../../tests/corpus/pki/user-1024.key.pem");
-        let der = pem_body(pem);
+        let der = pem_body(&test_key_pem());
         let key = RsaKey::from_pkcs8_der(&der).expect("key");
         assert_eq!(format!("{key:?}"), "RsaKey(..)");
         assert!(key.is_lotw_shaped());
@@ -413,9 +412,17 @@ mod tests {
 
     #[test]
     fn trailing_bytes_after_a_key_are_refused() {
-        let mut der = pem_body(include_str!("../../../tests/corpus/pki/user-1024.key.pem"));
+        let mut der = pem_body(&test_key_pem());
         der.push(0);
         assert_eq!(RsaKey::from_pkcs8_der(&der).err(), Some(Error::NotRsa));
+    }
+
+    fn test_key_pem() -> String {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/corpus/pki/user-1024.key.pem"),
+        )
+        .expect("test key PEM")
     }
 
     /// A PEM's base64 body, decoded by hand so these tests need nothing outside this crate.

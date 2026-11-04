@@ -224,6 +224,13 @@ fn network_policy_scans_library_and_binding_but_allows_cli() {
         "workspace_root": root,
         "workspace_members": names,
         "packages": packages,
+        "resolve": {"nodes": [
+            {"id": "qso-graph-trust", "deps": [
+                {"pkg": xtask::UNSAFE_BINDING, "dep_kinds": [{"kind": null}]}
+            ]},
+            {"id": xtask::UNSAFE_BINDING, "deps": []},
+            {"id": "qso-graph-trust-cli", "deps": []},
+        ]},
     });
     assert!(xtask::no_network(&meta).is_empty());
     // An unreferenced file in a nested directory is scanned even if no current
@@ -530,6 +537,7 @@ fn this_repository_passes() {
             Vec::<String>::new(),
             "{target}"
         );
+        assert_eq!(xtask::no_network(&per), Vec::<String>::new(), "{target}");
     }
     assert_eq!(xtask::no_unsafe(&meta), Vec::<String>::new());
     assert_eq!(xtask::no_network(&meta), Vec::<String>::new());
