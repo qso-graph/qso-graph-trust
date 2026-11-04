@@ -25,12 +25,15 @@ The behavior comes from TQSL 2.8.7, commit `d9e01726e54887f8241e86e789c5b91f0204
 | `adif_modes` | Overlay ARRL's ADIF map; try mode/submode, bare submode, then mode. Native LoTW mode redefinitions are ignored, as in the app. | `apps/tqsl.cpp:684–713`; `src/location.cpp:1487–1598`; `src/tqslconvert.cpp:1404–1441` |
 | `ignore_seconds` | Set seconds to zero before signing and building the duplicate key. | `src/tqslconvert.cpp:1017–1023, 1312–1318, 1819–1839`; app passes it at `apps/tqsl.cpp:2290–2291` |
 | `ignore_log_callsigns` | Disregard STATION_CALLSIGN and OPERATOR. The selected certificate and station still have to agree. | `src/tqslconvert.cpp:1076–1100, 1275–1287`; `apps/tqsl.cpp:2292–2293` |
-| `allow_bad_calls` | Bypass the contacted CALL's amateur-call plausibility check, including prefix, letters/digits, and slash checks. Dates, bands, modes and other validation still apply. | `src/tqslconvert.cpp:1390–1402, 2232–2287`; `apps/tqsl.cpp:2286–2288` |
+| `allow_bad_calls` | Bypass the contacted CALL's amateur-call plausibility check, including prefix, letters/digits, and slash checks. QGT always refuses control characters (C0, DEL, C1) and characters XML forbids, before trimming. Dates, bands, modes and other validation still apply. | `src/tqslconvert.cpp:1390–1402, 2232–2287`; `apps/tqsl.cpp:2286–2288` |
 | `qth` | Ignore log location details; report populated-field differences and fill empty fields; or update from the log, carrying changes forward. Updating the primary subdivision clears county/zone selections absent from the new lists, before later log fields are applied. Codes and labels come from ARRL's generated tables. | `src/tqslconvert.cpp:1116–1187, 1499–1530, 1582–1811`; label normalization in `src/location.cpp:4076–4200`; `apps/tqsl.cpp:2295`; preference labels in `apps/tqsl_prefs.cpp:556–563` |
 
-These APIs accept one explicitly selected certificate. A log that needs another call's or DXCC
-entity's certificate is refused. The caller must select that certificate and location explicitly.
-No preference permits signing with a key that does not match the certificate.
+These APIs accept one explicitly selected certificate. With `qth=Ignore`, like TQSL's ignore
+option, the log's STATION_CALLSIGN and MY_DXCC are not compared with the selected location, so
+another station's QSOs can be signed as the selected location's. With report or update, differing
+MY_DXCC is refused, and differing STATION_CALLSIGN or OPERATOR is refused unless
+`ignore_log_callsigns` is set. The caller must select the intended certificate and location
+explicitly. No preference permits signing with a key that does not match the certificate.
 
 `tests/tqsllib/make-options.py` drives the reference library with the existing generated standard
 set's test keys and certificates. `tests/corpus/signing-options` contains successful signed logs,

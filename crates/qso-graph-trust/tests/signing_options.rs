@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use qso_graph_trust::certificate::Trust;
 use qso_graph_trust::options::{QthHandling, SigningOptions};
-use qso_graph_trust::qso::Qso;
+use qso_graph_trust::qso::{Qso, QsoError};
 use qso_graph_trust::records;
 use qso_graph_trust::signed_log::{sign_log, sign_log_with_options};
 use qso_graph_trust::signing::KeyEntry;
@@ -258,6 +258,54 @@ fn settings_sign_and_record_exactly_as_tqsllib() {
                 .any(|r| Qso::from_adif_with_options(r, &options(case)).is_err())
         );
     }
+}
+
+#[test]
+fn calls_refuse_controls_and_xml_forbidden_characters_with_any_options() {
+    let forbidden = (0..=0x1f)
+        .chain(0x7f..=0x9f)
+        .chain([0xfffe, 0xffff])
+        .map(|c| char::from_u32(c).expect("Unicode scalar"));
+    for c in forbidden {
+        for call in [
+            format!("TEST{c}X"),
+            format!("{c}KC4QPQ"),
+            format!("KC4QPQ{c}"),
+        ] {
+            let adif = format!(
+                "<CALL:{}>{call}<QSO_DATE:8>20261103<TIME_ON:6>183055<BAND:3>20m<MODE:2>CW<EOR>",
+                call.len()
+            );
+            let record = records::parse(adif.as_bytes()).expect("ADIF").remove(0);
+            for allow_bad_calls in [false, true] {
+                let options = SigningOptions {
+                    allow_bad_calls,
+                    ..SigningOptions::default()
+                };
+                assert_eq!(
+                    Qso::from_adif_with_options(&record, &options),
+                    Err(QsoError::Invalid {
+                        field: "CALL",
+                        value: call.clone(),
+                    }),
+                    "CALL {call:?}, allow_bad_calls={allow_bad_calls}"
+                );
+            }
+        }
+    }
+    // Removing the planted character leaves a permitted non-amateur call.
+    let adif = b"<CALL:5>TESTX<QSO_DATE:8>20261103<TIME_ON:6>183055<BAND:3>20m<MODE:2>CW<EOR>";
+    let record = records::parse(adif).expect("ADIF").remove(0);
+    let options = SigningOptions {
+        allow_bad_calls: true,
+        ..SigningOptions::default()
+    };
+    assert_eq!(
+        Qso::from_adif_with_options(&record, &options)
+            .expect("printable non-amateur call")
+            .call(),
+        "TESTX"
+    );
 }
 
 #[test]

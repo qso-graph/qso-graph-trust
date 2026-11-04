@@ -249,9 +249,21 @@ impl Qso {
                 Some(v) if v.len() > MAX_VALUE_LEN => {
                     Err(invalid(name, &String::from_utf8_lossy(&v[..MAX_VALUE_LEN])))
                 }
-                Some(v) => match std::str::from_utf8(v).map(str::trim) {
-                    Ok("") => Ok(None),
-                    Ok(s) => Ok(Some(s.to_ascii_uppercase())),
+                Some(v) => match std::str::from_utf8(v) {
+                    // Non-amateur calls bypass plausibility, never character safety. Check
+                    // before trimming so leading/trailing controls cannot disappear.
+                    Ok(s)
+                        if name == "CALL"
+                            && s.chars().any(|c| {
+                                c.is_control() || matches!(c, '\u{fffe}' | '\u{ffff}')
+                            }) =>
+                    {
+                        Err(invalid(name, s))
+                    }
+                    Ok(s) => match s.trim() {
+                        "" => Ok(None),
+                        s => Ok(Some(s.to_ascii_uppercase())),
+                    },
                     Err(_) => Err(invalid(name, &String::from_utf8_lossy(v))),
                 },
             }

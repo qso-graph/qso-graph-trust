@@ -16,11 +16,14 @@ pub struct SigningOptions {
     pub adif_modes: Vec<(String, String)>,
     /// Set seconds to zero before signing and duplicate detection.
     pub ignore_seconds: bool,
-    /// Bypass the contacted call's amateur callsign check. Other QSO validation still applies.
+    /// Bypass the contacted call's amateur callsign check. Controls and characters forbidden by
+    /// XML remain refused, as does other invalid QSO data.
     pub allow_bad_calls: bool,
     /// Disregard the log's STATION_CALLSIGN and OPERATOR, without changing the selected certificate.
     pub ignore_log_callsigns: bool,
     /// Ignore, report differences in, or update location details from the log.
+    /// `Ignore`, like TQSL's, does not compare STATION_CALLSIGN or MY_DXCC, so another station's
+    /// QSOs can be signed as the selected location's.
     pub qth: QthHandling,
 }
 
