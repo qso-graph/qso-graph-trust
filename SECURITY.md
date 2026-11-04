@@ -14,11 +14,20 @@ You'll get an answer, and a fix is made before the details are published.
 
 ## Supported versions
 
-QGT is in development and has no release yet. Once it does, the latest release is supported.
+QGT is in beta. The latest release on crates.io, beta or not, is supported; a fix is a new release.
 
 ## What QGT promises
 
-- The private key is held by the OS credential store and leaves it only as a signature or a backup QGT
-  encrypts itself.
-- The library contains no `unsafe` code and no C or C++ (`cargo xtask policy`).
-- TLS verification is never turned off.
+- **The key is only ever used to sign.** No API returns it, and it is never in a log, an error or a
+  trace. Every QGT program wipes the memory it frees. The custody test, on Linux, signs with a key
+  file, drops everything, and reads the program's whole memory: none of the key's numbers, its file or
+  its password is left there. While a key signs it is in memory, as in every signer.
+- **The library's own code has no `unsafe`.** The one crate with `unsafe` code is the binding to
+  AWS-LC, `qso-graph-trust-awslc`, which makes LoTW's signature; AWS-LC is the only C in the library's
+  dependency tree (`cargo xtask policy`, decisions 0002 and 0006).
+- **A TQSL backup's certificates are trusted only if they chain to LoTW's own root,** pinned in the
+  library (`tbk::read` with `Trust::lotw()`), never to a root the backup brings with it. A certificate
+  a program reads itself with `Certificate::from_pem_or_der` is checked only when the program calls
+  `Certificate::verify`; `sign_log` checks the key, call, entity and dates, not the chain.
+- **To come:** the key held by the OS credential store, leaving it only as a signature or a backup QGT
+  encrypts itself; and TLS verification never turned off when QGT uploads.

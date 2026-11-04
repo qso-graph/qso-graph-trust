@@ -4,8 +4,9 @@
 Everything TQSL 2.8.7 does, and what QG Trust does about each. QG Trust doesn't need everything TQSL
 has, so every feature is placed in one of three lists, in priority order:
 
-1. **Needed for 0.7.0:** what an operator needs to stop using TQSL. Built first, in the order listed.
-2. **Nice to have:** worth doing later, not needed to replace TQSL.
+1. **Needed for 0.7.0:** what an operator needs to choose QG Trust as an alternative. Built first, in
+   the order listed.
+2. **Nice to have:** worth doing later, not needed for that choice.
 3. **Won't add:** left out on purpose, with the reason.
 
 This is the library's list. The command line (`qg-trust`) and QSO Graph Desktop are built on the
@@ -35,7 +36,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| Sign an ADIF log | File: Sign and save | Matches TQSL's output exactly | Done | #171 |
+| Sign an ADIF log | File: Sign and save | Signed records and signatures match TQSL's byte for byte; only the identification line differs | Done | #171 |
 | Save the signed log (`.tq8`) | File: Sign and save | | Done | #171 |
 | Read ADIF | | | Done | #171 |
 | Choose the station location to sign for | prompt | | Done | #171 |

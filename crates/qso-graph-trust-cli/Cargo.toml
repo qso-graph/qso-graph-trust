@@ -7,7 +7,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-# Not on crates.io until it signs: 0.1.0-beta.1 publishes the library and its binding only.
+# Not on crates.io until it signs: a release publishes the library and its binding only.
 publish = false
 
 # The command is qg-trust: QSO Graph's commands are qg-<word> (qg-trust, qg-rig,
@@ -18,7 +18,7 @@ name = "qg-trust"
 path = "src/main.rs"
 
 [dependencies]
-qso-graph-trust = { path = "../qso-graph-trust", version = "=0.1.0-beta.1" }
+qso-graph-trust = { path = "../qso-graph-trust", version = "=0.1.0-beta.2" }
 # Every block is wiped when it is freed, whichever library allocated it, so no key data is left
 # in freed memory (AGENTS.md; cargo xtask policy requires it in every program).
 zeroizing-alloc = { version = "=0.1.1", default-features = false }

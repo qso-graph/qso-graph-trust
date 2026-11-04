@@ -5,17 +5,19 @@ build and check. When a rule here and your task disagree, stop and ask.
 
 ## What this is
 
-**QSO Graph Trust (QGT) signs logs for ARRL's Logbook of The World (LoTW) with the operator's key held by
-the OS credential store.** One Rust library, shared by QSO Graph Desktop (QG Trust's interface, as an
+**QSO Graph Trust (QGT) signs logs for ARRL's Logbook of The World (LoTW), and is built to keep the
+operator's key in the OS credential store.** One Rust library, shared by QSO Graph Desktop (QG Trust's interface, as an
 extension), the `qg-trust` command line and other people's tools. It is an alternative to TQSL: described
 as an alternative, never as replacing or fixing TQSL, and TQSL's behaviour is stated as facts with their source, never as faults.
 
 The core requirement: **the ham's key stays theirs, and only the QSOs they mean to sign get signed,
-exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if their key is compromised.
+exactly as LoTW accepts them.** A compromised key signs QSOs in the ham's name: ARRL revokes its
+certificate, and the QSOs submitted with it, and the confirmations and credit they earned, can be
+removed (ARRL's [certificate security](https://lotw.arrl.org/lotw-help/certificatesecurity/)).
 
 ## Rules (each one has a test you can apply)
 
-- **No C or C++ in the library.** Nothing in `qso-graph-trust`'s dependency tree, on the platforms
+- **No C or C++ in the library but its named providers.** Nothing in `qso-graph-trust`'s dependency tree, on the platforms
   QGT ships and with every feature, compiles or ships C, C++ or assembly source, uses a crate that
   builds native code, or links anything but the operating system. Crates that only bind the OS
   (`OS_BINDINGS`), Rust's own `asm!` in a reviewed outside crate, and one cryptographic provider,
@@ -26,8 +28,10 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
   aws-lc-rs does not sign (decision 0006); in QG Trust both are reached only through the binding;
   RustCrypto's `rsa` is a test tool only, never shipped. The library never signs for a remote
   caller (decision 0002, amended 2026-11-03). *Test: `cargo xtask policy` and `cargo deny`.*
-- **Every outside crate a shipped crate uses is reviewed,** by exact name and version, through
-  cargo-vet: an imported audit, a trusted publisher, or our own (`supply-chain/`, decision 0004).
+- **Every outside crate a shipped crate uses is reviewed, or listed as not reviewed yet,** by exact
+  name and version, through cargo-vet: an imported audit, a trusted publisher, our own, or an
+  exemption, which cargo-vet means as "not audited yet", listed in the open in
+  `supply-chain/config.toml` (decision 0004).
   It comes from crates.io only. *Test: `cargo vet` and `cargo deny`.* The no-C rule is the
   library's alone; the command line carries the TLS stack, which is C.
 - **No unsafe code, but in one named binding.** `qso-graph-trust-awslc`, which calls AWS-LC to sign
@@ -45,8 +49,11 @@ exactly as LoTW accepts them.** ARRL revokes everything a ham has in LoTW if the
   program without it, and the custody test (`crates/qso-graph-trust-custody`, Linux, debug and
   release) reads a signing program's whole memory, as a crash dump holds it, and finds no key data
   or password.*
-- **The OS credential store holds the key at rest,** and it leaves the store only to sign, as a
-  signature, or as a backup QGT encrypts itself; while it signs, it is in memory, as in every signer. No API returns it, and it is never in a file, log, trace, error, IPC message or crash dump.
+- **The OS credential store holds the key at rest,** once QGT keeps keys (the store is still to
+  come; until then the library holds no key at rest), and it leaves the store only to sign, as a
+  signature, or as a backup QGT encrypts itself. While it signs, it is in memory, as in every signer,
+  so a crash dump taken then can hold it; freed memory never does. No API returns it, and nothing QGT
+  writes, logs, traces, reports in an error or sends over IPC holds it.
 - **LoTW's tables are ARRL's, never typed in.** Bands, modes, the ADIF mode map, satellites, DXCC
   entities, station-location fields and the signature specification come from ARRL's TQSL
   configuration (`data/tqsl-config/config.xml`, under ARRL's licence beside it), generated into
@@ -77,12 +84,23 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 cargo xtask policy
 python3 scripts/gen-lotw-tables.py --check
+python3 scripts/package-files.py --check
+python3 scripts/test_release_check.py
 ```
 
 **What CI checks:** formatting, clippy and the tests on Windows, macOS and Linux; the policy checks
 and the canary; `cargo vet`, `cargo deny` and `cargo audit`; and `cargo package` for the binding and the
 library, as crates.io would receive them; on every pull request and weekly. `ci-all-green` is the one result a
 merge waits for.
+
+## Releasing
+
+A release is KI7MT's, never an agent's: **Actions → Release → Run workflow** from main, with the version
+main already says (`X.Y.Z` or `X.Y.Z-beta.N`). It publishes `qso-graph-trust-awslc`, then
+`qso-graph-trust`, on crates.io with Trusted Publishing, attests both packages, and tags the commit
+(`.github/workflows/release.yml`; its decisions are `scripts/release_check.py`'s). To prepare one:
+set the workspace version in `Cargo.toml` and the `=` pins on the internal dependencies, move the
+CHANGELOG's Unreleased section under the version, and merge that by pull request.
 
 ## Where the real documents are
 
