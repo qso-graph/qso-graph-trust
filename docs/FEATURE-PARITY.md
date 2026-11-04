@@ -29,7 +29,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | List | Features | Done | Part done | To do |
 |---|---|---|---|---|
-| Needed for 0.7.0 | 43 | 16 | 5 | 22 |
+| Needed for 0.7.0 | 43 | 16 | 11 | 16 |
 | Nice to have | 15 |  |  | 15 |
 | Won't add | 15 | | | |
 
@@ -104,12 +104,12 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| Request a new certificate (`.tq5`), matching TQSL's | Request New Callsign Certificate | Library: `CertificateRequest::generate`; Desktop/CLI to come | Part done | #172 |
-| Request: call, DXCC entity, first and last QSO date | wizard | Library validates DXCC and QSO dates | Part done | #172 |
-| Request: name, address, email | wizard | Library validates and writes bounded public fields | Part done | #172 |
-| Request: kind of call (club, DXpedition, special event, former, replacing, QSL manager) | wizard | `CallKind` intent; TQSL has no kind-specific wire field; caller chooses signer | Part done | #172 |
-| Request signed by a certificate already held | wizard | Library: `Authorization::Additional`, borrowed `TqslKey` | Part done | #172 |
-| Renew a certificate | Renew Callsign Certificate | Library: `Authorization::Renewal`, fresh key and stored response handoff | Part done | #172 |
+| Request a new certificate (`.tq5`), matching TQSL's | Request New Callsign Certificate | Library: `CertificateRequest::generate`, pending requests in `Store`; no CLI or Desktop yet | Part done | #172 |
+| Request: call, DXCC entity, first and last QSO date | wizard | Library validates DXCC and QSO dates; no CLI or Desktop yet | Part done | #172 |
+| Request: name, address, email | wizard | Library validates and writes bounded public fields; no CLI or Desktop yet | Part done | #172 |
+| Request: kind of call (club, DXpedition, special event, former, replacing, QSL manager) | wizard | Library: `CallKind` intent; TQSL has no kind-specific wire field; caller chooses signer; no CLI or Desktop yet | Part done | #172 |
+| Request signed by a certificate already held | wizard | Library: `Authorization::Additional`, borrowed `TqslKey`; no CLI or Desktop yet | Part done | #172 |
+| Renew a certificate | Renew Callsign Certificate | Library: `Authorization::Renewal`, fresh key and matched pending response in `Store`; no CLI or Desktop yet | Part done | #172 |
 
 ### 1.8 Upload to LoTW
 

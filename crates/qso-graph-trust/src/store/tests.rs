@@ -391,6 +391,7 @@ struct ObservedKeys {
     folder: PathBuf,
     fail_write: bool,
     fail_delete: bool,
+    deny_put: std::sync::atomic::AtomicBool,
     calls: Mutex<Vec<&'static str>>,
 }
 impl ObservedKeys {
@@ -400,6 +401,7 @@ impl ObservedKeys {
             folder: folder.into(),
             fail_write,
             fail_delete,
+            deny_put: std::sync::atomic::AtomicBool::new(false),
             calls: Mutex::new(Vec::new()),
         }
     }
@@ -415,6 +417,9 @@ impl KeyStore for ObservedKeys {
     fn put(&self, name: &str, der: &[u8]) -> Result<(), KeyStoreError> {
         self.file_does_not_name(name);
         self.calls.lock().expect("calls").push("put");
+        if self.deny_put.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(KeyStoreError::AccessDenied);
+        }
         self.inner.put(name, der)?;
         if self.fail_write {
             fs::create_dir(self.folder.join("store.xml.partial"))
@@ -615,6 +620,7 @@ fn open_reports_missing_and_orphaned_keys_without_reading_or_removing_secrets() 
     assert_eq!(
         report,
         OpenReport {
+            missing_request_keys: Vec::new(),
             missing_keys: vec![id.clone()],
             orphaned_keys: vec![orphan.clone()]
         }
@@ -930,3 +936,5 @@ fn platform_default_folder_uses_the_shared_service_path() {
     }
     assert_eq!(default_dir_from(|_| None), None);
 }
+
+mod requests;

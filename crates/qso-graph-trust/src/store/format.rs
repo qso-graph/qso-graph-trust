@@ -4,14 +4,16 @@
 use std::collections::BTreeSet;
 
 use base64ct::{Base64, Encoding};
+use x509_cert::der::Decode;
+use x509_cert::spki::SubjectPublicKeyInfoRef;
 
 use crate::certificate::{Certificate, MAX_CERTIFICATE_LEN};
 use crate::station::{MAX_FIELDS, MAX_LEN, StationLocation};
 use crate::xml::{self, Element};
 
 use super::{
-    Data, MAX_CERTIFICATES, MAX_FILE_LEN, MAX_LOCATIONS, MAX_NAME_LEN, StoreError,
-    StoredCertificate, StoredLocation, VERSION, keys,
+    Data, MAX_CERTIFICATES, MAX_FILE_LEN, MAX_LOCATIONS, MAX_NAME_LEN, MAX_PENDING_REQUESTS,
+    PendingRequest, StoreError, StoredCertificate, StoredLocation, VERSION, keys,
 };
 
 pub(super) fn read(text: &str) -> Result<Data, StoreError> {
@@ -41,7 +43,15 @@ pub(super) fn read(text: &str) -> Result<Data, StoreError> {
 
 fn read_v1(root: &Element<'_>) -> Result<Data, StoreError> {
     container(root, &["version"])?;
-    if root.children.len() != 3 {
+    if root.children.iter().any(|c| {
+        ![
+            "certificates",
+            "locations",
+            "signed-qsos",
+            "pending-requests",
+        ]
+        .contains(&c.name)
+    }) {
         return Err(StoreError::Invalid("store sections"));
     }
     let certificates = section(root, "certificates")?;
@@ -141,6 +151,67 @@ fn read_v1(root: &Element<'_>) -> Result<Data, StoreError> {
             StationLocation::new(&borrowed).map_err(|_| StoreError::Invalid("station location"))?;
         data.locations.push(StoredLocation { name, station });
     }
+    // Optional in version 1: stores written before request support remain readable. An older
+    // reader refuses the new section rather than silently discarding pending-key custody.
+    if root.children.iter().any(|c| c.name == "pending-requests") {
+        let pending = section(root, "pending-requests")?;
+        container(pending, &[])?;
+        if pending.children.len() > MAX_PENDING_REQUESTS {
+            return Err(StoreError::Limit("pending requests"));
+        }
+        let mut public_keys = BTreeSet::new();
+        for r in &pending.children {
+            if r.name != "request" || !r.children.is_empty() {
+                return Err(StoreError::Invalid("pending request element"));
+            }
+            attributes(r, &["id", "call", "dxcc", "created", "key"])?;
+            let id = attribute(r, "id", 44)?;
+            if !keys::valid_name(&id, "request:") || !ids.insert(id.clone()) {
+                return Err(StoreError::Invalid("request identifier"));
+            }
+            let key_name = attribute(r, "key", 40)?;
+            if !keys::valid_name(&key_name, "key:") || !key_names.insert(key_name.clone()) {
+                return Err(StoreError::Invalid("key name"));
+            }
+            let callsign = attribute(r, "call", 20)?;
+            if !crate::qso::is_callsign(&callsign) {
+                return Err(StoreError::Invalid("request callsign"));
+            }
+            let dxcc = attribute(r, "dxcc", 10)?
+                .parse()
+                .map_err(|_| StoreError::Invalid("request DXCC"))?;
+            if crate::lotw::dxcc(dxcc).is_none() {
+                return Err(StoreError::Invalid("request DXCC"));
+            }
+            let created_at = attribute(r, "created", 20)?
+                .parse()
+                .map_err(|_| StoreError::Invalid("request creation time"))?;
+            let encoded = r.text();
+            // A generated RSA-1024 SPKI is 162 bytes. Allow bounded DER overhead, without
+            // allocating arbitrarily large public keys from an edited store file.
+            if encoded.len() > 512 {
+                return Err(StoreError::Limit("request SPKI bytes"));
+            }
+            let public_key_der = Base64::decode_vec(&encoded)
+                .map_err(|_| StoreError::Invalid("request SPKI base64"))?;
+            let spki = SubjectPublicKeyInfoRef::from_der(&public_key_der)
+                .map_err(|_| StoreError::Invalid("request SPKI DER"))?;
+            if spki.algorithm.oid
+                != x509_cert::der::asn1::ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1")
+                || !public_keys.insert(public_key_der.clone())
+            {
+                return Err(StoreError::Invalid("request public key"));
+            }
+            data.pending_requests.push(PendingRequest {
+                id,
+                callsign,
+                dxcc,
+                public_key_der,
+                created_at,
+                key_name,
+            });
+        }
+    }
     Ok(data)
 }
 
@@ -238,7 +309,31 @@ pub(super) fn write(data: &Data) -> Result<String, StoreError> {
         }
         out.push_str("    </location>\n");
     }
-    out.push_str("  </locations>\n  <signed-qsos version=\"1\"/>\n</qgt-store>\n");
+    out.push_str("  </locations>\n  <signed-qsos version=\"1\"/>\n");
+    if !data.pending_requests.is_empty() {
+        out.push_str("  <pending-requests>\n");
+        for r in &data.pending_requests {
+            out.push_str("    <request");
+            for (name, value) in [
+                ("id", r.id.as_str()),
+                ("call", &r.callsign),
+                ("dxcc", &r.dxcc.to_string()),
+                ("created", &r.created_at.to_string()),
+                ("key", &r.key_name),
+            ] {
+                out.push(' ');
+                out.push_str(name);
+                out.push_str("=\"");
+                escape(&mut out, value)?;
+                out.push('"');
+            }
+            out.push('>');
+            out.push_str(&Base64::encode_string(&r.public_key_der));
+            out.push_str("</request>\n");
+        }
+        out.push_str("  </pending-requests>\n");
+    }
+    out.push_str("</qgt-store>\n");
     if out.len() > MAX_FILE_LEN {
         return Err(StoreError::Limit("file bytes"));
     }

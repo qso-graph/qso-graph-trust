@@ -60,21 +60,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 The `.tq8` is what LoTW accepts: upload it on LoTW's website.
 
-## Certificate requests
-
-`request::CertificateRequest::generate` creates a new `.tq5`, an additional request signed by a
-borrowed `TqslKey`, or a renewal with a fresh RSA-1024 key. It validates DXCC and QSO dates and
-bounds every public field. The CSR and request fields, including `TQSL_IDENT`, match the
-TQSL 2.8.7 request format.
-`CallKind` records the operator's intent; TQSL does not encode it in the file.
-
-Desktop and CLI supply an OS `KeyStore` backend and install the wiping allocator above. Call
-`GeneratedRequest::store_key` before saving or submitting its public `tq5()` text. Retain the
-returned credential name with the call, DXCC and public key until the response arrives. Verify
-that response's issuer and identity, then call `Store::add_requested_certificate` to attach the
-matched key. Pending keys appear in the orphan report until attached and must be retained.
-The generated private key has no public byte accessor. Request creation performs no upload.
-
 ## Checking a download
 
 Each release is published by this repository's release workflow, which GitHub attests: a signed

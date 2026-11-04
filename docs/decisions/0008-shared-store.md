@@ -68,6 +68,18 @@ OS credential backends await their own dependency decision. No backend or new de
 - `default_dir()` uses XDG data home (absolute, nonempty) or HOME on Linux, HOME on macOS and APPDATA
   on Windows. It only resolves the path; callers may supply any folder explicitly.
 
+Certificate requests extend version 1 with an optional `pending-requests` section. Older version-1
+files without it remain readable; the writer omits it when empty. Older readers refuse the new
+section, preventing accidental loss. Each `request` holds `id="request:<uuid>"`, `call`, `dxcc`,
+`created` (Unix seconds), and `key="key:<uuid>"` attributes, with base64 SPKI DER as text. No private
+bytes are in XML. Requests are bounded at 1024, with bounded, parsed RSA SPKIs, valid calls and
+DXCC entities, unique request IDs and SPKIs, and key names unique across requests and certificates.
+`Store::store_request` publishes the pending record after putting the key, using the import rollback
+and durability rules. Open reports missing pending keys separately and does not count them as
+orphans. Response attachment matches SPKI, call and DXCC, checks the private key as on import, and
+replaces the pending record with a certificate under one lock and one file replacement. Abandonment
+follows deletion's file-first ordering. Applications verify response issuer trust before attachment.
+
 An empty store is valid (a folder without `store.xml` is also empty until the first mutation):
 
 ```xml

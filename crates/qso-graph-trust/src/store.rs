@@ -22,6 +22,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use crate::certificate::Certificate;
+use crate::request::GeneratedRequest;
 use crate::signing::{KeyError, TqslKey};
 use crate::station::StationLocation;
 use crate::tbk::BackedUpCertificate;
@@ -34,6 +35,8 @@ pub const MAX_FILE_LEN: usize = 32 * 1024 * 1024;
 pub const MAX_CERTIFICATES: usize = 1024;
 /// The most station locations in a store.
 pub const MAX_LOCATIONS: usize = 4096;
+/// The most pending certificate requests in a store.
+pub const MAX_PENDING_REQUESTS: usize = 1024;
 /// The longest location name in bytes.
 pub const MAX_NAME_LEN: usize = 255;
 /// The largest credential secret, matching Windows Credential Manager's limit.
@@ -72,12 +75,31 @@ pub struct StoredLocation {
     pub station: StationLocation,
 }
 
+/// Public metadata for a request whose private key is owned by this store.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingRequest {
+    /// Opaque request identifier for abandonment.
+    pub id: String,
+    /// Requested uppercase callsign.
+    pub callsign: String,
+    /// Requested ARRL DXCC entity number.
+    pub dxcc: u32,
+    /// Requested SubjectPublicKeyInfo DER, used to match the response.
+    pub public_key_der: Vec<u8>,
+    /// Request creation time in whole seconds since the Unix epoch.
+    pub created_at: u64,
+    /// Library-owned credential name; this conveys no access to its bytes.
+    pub key_name: String,
+}
+
 /// Inconsistencies found at open. Nothing is deleted or repaired automatically.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct OpenReport {
     /// Certificate identifiers whose named credential is missing.
     pub missing_keys: Vec<String>,
-    /// Credential names with no certificate in the file.
+    /// Pending request identifiers whose named credential is missing.
+    pub missing_request_keys: Vec<String>,
+    /// Credential names with no certificate or pending request in the file.
     pub orphaned_keys: Vec<String>,
 }
 
@@ -168,6 +190,7 @@ impl From<KeyError> for StoreError {
 struct Data {
     certificates: Vec<StoredCertificate>,
     locations: Vec<StoredLocation>,
+    pending_requests: Vec<PendingRequest>,
 }
 
 /// A shared folder and its private, library-owned credential backend.
@@ -238,6 +261,11 @@ impl Store {
                 report.missing_keys.push(cert.id.clone());
             }
         }
+        for request in &data.pending_requests {
+            if !store.keys.exists(&request.key_name)? {
+                report.missing_request_keys.push(request.id.clone());
+            }
+        }
         let names = store.keys.names()?;
         if names.len() > keys::MAX_KEYS {
             return Err(StoreError::Limit("credential names"));
@@ -250,6 +278,7 @@ impl Store {
                 .certificates
                 .iter()
                 .any(|c| c.key_name.as_ref() == Some(&name))
+                && !data.pending_requests.iter().any(|r| r.key_name == name)
             {
                 report.orphaned_keys.push(name);
             }
@@ -310,45 +339,94 @@ impl Store {
         });
         // Serialize before putting the key, so bad public input cannot create even a temporary orphan.
         let xml = format::write(&data)?;
-        self.keys.put(&name, &der)?;
-        if let Err(write) = self.replace(&xml) {
-            // After rename the certificate already names the key, even when directory sync fails.
-            if matches!(write, StoreError::Durability(_)) {
-                return Err(write);
-            }
-            if let Err(cleanup) = self.keys.delete(&name) {
-                return Err(StoreError::Rollback {
-                    write: Box::new(write),
-                    cleanup,
-                });
-            }
-            return Err(write);
-        }
+        self.put_and_replace(&name, &der, &xml)?;
         Ok(id)
     }
 
-    /// Attach a response certificate to a previously stored request key. The caller verifies
-    /// its issuer and pending call/DXCC on import. The credential is checked against the
-    /// certificate before publishing; failures never delete the pending key, allowing retry.
-    pub fn add_requested_certificate(
-        &self,
-        certificate: &Certificate,
-        key_name: &str,
-    ) -> Result<String, StoreError> {
-        if !keys::valid_name(key_name, "key:") {
-            return Err(StoreError::Invalid("credential name"));
-        }
+    /// Store a generated key and publish its pending request, returning a `request:<uuid>` ID.
+    /// The request remains borrowed so a pre-replacement failure can be retried. Do not submit
+    /// its `.tq5` until this succeeds. Duplicate SPKIs are refused. After `Durability`, consult
+    /// `pending_requests` before retrying: the record is visible and its key has been retained.
+    pub fn store_request(&self, request: &GeneratedRequest) -> Result<String, StoreError> {
         let _lock = self.lock()?;
         let mut data = self.read()?;
-        check_certificate(&data, certificate)?;
+        if data.pending_requests.len() >= MAX_PENDING_REQUESTS {
+            return Err(StoreError::Limit("pending requests"));
+        }
         if data
-            .certificates
+            .pending_requests
             .iter()
-            .any(|c| c.key_name.as_deref() == Some(key_name))
+            .any(|r| r.public_key_der == request.public)
         {
             return Err(StoreError::AlreadyExists);
         }
-        let der = self.keys.get(key_name)?.ok_or(StoreError::NotFound)?;
+        if request.private.len() > MAX_KEY_LEN {
+            return Err(StoreError::Limit("credential bytes"));
+        }
+        TqslKey::from_pkcs8_der(&request.private, &request.public)?;
+        let name = keys::new_name("key:")?;
+        let id = keys::new_name("request:")?;
+        if self.keys.exists(&name)? || data.pending_requests.iter().any(|r| r.id == id) {
+            return Err(StoreError::AlreadyExists);
+        }
+        data.pending_requests.push(PendingRequest {
+            id: id.clone(),
+            callsign: request.callsign.clone(),
+            dxcc: request.dxcc,
+            public_key_der: request.public.clone(),
+            created_at: request.created_at,
+            key_name: name.clone(),
+        });
+        let xml = format::write(&data)?;
+        self.put_and_replace(&name, &request.private, &xml)?;
+        Ok(id)
+    }
+
+    /// List pending public metadata from the current file under the lock.
+    pub fn pending_requests(&self) -> Result<Vec<PendingRequest>, StoreError> {
+        let _lock = self.lock()?;
+        Ok(self.read()?.pending_requests)
+    }
+
+    /// Publish removal of a pending record before deleting its key. A failed durability sync
+    /// retains the key; backend deletion failure leaves an orphan reported on the next open.
+    pub fn abandon_request(&self, id: &str) -> Result<(), StoreError> {
+        let _lock = self.lock()?;
+        let mut data = self.read()?;
+        let i = data
+            .pending_requests
+            .iter()
+            .position(|r| r.id == id)
+            .ok_or(StoreError::NotFound)?;
+        let request = data.pending_requests.remove(i);
+        self.replace(&format::write(&data)?)?;
+        self.keys.delete(&request.key_name)?;
+        Ok(())
+    }
+
+    /// Attach a response to its pending request by SPKI, call and DXCC, validating the stored
+    /// private key against the certificate. The caller verifies issuer trust before import.
+    /// Attachment and pending removal share one file replacement under the lock. Failures
+    /// before replacement retain the pending request and key; `Durability` leaves the
+    /// certificate visible and its key retained.
+    pub fn add_requested_certificate(
+        &self,
+        certificate: &Certificate,
+    ) -> Result<String, StoreError> {
+        let _lock = self.lock()?;
+        let mut data = self.read()?;
+        check_certificate(&data, certificate)?;
+        let i = data
+            .pending_requests
+            .iter()
+            .position(|r| {
+                r.public_key_der == certificate.public_key_der()
+                    && r.callsign == certificate.callsign()
+                    && r.dxcc == certificate.dxcc()
+            })
+            .ok_or(StoreError::NotFound)?;
+        let key_name = data.pending_requests[i].key_name.clone();
+        let der = self.keys.get(&key_name)?.ok_or(StoreError::NotFound)?;
         if der.len() > MAX_KEY_LEN {
             return Err(StoreError::Limit("credential bytes"));
         }
@@ -360,8 +438,9 @@ impl Store {
         data.certificates.push(StoredCertificate {
             id: id.clone(),
             certificate: certificate.clone(),
-            key_name: Some(key_name.into()),
+            key_name: Some(key_name),
         });
+        data.pending_requests.remove(i);
         self.replace(&format::write(&data)?)?;
         Ok(id)
     }
@@ -479,6 +558,24 @@ impl Store {
         let key = TqslKey::from_pkcs8_der(&der, cert.certificate.public_key_der())?;
         drop(der);
         Ok(sign(&key))
+    }
+
+    fn put_and_replace(&self, name: &str, der: &[u8], xml: &str) -> Result<(), StoreError> {
+        self.keys.put(name, der)?;
+        if let Err(write) = self.replace(xml) {
+            // After rename the file already names the key, even when durability sync fails.
+            if matches!(write, StoreError::Durability(_)) {
+                return Err(write);
+            }
+            if let Err(cleanup) = self.keys.delete(name) {
+                return Err(StoreError::Rollback {
+                    write: Box::new(write),
+                    cleanup,
+                });
+            }
+            return Err(write);
+        }
+        Ok(())
     }
 
     fn lock(&self) -> Result<File, StoreError> {
@@ -693,8 +790,3 @@ fn default_dir_from(env: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests;
-
-// Keep UUID generation and validation in the store, shared with request custody.
-pub(crate) fn request_key_name() -> Result<String, crate::request::RequestError> {
-    keys::new_name("key:").map_err(|_| crate::request::RequestError::Crypto)
-}

@@ -5,14 +5,13 @@ use super::*;
 use std::path::Path;
 
 use base64ct::{Base64, Encoding};
-use rsa::pkcs8::{DecodePrivateKey, DecodePublicKey};
-use rsa::{Pkcs1v15Sign, RsaPrivateKey, RsaPublicKey};
+use rsa::pkcs8::DecodePublicKey;
+use rsa::{Pkcs1v15Sign, RsaPublicKey};
 use sha2::Digest;
 use x509_cert::der::{DecodePem, Encode};
 
 use crate::records;
 use crate::signing::KeyEntry;
-use crate::store::MemoryKeyStore;
 
 fn corpus(path: &str) -> Vec<u8> {
     std::fs::read(
@@ -92,10 +91,10 @@ fn verify_csr(csr: &CertReq) {
 }
 
 #[test]
-fn same_test_key_reproduces_tqsllib_requests_byte_for_byte() {
+fn same_test_key_reproduces_tqsllib_requests_except_identification() {
     // Differential test: these are tqsllib's *actual* requests, not DER constructed by this test.
     // Reusing each test key also makes its PKCS#1 v1.5 signature deterministic, so compare every
-    // byte, identification and CSR signature included.
+    // byte except the identification field, including the CSR signature.
     for (prefix, call, password) in [
         ("tqsl/1024", "QG0TEST", None),
         ("tqsl/1024-password", "QG0TEST", Some(b"qgt-key".as_slice())),
@@ -117,7 +116,23 @@ fn same_test_key_reproduces_tqsllib_requests_byte_for_byte() {
         assert_eq!(csr, csr_in(&theirs), "{prefix}/{call}");
         verify_csr(&csr);
         let ours = req.frame(&csr, Authorization::New, None).expect("frame");
-        assert_eq!(ours, theirs, "{prefix}/{call}");
+        let old_ident = parse_tq5(&theirs)[0]
+            .text("TQSL_IDENT")
+            .expect("ident")
+            .to_owned();
+        let mut normalized = String::new();
+        field(&mut normalized, "TQSL_IDENT", &old_ident);
+        let mut ours_ident = String::new();
+        let current = parse_tq5(&ours)[0]
+            .text("TQSL_IDENT")
+            .expect("ident")
+            .to_owned();
+        field(&mut ours_ident, "TQSL_IDENT", &current);
+        assert_eq!(
+            ours.replace(&ours_ident, &normalized),
+            theirs,
+            "{prefix}/{call}"
+        );
     }
 }
 
@@ -127,11 +142,12 @@ fn fresh_key_is_lotw_shaped_csr_verifies_and_only_public_values_are_returned() {
     let generated = req.generate(Authorization::New).expect("request");
     assert_eq!(format!("{generated:?}"), "GeneratedRequest(..)");
     assert!(!generated.tq5().contains("PRIVATE KEY"));
-    assert!(
-        generated
-            .tq5()
-            .contains("TQSL: 2.8.7, Lib: V2.8.7, Config: 11.35")
-    );
+    assert!(generated.tq5().contains(&format!(
+        "QSO Graph Trust Lib: V{} Config: V{}.{}",
+        crate::VERSION,
+        crate::lotw::CONFIG_VERSION.0,
+        crate::lotw::CONFIG_VERSION.1
+    )));
     TqslKey::from_pkcs8_der(&generated.private, generated.public_key_der())
         .expect("LoTW shape and matching public key");
     let csr = csr_in(generated.tq5());
@@ -152,7 +168,7 @@ fn fresh_key_is_lotw_shaped_csr_verifies_and_only_public_values_are_returned() {
     let public_fields = |r: &records::Record| {
         r.fields
             .iter()
-            .filter(|f| f.name != "TQSL_CRQ_REQUEST")
+            .filter(|f| !["TQSL_CRQ_REQUEST", "TQSL_IDENT"].contains(&f.name.as_str()))
             .cloned()
             .collect::<Vec<_>>()
     };
@@ -454,98 +470,6 @@ fn optional_fields_dates_trimming_and_openssl_subject_encoding() {
 }
 
 #[test]
-fn credential_handoff_is_wiped_retryable_and_does_not_export_a_key() {
-    let generated = request("QG0TEST")
-        .generate(Authorization::New)
-        .expect("request");
-    let store = MemoryKeyStore::new();
-    let name = generated.store_key(&store).expect("custody handoff");
-    assert!(name.starts_with("key:"));
-    let private = store.get(&name).expect("credential").expect("present");
-    TqslKey::from_pkcs8_der(&private, generated.public_key_der()).expect("stored generated key");
-    assert_eq!(private, generated.private);
-    drop(generated);
-    assert!(
-        store
-            .exists(&name)
-            .expect("credential survives request object")
-    );
-}
-
-#[test]
-fn response_can_be_attached_and_used_after_reopening_store() {
-    use crate::certificate::Trust;
-    use crate::store::Store;
-    let generated = request("QG0TEST")
-        .generate(Authorization::New)
-        .expect("request");
-    let backend = MemoryKeyStore::new();
-    let key_name = generated.store_key(&backend).expect("handoff");
-    // A test CA issues the response, just as it issued the corpus's certificate. No real keys.
-    let mut response =
-        x509_cert::Certificate::from_pem(corpus("tqsl/1024/tqsl/certs/user")).expect("template");
-    response.tbs_certificate.subject_public_key_info =
-        SubjectPublicKeyInfoOwned::from_der(generated.public_key_der()).expect("SPKI");
-    let ca =
-        RsaPrivateKey::from_pkcs8_pem(&String::from_utf8(corpus("tqsl/pki/ca.key")).expect("PEM"))
-            .expect("test CA");
-    let sig = ca
-        .sign(
-            Pkcs1v15Sign::new::<sha2::Sha256>(),
-            &sha2::Sha256::digest(response.tbs_certificate.to_der().expect("TBS")),
-        )
-        .expect("CA signature");
-    response.signature = BitString::from_bytes(&sig).expect("signature");
-    let certificate =
-        Certificate::from_pem_or_der(&response.to_der().expect("response")).expect("response");
-    let trust = Trust::with_roots(&[&corpus("tqsl/pki/root.pem")]).expect("trust");
-    certificate
-        .verify(
-            &trust,
-            &[x509_cert::Certificate::from_pem(corpus("tqsl/pki/ca.pem"))
-                .expect("CA")
-                .to_der()
-                .expect("CA DER")],
-        )
-        .expect("response chains");
-    let path = std::env::temp_dir().join(
-        crate::store::request_key_name()
-            .expect("unique")
-            .replace(':', "-"),
-    );
-    std::fs::create_dir(&path).expect("temporary store");
-    let (store, report) = Store::open(&path, &backend).expect("open");
-    assert!(report.orphaned_keys.contains(&key_name));
-    let wrong =
-        Certificate::from_pem_or_der(&corpus("tqsl/1024/tqsl/certs/user")).expect("wrong response");
-    assert!(store.add_requested_certificate(&wrong, &key_name).is_err());
-    assert!(
-        backend
-            .exists(&key_name)
-            .expect("failed attach keeps pending key")
-    );
-    let id = store
-        .add_requested_certificate(&certificate, &key_name)
-        .expect("attach");
-    assert!(
-        store
-            .add_requested_certificate(&certificate, &key_name)
-            .is_err()
-    );
-    drop(store);
-    drop(generated);
-    let (store, report) = Store::open(&path, &backend).expect("reopen");
-    assert!(report.orphaned_keys.is_empty());
-    store
-        .with_key(&id, |key| {
-            assert!(key.matches_public_key(certificate.public_key_der()))
-        })
-        .expect("store lends requested key");
-    drop(store);
-    std::fs::remove_dir_all(path).expect("cleanup");
-}
-
-#[test]
 fn issuer_uses_openssl_oneline_escaping_and_multivalued_rdn_separator() {
     // Expected spelling checked against OpenSSL's X509_NAME_oneline (`-nameopt compat`),
     // the routine tqsl_getCertificateIssuer calls, rather than RFC 4514 name formatting.
@@ -583,48 +507,15 @@ fn issuer_uses_openssl_oneline_escaping_and_multivalued_rdn_separator() {
 }
 
 #[test]
-fn failed_credential_handoff_keeps_the_key_for_retry() {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    struct Backend {
-        refuse: AtomicBool,
-        memory: MemoryKeyStore,
-    }
-    impl KeyStore for Backend {
-        fn put(&self, name: &str, der: &[u8]) -> Result<(), KeyStoreError> {
-            if self.refuse.load(Ordering::Relaxed) {
-                Err(KeyStoreError::AccessDenied)
-            } else {
-                self.memory.put(name, der)
-            }
-        }
-        fn get(&self, name: &str) -> Result<Option<Zeroizing<Vec<u8>>>, KeyStoreError> {
-            self.memory.get(name)
-        }
-        fn delete(&self, name: &str) -> Result<(), KeyStoreError> {
-            self.memory.delete(name)
-        }
-        fn exists(&self, name: &str) -> Result<bool, KeyStoreError> {
-            self.memory.exists(name)
-        }
-        fn names(&self) -> Result<Vec<String>, KeyStoreError> {
-            self.memory.names()
-        }
-    }
-    let generated = request("QG0TEST")
-        .generate(Authorization::New)
-        .expect("request");
-    let backend = Backend {
-        refuse: AtomicBool::new(true),
-        memory: MemoryKeyStore::new(),
-    };
+fn a_clock_before_the_epoch_cannot_create_pending_metadata() {
+    use std::time::{Duration, UNIX_EPOCH};
     assert_eq!(
-        generated.store_key(&backend),
-        Err(RequestError::Store(KeyStoreError::AccessDenied))
+        creation_time(UNIX_EPOCH - Duration::from_secs(1)),
+        Err(RequestError::Clock)
     );
-    assert!(backend.names().expect("names").is_empty());
-    backend.refuse.store(false, Ordering::Relaxed);
-    let name = generated.store_key(&backend).expect("retry");
-    let private = backend.get(&name).expect("get").expect("present");
-    TqslKey::from_pkcs8_der(&private, generated.public_key_der())
-        .expect("same request key survives denial");
+    assert_eq!(creation_time(UNIX_EPOCH), Ok(0));
+    assert_eq!(
+        creation_time(UNIX_EPOCH + Duration::from_secs(123)),
+        Ok(123)
+    );
 }

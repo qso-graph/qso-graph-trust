@@ -4,14 +4,28 @@
 //! Callsign certificate requests compatible with TQSL 2.8.7 (`openssl_cert.cpp`,
 //! `tqsl_createCertRequest` and `tqsl_sign_base64_data`). Nothing is sent to ARRL here.
 //!
-//! Desktop and CLI collect a [`CertificateRequest`], borrow an old key through
-//! [`crate::store::Store::with_key`] when signing, and call [`CertificateRequest::generate`].
-//! They hand the opaque result to [`GeneratedRequest::store_key`] using their OS credential
-//! backend before saving/submitting the public `.tq5`. Retain the returned credential name,
-//! call, DXCC and public key with the pending request. When the response arrives, verify its
-//! issuer and attach the credential with [`crate::store::Store::add_requested_certificate`].
-//! Pending credentials appear in the store's orphan report until attached; never delete them
-//! merely because that report lists them. Applications must install the wiping allocator.
+//! Desktop and CLI can collect a [`CertificateRequest`] and call [`CertificateRequest::generate`].
+//! For additional requests or renewals, borrow the authorizing key through
+//! [`crate::store::Store::with_key`]; return the generated request from the callback before
+//! calling [`crate::store::Store::store_request`] (the callback must not reenter the store).
+//! Store the opaque result before saving or submitting its public [`GeneratedRequest::tq5`].
+//! The store owns the backend and records the pending call, DXCC, SPKI, creation time and key
+//! name in `store.xml`; applications need not retain a credential handle or request metadata.
+//! Use [`crate::store::Store::pending_requests`] to list requests and
+//! [`crate::store::Store::abandon_request`] to discard one. Verify the response's issuer, then
+//! pass it to [`crate::store::Store::add_requested_certificate`], which matches call, DXCC and
+//! SPKI and checks the stored private key before attaching it and removing the pending record.
+//!
+//! Requests identify QG Trust with the same `TQSL_IDENT` value as signed logs. The other fields,
+//! CSR subject, empty attributes and algorithms follow TQSL 2.8.7. [`CallKind`] captures wizard
+//! intent; TQSL does not encode a kind-specific field. Generation uses AWS-LC through the binding
+//! for RSA-1024 (exponent 65537) and SHA-256 CSR signing, which aws-lc-rs cannot perform at that
+//! key size. Generated PKCS#8 remains in wiped memory and has no public byte accessor.
+//!
+//! These are library APIs; CLI commands and Desktop screens are not implemented yet. The only
+//! backend currently selectable is volatile [`crate::store::KeyBackend::Memory`], for tests;
+//! persistent OS backends await their dependency decision. Applications must install the wiping
+//! allocator described in the crate README. No upload is performed here.
 
 use std::fmt;
 
@@ -29,7 +43,6 @@ use zeroize::Zeroizing;
 use crate::certificate::Certificate;
 use crate::qso::{Date, is_callsign};
 use crate::signing::{TqslKey, tqsl_base64};
-use crate::store::{KeyStore, KeyStoreError};
 
 /// The operator's reason for requesting a call. TQSL's wizard uses this to guide signer
 /// selection (`apps/crqwiz.cpp`, `signCode`); `TQSL_CERT_REQ` has no kind field and none is
@@ -115,8 +128,11 @@ pub enum Authorization<'a> {
 /// Debug output never includes the key. Dropping this without storing loses the new key.
 pub struct GeneratedRequest {
     tq5: String,
-    private: Zeroizing<Vec<u8>>,
-    public: Vec<u8>,
+    pub(crate) private: Zeroizing<Vec<u8>>,
+    pub(crate) public: Vec<u8>,
+    pub(crate) callsign: String,
+    pub(crate) dxcc: u32,
+    pub(crate) created_at: u64,
 }
 
 impl fmt::Debug for GeneratedRequest {
@@ -135,17 +151,6 @@ impl GeneratedRequest {
     pub fn public_key_der(&self) -> &[u8] {
         &self.public
     }
-
-    /// Hand the new key directly to the caller's credential backend. Returns a fresh `key:<uuid>`
-    /// name to retain with the pending request. On failure this object still owns the wiped key,
-    /// so the operator can retry; the backend must implement `KeyStore::put` atomically.
-    pub fn store_key(&self, store: &dyn KeyStore) -> Result<String, RequestError> {
-        let name = crate::store::request_key_name()?;
-        store
-            .put(&name, &self.private)
-            .map_err(RequestError::Store)?;
-        Ok(name)
-    }
 }
 
 /// Fixed error categories; no key material, password or user-supplied text is included.
@@ -159,8 +164,8 @@ pub enum RequestError {
     SignerMismatch,
     /// The issuer name cannot be represented as TQSL's issuer field.
     Issuer,
-    /// The credential backend refused the handoff.
-    Store(KeyStoreError),
+    /// The system clock precedes the Unix epoch.
+    Clock,
 }
 
 impl fmt::Display for RequestError {
@@ -170,7 +175,7 @@ impl fmt::Display for RequestError {
             Self::Crypto => f.write_str("could not generate or sign the certificate request"),
             Self::SignerMismatch => f.write_str("request signer does not match the certificate"),
             Self::Issuer => f.write_str("certificate issuer cannot be written as a TQSL issuer"),
-            Self::Store(error) => write!(f, "could not store the request key: {error}"),
+            Self::Clock => f.write_str("the system clock precedes the Unix epoch"),
         }
     }
 }
@@ -213,13 +218,14 @@ impl CertificateRequest {
     }
 
     /// Generate a fresh RSA-1024 key and TQSL-compatible PKCS#10 request. The private key has
-    /// no public byte accessor: pass the result directly to `GeneratedRequest::store_key`.
-    /// Framing and identification follow the TQSL 2.8.7 request format, including TQSL_IDENT.
+    /// no public byte accessor: hand the result to [`crate::store::Store::store_request`].
+    /// Framing follows TQSL 2.8.7; `TQSL_IDENT` names QG Trust.
     pub fn generate(
         &self,
         authorization: Authorization<'_>,
     ) -> Result<GeneratedRequest, RequestError> {
         self.validate()?;
+        let created_at = creation_time(std::time::SystemTime::now())?;
         let signer = self.signer(authorization)?;
         let (private, public) = RsaKey::generate_lotw().map_err(|_| RequestError::Crypto)?;
         // Exercise precisely the same shape and public/private match checks as imported keys.
@@ -230,6 +236,9 @@ impl CertificateRequest {
             tq5,
             private,
             public,
+            callsign: self.callsign.trim().into(),
+            dxcc: self.dxcc,
+            created_at,
         })
     }
 
@@ -331,7 +340,10 @@ impl CertificateRequest {
         field(
             &mut out,
             "TQSL_IDENT",
-            &format!("TQSL: 2.8.7, Lib: V2.8.7, Config: {major}.{minor}"),
+            &format!(
+                "QSO Graph Trust Lib: V{} Config: V{major}.{minor}",
+                crate::VERSION
+            ),
         );
         out.push_str(match auth {
             Authorization::New => "<TQSL_CRQ_NEW>\n\n",
@@ -376,6 +388,12 @@ impl CertificateRequest {
         out.push_str("<eor>\n\n");
         Ok(out)
     }
+}
+
+fn creation_time(now: std::time::SystemTime) -> Result<u64, RequestError> {
+    now.duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|_| RequestError::Clock)
 }
 
 fn field(out: &mut String, name: &str, value: &str) {
