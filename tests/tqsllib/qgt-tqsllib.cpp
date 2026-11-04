@@ -182,7 +182,7 @@ int location(int argc, char** argv) {
 // tqsl_beginSigning, and duplicates refused and committed so uploaded.db records the log.
 int sign(int argc, char** argv) {
 	if (argc < 5 || argc > 6) usage();
-	char* keypass = argc == 6 ? argv[5] : nullptr;
+	char* keypass = argc == 6 ? argv[5] : std::getenv("QGT_TEST_KEYPASS");
 	tQSL_Location loc;
 	if (tqsl_getStationLocation(&loc, argv[2])) fail(std::string("opening location ") + argv[2]);
 	char call[256];
@@ -200,6 +200,23 @@ int sign(int argc, char** argv) {
 	tQSL_Converter conv = nullptr;
 	if (tqsl_beginADIFConverter(&conv, argv[3], certs, ncerts, loc)) fail(std::string("reading ") + argv[3]);
 	tqsl_setConverterAllowDuplicates(conv, false);
+	// Optional settings for the signing-options differential corpus. No process-global map
+	// survives a run. TQSL's app installs these after opening the converter (tqsl.cpp:2286–2295).
+	if (const char* value = std::getenv("QGT_IGNORE_SECONDS"))
+		tqsl_setConverterIgnoreSeconds(conv, std::atoi(value));
+	if (const char* value = std::getenv("QGT_IGNORE_CALLSIGNS"))
+		tqsl_setConverterIgnoreCallsigns(conv, std::atoi(value));
+	if (const char* value = std::getenv("QGT_ALLOW_BAD_CALLS"))
+		tqsl_setConverterAllowBadCall(conv, std::atoi(value));
+	if (const char* value = std::getenv("QGT_QTH"))
+		tqsl_setConverterQTHDetails(conv, std::atoi(value));
+	if (const char* value = std::getenv("QGT_MODE_MAP")) {
+		std::string mapping(value);
+		auto eq = mapping.find('=');
+		if (eq == std::string::npos) usage();
+		if (tqsl_setADIFMode(mapping.substr(0, eq).c_str(), mapping.substr(eq + 1).c_str()))
+			fail("installing the custom mode map");
+	}
 	std::ofstream out(argv[4], std::ios::out | std::ios::trunc | std::ios::binary);
 	if (!out) {
 		std::fprintf(stderr, "qgt-tqsllib: cannot write %s\n", argv[4]);

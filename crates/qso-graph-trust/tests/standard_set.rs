@@ -13,9 +13,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use qso_graph_trust::certificate::Certificate;
+use qso_graph_trust::options::SigningOptions;
 use qso_graph_trust::qso::Qso;
 use qso_graph_trust::records;
-use qso_graph_trust::signed_log::sign_log;
+use qso_graph_trust::signed_log::{sign_log, sign_log_with_options};
 use qso_graph_trust::signing::KeyEntry;
 use qso_graph_trust::station::StationLocation;
 
@@ -91,6 +92,18 @@ fn every_location_signs_as_tqsllib() {
         let at = cert.validity().0 + Duration::from_secs(3600);
         let ours =
             sign_log(&cert, &signer, &station, &qsos, at).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(
+            ours,
+            sign_log_with_options(
+                &cert,
+                &signer,
+                &station,
+                &qsos,
+                at,
+                &SigningOptions::default()
+            )
+            .expect("default options")
+        );
         let theirs = set(&format!("signed/{name}.tq7"));
         assert_eq!(
             String::from_utf8_lossy(without_ident(&ours)),

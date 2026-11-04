@@ -13,8 +13,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::{Store, StoreError, format, owner_file, sync_directory};
 use crate::certificate::Certificate;
 use crate::lotw;
+use crate::options::SigningOptions;
 use crate::qso::Qso;
-use crate::signed_log::{LogError, sign_log, tq8};
+use crate::signed_log::{LogError, sign_log, sign_resolved, tq8};
 use crate::signing::TqslKey;
 use crate::station::StationLocation;
 use crate::tbk::Backup;
@@ -64,6 +65,7 @@ pub struct PreviouslySigned {
 pub struct SigningPlan {
     qsos: Vec<Qso>,
     station: StationLocation,
+    locations: Option<Vec<StationLocation>>,
     new: Vec<usize>,
     signed_before: Vec<PreviouslySigned>,
 }
@@ -89,6 +91,13 @@ impl SigningPlan {
         Some(SigningSelection {
             qsos,
             station: self.station.clone(),
+            locations: self.locations.as_ref().map(|locations| match choice {
+                DuplicateChoice::SignAgain => locations.clone(),
+                DuplicateChoice::NewOnly => {
+                    self.new.iter().map(|&i| locations[i].clone()).collect()
+                }
+                DuplicateChoice::Cancel => unreachable!("cancelled above"),
+            }),
         })
     }
 }
@@ -97,6 +106,7 @@ impl SigningPlan {
 pub struct SigningSelection {
     qsos: Vec<Qso>,
     station: StationLocation,
+    locations: Option<Vec<StationLocation>>,
 }
 impl SigningSelection {
     /// Selected QSOs, in input order.
@@ -112,16 +122,22 @@ impl SigningSelection {
         key: &TqslKey,
         now: SystemTime,
     ) -> Result<SignedLog, LogError> {
-        let bytes = tq8(&sign_log(cert, key, &self.station, &self.qsos, now)?);
+        let bytes = tq8(&match &self.locations {
+            Some(locations) => sign_resolved(cert, key, &self.qsos, locations, now)?,
+            None => sign_log(cert, key, &self.station, &self.qsos, now)?,
+        });
         let signed_at = now.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs());
-        let station = station_details(&self.station);
         let records = self
             .qsos
             .iter()
-            .map(|q| SignedQso {
-                key: duplicate_key(q, &self.station),
-                station: station.clone(),
-                signed_at,
+            .enumerate()
+            .map(|(index, q)| {
+                let station = self.locations.as_ref().map_or(&self.station, |s| &s[index]);
+                SignedQso {
+                    key: duplicate_key(q, station),
+                    station: station_details(station),
+                    signed_at,
+                }
             })
             .collect();
         Ok(SignedLog { bytes, records })
@@ -198,7 +214,8 @@ impl SignedLog {
 /// TQSL 2.8.7's key: local call + contact fields in ARRL's signature-specification order.
 /// Includes frequency text, mapped LoTW mode and exact seconds; excludes station fields,
 /// certificate serial and station name. TQSL's `snprintf` limits the result to 127 bytes
-/// (tqslconvert.cpp:1836–1839). Qso's normalized fields are ASCII, so truncation is safe.
+/// (tqslconvert.cpp:1836–1839). The only possibly non-ASCII contact field, a non-amateur CALL,
+/// ends before this limit, so truncation is on a character boundary.
 /// No seconds are rounded here: any ignore-seconds setting must also affect what is signed.
 pub fn duplicate_key(qso: &Qso, station: &StationLocation) -> String {
     let mut key = format!("{}{}", station.call(), qso.sign_data());
@@ -259,7 +276,12 @@ pub(super) fn check_record(record: &SignedQso) -> Result<(), StoreError> {
     if record.key.len() > MAX_SIGNED_KEY_LEN || record.station.len() > MAX_SIGNED_STATION_LEN {
         return Err(StoreError::Limit("signed QSO bytes"));
     }
-    if record.key.is_empty() || !record.key.bytes().all(|b| (b' '..=b'~').contains(&b)) {
+    if record.key.is_empty()
+        || record
+            .key
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '\u{fffe}' | '\u{ffff}'))
+    {
         return Err(StoreError::Invalid("signed QSO key"));
     }
     if record.station.chars().any(|c| {
@@ -353,6 +375,27 @@ impl Store {
         qsos: &[Qso],
         station: &StationLocation,
     ) -> Result<SigningPlan, StoreError> {
+        self.prepare(qsos, station, None)
+    }
+
+    /// Normalize seconds and resolve the log's locations before duplicate detection. Construct
+    /// QSOs with these same options. Per-QSO locations survive duplicate selection, including
+    /// updates inherited from a QSO omitted by `NewOnly`. Signing and recording use this snapshot.
+    pub fn prepare_signing_with_options(
+        &self,
+        qsos: &[Qso],
+        station: &StationLocation,
+        options: &SigningOptions,
+    ) -> Result<SigningPlan, StoreError> {
+        self.prepare(qsos, station, Some(options))
+    }
+
+    fn prepare(
+        &self,
+        qsos: &[Qso],
+        station: &StationLocation,
+        options: Option<&SigningOptions>,
+    ) -> Result<SigningPlan, StoreError> {
         if qsos.len() > MAX_SIGNED_QSOS {
             return Err(StoreError::Limit("signing QSOs"));
         }
@@ -360,14 +403,24 @@ impl Store {
             let _lock = self.lock()?;
             self.read()?.signed_qsos
         };
-        let details = station_details(station);
+        let locations = options
+            .map(|o| o.locations(qsos, station))
+            .transpose()
+            .map_err(StoreError::Log)?;
+        let qsos = match (options, &locations) {
+            (Some(o), Some(locations)) => o.qsos(qsos, locations).map_err(StoreError::Log)?,
+            _ => qsos.to_vec(),
+        };
         let mut plan = SigningPlan {
             qsos: qsos.to_vec(),
             station: station.clone(),
+            locations,
             new: Vec::new(),
             signed_before: Vec::new(),
         };
         for (index, qso) in qsos.iter().enumerate() {
+            let station = plan.locations.as_ref().map_or(station, |s| &s[index]);
+            let details = station_details(station);
             let key = duplicate_key(qso, station);
             if let Some(previous) = seen
                 .get(&key)

@@ -14,6 +14,7 @@ pub mod gzip;
 pub mod import;
 mod lotw;
 mod memory;
+pub mod options;
 mod pkcs12;
 mod protected_key;
 pub mod qso;

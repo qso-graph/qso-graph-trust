@@ -17,6 +17,7 @@ use std::time::SystemTime;
 
 use crate::certificate::Certificate;
 use crate::lotw;
+use crate::options::SigningOptions;
 use crate::qso::Qso;
 use crate::signing::{TqslKey, tqsl_base64};
 use crate::station::StationLocation;
@@ -61,6 +62,13 @@ pub enum LogError {
     Empty,
     /// The signing itself failed.
     Signing,
+    /// A location resulting from the log is invalid.
+    Location {
+        /// QSO's zero-based input index.
+        index: usize,
+        /// The invalid location field.
+        error: crate::station::StationError,
+    },
 }
 
 impl fmt::Display for LogError {
@@ -98,6 +106,7 @@ impl fmt::Display for LogError {
             ),
             Self::Empty => write!(f, "the log has no QSOs"),
             Self::Signing => write!(f, "signing failed"),
+            Self::Location { index, error } => write!(f, "QSO {}: {error}", index + 1),
         }
     }
 }
@@ -112,23 +121,74 @@ pub fn sign_log(
     qsos: &[Qso],
     now: SystemTime,
 ) -> Result<Vec<u8>, LogError> {
+    let locations = vec![station.clone(); qsos.len().max(1)];
+    validate_log(cert, key, qsos, &locations, now)?;
+    for (index, q) in qsos.iter().enumerate() {
+        if let Some((field, value)) = q.station().find(|(f, v)| station.contradicts(f, v)) {
+            return Err(LogError::QsoFromAnotherStation {
+                index,
+                field,
+                value: value.to_owned(),
+            });
+        }
+    }
+    write_log(cert, key, qsos, &locations)
+}
+
+/// Sign with explicit log handling settings. Construct QSOs with these options too, so custom
+/// modes and relaxed calls are accepted at input. Locations are resolved in input order before
+/// any signature is made. Report mode fills empty fields; update mode carries changes forward.
+/// A log requiring a different certificate is refused; the caller selects certificates explicitly.
+pub fn sign_log_with_options(
+    cert: &Certificate,
+    key: &TqslKey,
+    station: &StationLocation,
+    qsos: &[Qso],
+    now: SystemTime,
+    options: &SigningOptions,
+) -> Result<Vec<u8>, LogError> {
+    let locations = options.locations(qsos, station)?;
+    let qsos = options.qsos(qsos, &locations)?;
+    sign_resolved(cert, key, &qsos, &locations, now)
+}
+
+pub(crate) fn sign_resolved(
+    cert: &Certificate,
+    key: &TqslKey,
+    qsos: &[Qso],
+    locations: &[StationLocation],
+    now: SystemTime,
+) -> Result<Vec<u8>, LogError> {
+    validate_log(cert, key, qsos, locations, now)?;
+    write_log(cert, key, qsos, locations)
+}
+
+fn validate_log(
+    cert: &Certificate,
+    key: &TqslKey,
+    qsos: &[Qso],
+    locations: &[StationLocation],
+    now: SystemTime,
+) -> Result<(), LogError> {
     if !key.matches_public_key(cert.public_key_der()) {
         return Err(LogError::KeyNotCertificates);
     }
     if !cert.is_valid_at(now) {
         return Err(LogError::CertificateNotInForce);
     }
-    if station.call() != cert.callsign() {
-        return Err(LogError::CallNotCertificates {
-            station: station.call().to_string(),
-            certificate: cert.callsign().to_string(),
-        });
-    }
-    if station.dxcc() != cert.dxcc() {
-        return Err(LogError::DxccNotCertificates {
-            station: station.dxcc(),
-            certificate: cert.dxcc(),
-        });
+    for station in locations {
+        if station.call() != cert.callsign() {
+            return Err(LogError::CallNotCertificates {
+                station: station.call().to_string(),
+                certificate: cert.callsign().to_string(),
+            });
+        }
+        if station.dxcc() != cert.dxcc() {
+            return Err(LogError::DxccNotCertificates {
+                station: station.dxcc(),
+                certificate: cert.dxcc(),
+            });
+        }
     }
     if qsos.is_empty() {
         return Err(LogError::Empty);
@@ -140,16 +200,16 @@ pub fn sign_log(
     {
         return Err(LogError::QsoOutsideCertificate { index });
     }
-    for (index, q) in qsos.iter().enumerate() {
-        if let Some((field, value)) = q.station().find(|(f, v)| station.contradicts(f, v)) {
-            return Err(LogError::QsoFromAnotherStation {
-                index,
-                field,
-                value: value.to_string(),
-            });
-        }
-    }
 
+    Ok(())
+}
+
+fn write_log(
+    cert: &Certificate,
+    key: &TqslKey,
+    qsos: &[Qso],
+    locations: &[StationLocation],
+) -> Result<Vec<u8>, LogError> {
     let (major, minor) = lotw::CONFIG_VERSION;
     let mut out = String::new();
     field(
@@ -167,20 +227,28 @@ pub fn sign_log(
         cert_text.len()
     ));
 
-    out.push_str("<Rec_Type:8>tSTATION\n<STATION_UID:1>1\n<CERT_UID:1>1\n");
-    for (name, value) in station.fields() {
-        field(&mut out, name, value);
-    }
-    out.push_str("<eor>\n");
-
-    let station_data = station.sign_data();
-    for q in qsos {
+    let mut previous = None;
+    let mut station_uid = 0;
+    for (q, station) in qsos.iter().zip(locations) {
+        if previous != Some(station) {
+            station_uid += 1;
+            out.push_str("<Rec_Type:8>tSTATION\n");
+            field(&mut out, "STATION_UID", &station_uid.to_string());
+            out.push_str("<CERT_UID:1>1\n");
+            for (name, value) in station.fields() {
+                field(&mut out, name, value);
+            }
+            out.push_str("<eor>\n");
+            previous = Some(station);
+        }
+        let station_data = station.sign_data();
         let sign_data = (station_data.clone() + &q.sign_data()).to_ascii_uppercase();
         let signature = key
             .sign(sign_data.as_bytes())
             .map_err(|_| LogError::Signing)?;
         let signature = tqsl_base64(&signature);
-        out.push_str("<Rec_Type:8>tCONTACT\n<STATION_UID:1>1\n");
+        out.push_str("<Rec_Type:8>tCONTACT\n");
+        field(&mut out, "STATION_UID", &station_uid.to_string());
         let date = q.date().to_string();
         let time = q.time().to_string();
         let fields = [

@@ -1,0 +1,5 @@
+SPDX-License-Identifier: GPL-3.0-only
+Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
+
+Test QSOs only.
+<CALL:5>KN4YU<QSO_DATE:8>20261103<TIME_ON:6>183055<BAND:3>20m<MODE:2>CW<MY_DXCC:1>1<EOR>

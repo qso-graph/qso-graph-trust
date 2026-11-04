@@ -118,6 +118,8 @@ pub struct OpenReport {
 /// Why a store operation failed. No variant carries secret bytes or a password.
 #[derive(Debug)]
 pub enum StoreError {
+    /// The log's station details cannot be resolved for signing.
+    Log(crate::signed_log::LogError),
     /// An OS file operation failed before replacement.
     Io(io::Error),
     /// Replacement succeeded, but the durability sync failed. The visible file and its key must
@@ -157,6 +159,7 @@ pub enum StoreError {
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Log(error) => write!(f, "the log: {error}"),
             Self::Io(e) => write!(f, "the store file: {e}"),
             Self::Durability(e) => write!(
                 f,
