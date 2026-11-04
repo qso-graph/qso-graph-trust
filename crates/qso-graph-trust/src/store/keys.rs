@@ -45,7 +45,7 @@ impl std::error::Error for KeyStoreError {}
 /// all names are `key:<uuid v4>`. Backends must bound secrets by `MAX_KEY_LEN` and enumeration by
 /// `MAX_KEYS`, wipe secret temporaries, and return only these fixed errors, never backend messages.
 /// Secret DER is handed to the backend only for custody; the Store API never exports it.
-pub trait KeyStore: Send + Sync {
+pub(crate) trait KeyStore: Send + Sync {
     /// Atomically create a credential containing PKCS#8 DER. On error nothing was created;
     /// existing names are refused, never overwritten.
     fn put(&self, name: &str, der: &[u8]) -> Result<(), KeyStoreError>;
@@ -60,17 +60,17 @@ pub trait KeyStore: Send + Sync {
     fn names(&self) -> Result<Vec<String>, KeyStoreError>;
 }
 
-/// A volatile, thread-safe credential store for this crate's tests and callers' own tests.
+/// A volatile, thread-safe credential store, owned exclusively by Store outside this crate's tests.
 /// Every owned secret, including a copy returned by `get`, is `Zeroizing`. It is never durable
 /// storage and must not be used to keep an operator's keys at rest.
 #[derive(Default)]
-pub struct MemoryKeyStore {
+pub(super) struct MemoryKeyStore {
     secrets: Mutex<BTreeMap<String, Zeroizing<Vec<u8>>>>,
 }
 
 impl MemoryKeyStore {
     /// An empty test store.
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self::default()
     }
 }

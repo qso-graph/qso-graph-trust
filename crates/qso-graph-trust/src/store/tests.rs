@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 
-use std::sync::{Mutex, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use zeroize::Zeroizing;
@@ -12,6 +12,33 @@ use crate::qso::Qso;
 use crate::records;
 use crate::signed_log::sign_log;
 use crate::tbk;
+
+// Only crate-internal tests retain backend handles, to observe ordering and plant lost keys.
+// Public callers select a backend kind and cannot keep an object that reads its secrets.
+impl<K: KeyStore> KeyStore for Arc<K> {
+    fn put(&self, name: &str, der: &[u8]) -> Result<(), KeyStoreError> {
+        self.as_ref().put(name, der)
+    }
+    fn get(&self, name: &str) -> Result<Option<Zeroizing<Vec<u8>>>, KeyStoreError> {
+        self.as_ref().get(name)
+    }
+    fn delete(&self, name: &str) -> Result<(), KeyStoreError> {
+        self.as_ref().delete(name)
+    }
+    fn exists(&self, name: &str) -> Result<bool, KeyStoreError> {
+        self.as_ref().exists(name)
+    }
+    fn names(&self) -> Result<Vec<String>, KeyStoreError> {
+        self.as_ref().names()
+    }
+}
+
+fn open<K: KeyStore + 'static>(
+    dir: &Path,
+    keys: &Arc<K>,
+) -> Result<(Store, OpenReport), StoreError> {
+    Store::open_with_keys(dir, Box::new(Arc::clone(keys)))
+}
 
 struct Folder(PathBuf);
 impl Folder {
@@ -77,7 +104,7 @@ fn names_are_random_lowercase_version_four_uuids() {
 
 #[test]
 fn memory_credentials_are_wiped_types_and_deletion_is_final() {
-    let keys = MemoryKeyStore::new();
+    let keys = Arc::new(MemoryKeyStore::new());
     let name = keys::new_name("key:").expect("name");
     keys.put(&name, &[1, 2, 3]).expect("put");
     assert_eq!(keys.put(&name, &[4]), Err(KeyStoreError::AlreadyExists));
@@ -97,10 +124,39 @@ fn memory_credentials_are_wiped_types_and_deletion_is_final() {
 }
 
 #[test]
+fn public_memory_backend_is_fresh_and_owned_by_each_store() {
+    let folder = Folder::new();
+    let (store, report) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
+    assert_eq!(report, OpenReport::default());
+    let backup = backup();
+    let entry = &backup.certificates[0];
+    let password = corpus(&format!("keys/{}.password", entry.callsign));
+    let id = store
+        .add_certificate_with_key(entry, (!password.is_empty()).then_some(password.as_slice()))
+        .expect("import");
+    let (other, report) = Store::open(&folder.0, KeyBackend::Memory).expect("another backend");
+    assert_eq!(report.missing_keys, std::slice::from_ref(&id));
+    assert!(matches!(
+        other.with_key(&id, |_| ()),
+        Err(StoreError::NotFound)
+    ));
+    store
+        .with_key(&id, |_| ())
+        .expect("original still owns its key");
+    drop(store);
+    let (reopened, report) = Store::open(&folder.0, KeyBackend::Memory).expect("reopen");
+    assert_eq!(report.missing_keys, std::slice::from_ref(&id));
+    assert!(matches!(
+        reopened.with_key(&id, |_| ()),
+        Err(StoreError::NotFound)
+    ));
+}
+
+#[test]
 fn every_section_round_trips_and_stored_keys_sign_the_same_logs() {
     let folder = Folder::new();
-    let keys = MemoryKeyStore::new();
-    let (store, report) = Store::open(&folder.0, &keys).expect("open");
+    let keys = Arc::new(MemoryKeyStore::new());
+    let (store, report) = open(&folder.0, &keys).expect("open");
     assert_eq!(report, OpenReport::default());
     let backup = backup();
     let mut ids = Vec::new();
@@ -116,7 +172,7 @@ fn every_section_round_trips_and_stored_keys_sign_the_same_logs() {
     for l in &backup.locations {
         store.add_location(&l.name, &l.station).expect("location");
     }
-    let (reopened, report) = Store::open(&folder.0, &keys).expect("reopen");
+    let (reopened, report) = open(&folder.0, &keys).expect("reopen");
     assert_eq!(report, OpenReport::default());
     let certs = reopened.certificates().expect("certificates");
     assert_eq!(certs.len(), backup.certificates.len());
@@ -181,8 +237,8 @@ fn every_section_round_trips_and_stored_keys_sign_the_same_logs() {
 #[test]
 fn public_certificates_and_location_mutations_preserve_exact_names() {
     let folder = Folder::new();
-    let keys = MemoryKeyStore::new();
-    let (store, _) = Store::open(&folder.0, &keys).expect("open");
+    let keys = Arc::new(MemoryKeyStore::new());
+    let (store, _) = open(&folder.0, &keys).expect("open");
     let backup = backup();
     let cert = backup.certificates[0].certificate.as_ref().expect("cert");
     let id = store.add_certificate(cert).expect("public certificate");
@@ -230,12 +286,12 @@ fn public_certificates_and_location_mutations_preserve_exact_names() {
 #[test]
 fn newer_versions_are_refused_on_open_and_before_any_mutation() {
     let folder = Folder::new();
-    let keys = MemoryKeyStore::new();
-    let (store, _) = Store::open(&folder.0, &keys).expect("open");
+    let keys = Arc::new(MemoryKeyStore::new());
+    let (store, _) = open(&folder.0, &keys).expect("open");
     let text = empty_xml().replacen("qgt-store version=\"1\"", "qgt-store version=\"2\"", 1);
     fs::write(folder.0.join("store.xml"), &text).expect("plant");
     assert!(matches!(
-        Store::open(&folder.0, &keys),
+        open(&folder.0, &keys),
         Err(StoreError::NewerVersion {
             found: 2,
             supported: 1
@@ -266,7 +322,7 @@ fn newer_versions_are_refused_on_open_and_before_any_mutation() {
 #[test]
 fn planted_bad_files_are_refused_and_not_rewritten() {
     let folder = Folder::new();
-    let keys = MemoryKeyStore::new();
+    let keys = Arc::new(MemoryKeyStore::new());
     let path = folder.0.join("store.xml");
     let valid = empty_xml();
     let location = "<location name=\"home\"><field name=\"CALL\">QG0TEST</field><field name=\"DXCC\">291</field></location>";
@@ -304,15 +360,15 @@ fn planted_bad_files_are_refused_and_not_rewritten() {
     ];
     for text in cases {
         fs::write(&path, &text).expect("plant");
-        assert!(Store::open(&folder.0, &keys).is_err());
+        assert!(open(&folder.0, &keys).is_err());
         assert_eq!(fs::read_to_string(&path).expect("untouched"), text);
         fs::write(&path, &valid).expect("remove planted case");
-        assert!(Store::open(&folder.0, &keys).is_ok());
+        assert!(open(&folder.0, &keys).is_ok());
     }
     let file = File::create(&path).expect("plant oversize");
     file.set_len(MAX_FILE_LEN as u64 + 1).expect("sparse file");
     assert!(matches!(
-        Store::open(&folder.0, &keys),
+        open(&folder.0, &keys),
         Err(StoreError::Limit("file bytes"))
     ));
     assert_eq!(
@@ -320,7 +376,7 @@ fn planted_bad_files_are_refused_and_not_rewritten() {
         MAX_FILE_LEN as u64 + 1
     );
     fs::write(&path, valid).expect("remove oversize");
-    let (store, _) = Store::open(&folder.0, &keys).expect("valid again");
+    let (store, _) = open(&folder.0, &keys).expect("valid again");
     let before = fs::read(&path).expect("before");
     for name in ["bad\0", "bad\u{fffe}", "bad\u{ffff}", ""] {
         assert!(store.add_location(name, &station()).is_err());
@@ -394,8 +450,8 @@ fn keys_precede_the_file_and_failed_writes_roll_them_back() {
     let password = (!password.is_empty()).then_some(password.as_slice());
     for fail in [false, true] {
         let folder = Folder::new();
-        let keys = ObservedKeys::new(&folder.0, fail, false);
-        let (store, _) = Store::open(&folder.0, &keys).expect("open");
+        let keys = Arc::new(ObservedKeys::new(&folder.0, fail, false));
+        let (store, _) = open(&folder.0, &keys).expect("open");
         store
             .add_location("home", &station())
             .expect("existing file");
@@ -428,8 +484,8 @@ fn failed_cleanup_and_delete_are_reported_as_orphans() {
     let password = (!password.is_empty()).then_some(password.as_slice());
     for fail_write in [true, false] {
         let folder = Folder::new();
-        let keys = ObservedKeys::new(&folder.0, fail_write, true);
-        let (store, _) = Store::open(&folder.0, &keys).expect("open");
+        let keys = Arc::new(ObservedKeys::new(&folder.0, fail_write, true));
+        let (store, _) = open(&folder.0, &keys).expect("open");
         let result = store.add_certificate_with_key(entry, password);
         if fail_write {
             assert!(matches!(result, Err(StoreError::Rollback { .. })));
@@ -439,7 +495,7 @@ fn failed_cleanup_and_delete_are_reported_as_orphans() {
                 Err(StoreError::KeyStore(KeyStoreError::AccessDenied))
             ));
         }
-        let (_, report) = Store::open(&folder.0, &keys).expect("report");
+        let (_, report) = open(&folder.0, &keys).expect("report");
         assert_eq!(report.orphaned_keys, keys.names().expect("one orphan"));
         assert_eq!(report.orphaned_keys.len(), 1);
         assert!(report.missing_keys.is_empty());
@@ -453,10 +509,94 @@ fn failed_cleanup_and_delete_are_reported_as_orphans() {
 }
 
 #[test]
+fn failed_sync_after_rename_keeps_an_imported_key() {
+    let folder = Folder::new();
+    let keys = Arc::new(ObservedKeys::new(&folder.0, false, false));
+    let (store, _) = open(&folder.0, &keys).expect("open");
+    let backup = backup();
+    let entry = &backup.certificates[0];
+    let password = corpus(&format!("keys/{}.password", entry.callsign));
+    store
+        .fail_sync
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    assert!(matches!(
+        store
+            .add_certificate_with_key(entry, (!password.is_empty()).then_some(password.as_slice())),
+        Err(StoreError::Durability(_))
+    ));
+    assert_eq!(*keys.calls.lock().expect("calls"), ["put"]);
+    let certs = store.certificates().expect("renamed file is visible");
+    assert_eq!(certs.len(), 1);
+    assert!(
+        keys.exists(certs[0].key_name.as_ref().expect("key name"))
+            .expect("key retained")
+    );
+    assert_eq!(
+        open(&folder.0, &keys).expect("report").1,
+        OpenReport::default()
+    );
+    assert!(!folder.0.join("store.xml.partial").exists());
+    store
+        .fail_sync
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    store
+        .delete_certificate(&certs[0].id)
+        .expect("sync restored");
+    assert_eq!(*keys.calls.lock().expect("calls"), ["put", "delete"]);
+}
+
+#[test]
+fn failed_sync_after_rename_prevents_credential_deletion() {
+    let folder = Folder::new();
+    let keys = Arc::new(ObservedKeys::new(&folder.0, false, false));
+    let (store, _) = open(&folder.0, &keys).expect("open");
+    let backup = backup();
+    let entry = &backup.certificates[0];
+    let password = corpus(&format!("keys/{}.password", entry.callsign));
+    let id = store
+        .add_certificate_with_key(entry, (!password.is_empty()).then_some(password.as_slice()))
+        .expect("import");
+    let key_name = store.certificates().expect("certificates")[0]
+        .key_name
+        .clone()
+        .expect("name");
+    store
+        .fail_sync
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    assert!(matches!(
+        store.delete_certificate(&id),
+        Err(StoreError::Durability(_))
+    ));
+    assert_eq!(*keys.calls.lock().expect("no delete"), ["put"]);
+    assert!(keys.exists(&key_name).expect("key retained"));
+    assert!(store.certificates().expect("renamed file").is_empty());
+    assert!(!folder.0.join("store.xml.partial").exists());
+    let (_, report) = open(&folder.0, &keys).expect("report retained orphan");
+    assert_eq!(report.orphaned_keys, [key_name]);
+    assert!(report.missing_keys.is_empty());
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_sync_reopens_the_renamed_file_with_write_access() {
+    let folder = Folder::new();
+    let path = folder.0.join("store.xml");
+    fs::write(&path, empty_xml()).expect("renamed file");
+    let original = fs::metadata(&path).expect("metadata").permissions();
+    let mut read_only = original.clone();
+    read_only.set_readonly(true);
+    fs::set_permissions(&path, read_only).expect("plant write-access failure");
+    let result = sync_replacement(&folder.0);
+    fs::set_permissions(&path, original).expect("remove planted failure");
+    assert!(result.is_err());
+    sync_replacement(&folder.0).expect("writable file can be synced");
+}
+
+#[test]
 fn open_reports_missing_and_orphaned_keys_without_reading_or_removing_secrets() {
     let folder = Folder::new();
-    let keys = ObservedKeys::new(&folder.0, false, false);
-    let (store, _) = Store::open(&folder.0, &keys).expect("open");
+    let keys = Arc::new(ObservedKeys::new(&folder.0, false, false));
+    let (store, _) = open(&folder.0, &keys).expect("open");
     let entry = &backup().certificates[0];
     let password = corpus(&format!("keys/{}.password", entry.callsign));
     let id = store
@@ -471,7 +611,7 @@ fn open_reports_missing_and_orphaned_keys_without_reading_or_removing_secrets() 
         .put(&orphan, &[1])
         .expect("simulate interrupted import");
     let before = fs::read(folder.0.join("store.xml")).expect("before");
-    let (_, report) = Store::open(&folder.0, &keys).expect("open");
+    let (_, report) = open(&folder.0, &keys).expect("open");
     assert_eq!(
         report,
         OpenReport {
@@ -494,8 +634,8 @@ fn open_reports_missing_and_orphaned_keys_without_reading_or_removing_secrets() 
 #[test]
 fn malformed_or_mismatched_credentials_cannot_sign_or_be_imported() {
     let folder = Folder::new();
-    let keys = MemoryKeyStore::new();
-    let (store, _) = Store::open(&folder.0, &keys).expect("open");
+    let keys = Arc::new(MemoryKeyStore::new());
+    let (store, _) = open(&folder.0, &keys).expect("open");
     let mut backup = backup();
     let entry = &backup.certificates[0];
     let password = corpus(&format!("keys/{}.password", entry.callsign));
@@ -524,9 +664,9 @@ fn malformed_or_mismatched_credentials_cannot_sign_or_be_imported() {
 #[test]
 fn independent_writers_wait_for_the_lock_and_reload_the_current_file() {
     let folder = Folder::new();
-    let keys = MemoryKeyStore::new();
-    let (a, _) = Store::open(&folder.0, &keys).expect("writer a");
-    let (b, _) = Store::open(&folder.0, &keys).expect("writer b");
+    let keys = Arc::new(MemoryKeyStore::new());
+    let (a, _) = open(&folder.0, &keys).expect("writer a");
+    let (b, _) = open(&folder.0, &keys).expect("writer b");
     let lock = a.lock().expect("hold lock externally");
     let (started_tx, started_rx) = mpsc::channel();
     let (done_tx, done_rx) = mpsc::channel();
@@ -561,8 +701,8 @@ fn independent_writers_wait_for_the_lock_and_reload_the_current_file() {
 fn whole_file_replacement_changes_inode_and_creates_owner_only_files() {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let folder = Folder::new();
-    let keys = MemoryKeyStore::new();
-    let (store, _) = Store::open(&folder.0, &keys).expect("open");
+    let keys = Arc::new(MemoryKeyStore::new());
+    let (store, _) = open(&folder.0, &keys).expect("open");
     store.add_location("one", &station()).expect("first");
     let before = fs::metadata(folder.0.join("store.xml")).expect("metadata");
     store.add_location("two", &station()).expect("second");
@@ -585,6 +725,93 @@ fn whole_file_replacement_changes_inode_and_creates_owner_only_files() {
         .add_location("three", &station())
         .expect("recover stale partial");
     assert!(!folder.0.join("store.xml.partial").exists());
+}
+
+#[test]
+fn first_use_creates_a_nested_directory_and_accepts_later_writes() {
+    let folder = Folder::new();
+    let nested = folder.0.join("first/second/store");
+    let (store, report) = Store::open(&nested, KeyBackend::Memory).expect("create nested folder");
+    assert_eq!(report, OpenReport::default());
+    store.add_location("home", &station()).expect("first write");
+    let (reopened, _) = Store::open(&nested, KeyBackend::Memory).expect("existing directory");
+    assert_eq!(reopened.locations().expect("locations")[0].name, "home");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for path in [
+            folder.0.join("first"),
+            folder.0.join("first/second"),
+            nested.clone(),
+        ] {
+            assert_eq!(
+                fs::metadata(path).expect("directory").permissions().mode() & 0o777,
+                0o700
+            );
+        }
+        for name in ["store.xml", "store.lock"] {
+            assert_eq!(
+                fs::metadata(nested.join(name))
+                    .expect("file")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+    }
+    assert!(!nested.join("store.xml.partial").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn first_use_syncs_each_parent_and_retries_an_interrupted_directory_sync() {
+    use std::cell::RefCell;
+    let folder = Folder::new();
+    let first = folder.0.join("first");
+    let second = first.join("second");
+    let nested = second.join("store");
+    let observed = RefCell::new(Vec::new());
+    create_directory(&nested, |parent| {
+        sync_directory(parent)?;
+        observed.borrow_mut().push(parent.to_path_buf());
+        // Do not create the next descendant before acknowledging this parent's flush.
+        if parent == folder.0 {
+            assert!(first.is_dir());
+            assert!(!second.exists());
+        }
+        Ok(())
+    })
+    .expect("durable creation");
+    assert!(observed.borrow().ends_with(&[
+        folder.0.clone(),
+        first.clone(),
+        second.clone(),
+        nested.clone()
+    ]));
+
+    let interrupted = folder.0.join("interrupted/child");
+    let result = create_directory(&interrupted, |parent| {
+        if parent == folder.0 {
+            return Err(io::Error::other("injected parent sync failure"));
+        }
+        sync_directory(parent)
+    });
+    assert!(result.is_err());
+    assert!(folder.0.join("interrupted").is_dir());
+    assert!(!interrupted.exists());
+    let retried = RefCell::new(Vec::new());
+    create_directory(&interrupted, |parent| {
+        sync_directory(parent)?;
+        retried.borrow_mut().push(parent.to_path_buf());
+        Ok(())
+    })
+    .expect("retry must sync the already-created parent entry");
+    assert!(retried.borrow().ends_with(&[
+        folder.0.clone(),
+        folder.0.join("interrupted"),
+        interrupted
+    ]));
 }
 
 #[test]

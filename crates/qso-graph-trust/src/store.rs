@@ -2,17 +2,19 @@
 // Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 
 //! The shared QG Trust folder. Public records live in a bounded, versioned XML file; private
-//! PKCS#8 DER goes only to a [`KeyStore`] scoped to [`SERVICE`] (or [`TEST_SERVICE`] in tests).
+//! PKCS#8 DER stays in a library-owned backend scoped to [`SERVICE`] (or [`TEST_SERVICE`] in tests).
 //! Each operation reloads the file while holding its OS lock, so separate library releases and
 //! processes cannot lose each other's writes. Unknown versions are refused before any mutation.
 //!
 //! Applications that sign must install the wiping allocator required by this crate's README.
-//! OS credential-store backends are supplied by the caller; none is selected here.
+//! Callers select a [`KeyBackend`]; raw credential access stays inside the library.
 
 mod format;
 mod keys;
 
-pub use keys::{KeyStore, KeyStoreError, MAX_KEYS, MemoryKeyStore, SERVICE, TEST_SERVICE};
+pub use keys::{KeyStoreError, MAX_KEYS, SERVICE, TEST_SERVICE};
+
+use keys::{KeyStore, MemoryKeyStore};
 
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
@@ -36,6 +38,18 @@ pub const MAX_LOCATIONS: usize = 4096;
 pub const MAX_NAME_LEN: usize = 255;
 /// The largest credential secret, matching Windows Credential Manager's limit.
 pub const MAX_KEY_LEN: usize = 2560;
+
+/// Select a library-owned credential backend. No backend handle or secret reader is exposed.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub enum KeyBackend {
+    /// A fresh, volatile backend for tests and callers' own tests. Dropping the Store wipes its
+    /// secrets; reopening the folder creates another empty backend and reports missing keys.
+    /// This is not persistent storage for an operator's keys.
+    Memory,
+    // Os and OsTest belong here once their backend dependency decision is made; they will use
+    // SERVICE and TEST_SERVICE respectively, without handing a backend object to the caller.
+}
 
 /// A public certificate record; its identifier survives whole-file replacements.
 #[derive(Clone, Debug)]
@@ -72,7 +86,7 @@ pub struct OpenReport {
 pub enum StoreError {
     /// An OS file operation failed before replacement.
     Io(io::Error),
-    /// Replacement succeeded, but syncing the folder failed. The visible file and its key must
+    /// Replacement succeeded, but the durability sync failed. The visible file and its key must
     /// be kept together; the caller should report uncertain crash durability, not retry blindly.
     Durability(io::Error),
     /// A credential-store operation failed.
@@ -112,7 +126,7 @@ impl fmt::Display for StoreError {
             Self::Io(e) => write!(f, "the store file: {e}"),
             Self::Durability(e) => write!(
                 f,
-                "the store was replaced but its folder could not be synced: {e}"
+                "the store was replaced but its durability sync failed: {e}"
             ),
             Self::KeyStore(e) => write!(f, "the credential store: {e}"),
             Self::Key(e) => write!(f, "the signing key: {e}"),
@@ -156,42 +170,75 @@ struct Data {
     locations: Vec<StoredLocation>,
 }
 
-/// A shared folder and its caller-supplied credential backend. No private key is cached here.
-pub struct Store<'a> {
+/// A shared folder and its private, library-owned credential backend.
+///
+/// Raw credential access is deliberately unavailable to callers:
+///
+/// ```compile_fail,E0603
+/// use qso_graph_trust::store::KeyStore;
+/// ```
+///
+/// ```compile_fail,E0603
+/// use qso_graph_trust::store::MemoryKeyStore;
+/// ```
+///
+/// ```compile_fail,E0616
+/// use qso_graph_trust::store::Store;
+/// fn read_secret(store: &Store, name: &str) {
+///     let _ = store.keys.get(name);
+/// }
+/// ```
+///
+/// ```compile_fail,E0599
+/// use qso_graph_trust::store::Store;
+/// fn read_secret(store: &Store, name: &str) {
+///     let _ = store.get(name);
+/// }
+/// ```
+pub struct Store {
     dir: PathBuf,
-    keys: &'a dyn KeyStore,
+    keys: Box<dyn KeyStore>,
+    // Exercise failures after rename without depending on host permissions or filesystem faults.
+    #[cfg(test)]
+    fail_sync: std::sync::atomic::AtomicBool,
 }
 
-impl<'a> Store<'a> {
+impl Store {
     /// Open (or create) a folder, validate its file and report missing and orphaned credentials.
     /// An absent file is an empty store; the first successful mutation creates `store.xml`.
     pub fn open(
         dir: impl AsRef<Path>,
-        keys: &'a dyn KeyStore,
+        backend: KeyBackend,
     ) -> Result<(Self, OpenReport), StoreError> {
-        let mut builder = fs::DirBuilder::new();
-        builder.recursive(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::DirBuilderExt;
-            builder.mode(0o700);
-        }
-        builder.create(dir.as_ref())?;
+        let keys: Box<dyn KeyStore> = match backend {
+            KeyBackend::Memory => Box::new(MemoryKeyStore::new()),
+        };
+        Self::open_with_keys(dir.as_ref(), keys)
+    }
+
+    // Only the library can construct or retain a backend that can read credential bytes.
+    fn open_with_keys(
+        dir: &Path,
+        keys: Box<dyn KeyStore>,
+    ) -> Result<(Self, OpenReport), StoreError> {
+        create_directory(dir, sync_directory)?;
         let store = Self {
-            dir: dir.as_ref().to_path_buf(),
+            dir: dir.to_path_buf(),
             keys,
+            #[cfg(test)]
+            fail_sync: std::sync::atomic::AtomicBool::new(false),
         };
         let _lock = store.lock()?;
         let data = store.read()?;
         let mut report = OpenReport::default();
         for cert in &data.certificates {
             if let Some(name) = &cert.key_name
-                && !keys.exists(name)?
+                && !store.keys.exists(name)?
             {
                 report.missing_keys.push(cert.id.clone());
             }
         }
-        let names = keys.names()?;
+        let names = store.keys.names()?;
         if names.len() > keys::MAX_KEYS {
             return Err(StoreError::Limit("credential names"));
         }
@@ -441,12 +488,66 @@ impl<'a> Store<'a> {
             let _ = fs::remove_file(&partial);
         }
         result?;
-        #[cfg(unix)]
-        File::open(&self.dir)
-            .and_then(|f| f.sync_all())
-            .map_err(StoreError::Durability)?;
+        #[cfg(test)]
+        if self.fail_sync.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(StoreError::Durability(io::Error::other(
+                "injected sync failure after rename",
+            )));
+        }
+        sync_replacement(&self.dir).map_err(StoreError::Durability)?;
         Ok(())
     }
+}
+
+fn sync_replacement(dir: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        // The partial's flush predates the rename, so it cannot commit that metadata change.
+        // Reopen the renamed file with write access: sync_all calls FlushFileBuffers, which
+        // flushes cached file metadata as well as data. On NTFS this commits the rename before
+        // we delete a credential. Microsoft's File Caching and FlushFileBuffers documentation:
+        // https://learn.microsoft.com/en-us/windows/win32/fileio/file-caching
+        // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers
+        // This relies on the filesystem, drivers and hardware honoring flushes. Other filesystems
+        // and network shares may differ; this is not a volume-wide or ancestor-directory flush.
+        OpenOptions::new()
+            .write(true)
+            .open(dir.join("store.xml"))?
+            .sync_all()?;
+    }
+    sync_directory(dir)
+}
+
+fn sync_directory(dir: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    File::open(dir)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = dir;
+    Ok(())
+}
+
+fn create_directory(dir: &Path, sync: impl Fn(&Path) -> io::Result<()>) -> io::Result<()> {
+    let dir = std::path::absolute(dir)?;
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    // Work from the root down, never recursively: each entry must reach its parent on disk.
+    // Sync existing ancestors too, since a previous first use may have stopped before its sync.
+    let chain: Vec<_> = dir.ancestors().collect();
+    for path in chain.into_iter().rev() {
+        if let Some(parent) = path.parent() {
+            match builder.create(path) {
+                Ok(()) => (),
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists && path.is_dir() => (),
+                Err(e) => return Err(e),
+            }
+            sync(parent)?;
+        }
+    }
+    sync(&dir)
 }
 
 fn check_certificate(data: &Data, cert: &Certificate) -> Result<(), StoreError> {
