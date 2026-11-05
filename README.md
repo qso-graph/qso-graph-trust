@@ -1,3 +1,18 @@
+<p align="center">
+  <a href="https://github.com/qso-graph/qso-graph-trust/releases/latest"><img src="https://img.shields.io/github/v/release/qso-graph/qso-graph-trust?sort=semver&label=Release&color=blue" alt="Latest release"></a>
+  <a href="https://crates.io/crates/qso-graph-trust-cli"><img src="https://img.shields.io/crates/v/qso-graph-trust-cli?label=crates.io&color=blue" alt="qso-graph-trust-cli on crates.io"></a>
+  <a href="https://docs.rs/qso-graph-trust"><img src="https://img.shields.io/docsrs/qso-graph-trust?label=docs.rs" alt="The library's documentation on docs.rs"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--only-blue" alt="License: GPL-3.0-only"></a>
+  <img src="https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20%7C%20macOS-blue" alt="Platforms: Windows, Linux, macOS">
+</p>
+
+<p align="center">
+  <a href="#install"><img src="https://img.shields.io/badge/Windows-signed-2ea44f" alt="Windows: signed"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/macOS-notarized-2ea44f" alt="macOS: notarized"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/apt%20%26%20dnf-GPG%20signed-2ea44f" alt="apt and dnf: GPG signed"></a>
+  <a href="https://github.com/qso-graph/qso-graph-trust/attestations"><img src="https://img.shields.io/badge/Provenance-attested-2ea44f" alt="Provenance: attested, the attestations"></a>
+</p>
+
 # QSO Graph Trust
 
 QSO Graph Trust is the part of the QSO Graph Project that signs your logs for ARRL's
