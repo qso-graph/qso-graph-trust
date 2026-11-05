@@ -63,8 +63,8 @@ pub fn check_signed_log(tq8: &[u8]) -> Result<(), NotASignedLog> {
         _ => return Err(NotASignedLog),
     }
     let (mut certs, mut contacts) = (0usize, 0usize);
-    let mut stations: std::collections::HashMap<&[u8], Vec<(&str, &[u8])>> = Default::default();
-    let mut record: Option<(Kind, Vec<(&str, &[u8])>)> = None;
+    let mut stations: std::collections::HashMap<&[u8], Record<'_>> = Default::default();
+    let mut record: Option<(Kind, Record<'_>)> = None;
     while let Some(token) = fields.next()? {
         match (&mut record, token) {
             (None, Token::Field(name, value)) if name.eq_ignore_ascii_case("Rec_Type") => {
@@ -131,6 +131,9 @@ pub fn check_signed_log(tq8: &[u8]) -> Result<(), NotASignedLog> {
     }
     Ok(())
 }
+
+/// One record's fields, by name, in the order given.
+type Record<'a> = Vec<(&'a str, &'a [u8])>;
 
 #[derive(Clone, Copy)]
 enum Kind {
