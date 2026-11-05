@@ -52,7 +52,10 @@ fn roundtrip_is_randomized_and_every_byte_and_part_name_is_authenticated() {
     let password = Password::generate().expect("random");
     let typed = Password::from_typed(password.expose_secret()).expect("typed");
     let sealed = seal(LOTW_PART, b"secret", &password).expect("seal");
-    assert_ne!(seal(LOTW_PART, b"secret", &password).expect("seal"), sealed);
+    let second = seal(LOTW_PART, b"secret", &password).expect("seal");
+    // A different ciphertext alone would miss a fixed salt or a fixed nonce: check each field.
+    assert_ne!(&sealed[13..29], &second[13..29], "fresh salt per export");
+    assert_ne!(&sealed[29..41], &second[29..41], "fresh nonce per export");
     assert_eq!(&*open(LOTW_PART, &sealed, &typed).expect("open"), b"secret");
     let wrong = Password::generate().expect("random");
     assert_eq!(

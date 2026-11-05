@@ -82,7 +82,8 @@ jobs:
           # The first-publish token is for a crate's very first publish only. Left behind, it would
           # quietly stand in for Trusted Publishing, so once every crate exists its presence fails.
           if [ "$FIRST_PUBLISH" = true ]; then
-            python3 -I scripts/release_check.py first-token $CRATES
+            read -r -a crates <<< "$CRATES"
+            python3 -I scripts/release_check.py first-token "${crates[@]}"
           fi
           # A merge runs no CI, so main's commit has none of its own: what proves it is a green pull
           # request run of this repository's CI whose own commit holds exactly main's files.

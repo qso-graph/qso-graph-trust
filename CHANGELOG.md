@@ -5,7 +5,18 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-05
+
 ### Added
+
+- Versioned library store with keys in the OS credential store, file locking, atomic metadata
+  updates and recovery reporting; credential-store round trips are tested on Windows, Linux and
+  macOS with a test-only service name.
+- CLI argument parsing with clap, shell completions and styled output. The command still signs
+  from a supplied backup; the library's store and new workflows need CLI and Desktop integration.
+- Release packaging for Windows x86_64, Linux x86_64 and arm64, and macOS Apple silicon. PR CI builds
+  all four unsigned archives; the release workflow signs Windows and macOS programs, notarizes
+  macOS programs and attests the archives before publishing.
 
 - Library upload request construction and bounded LoTW response parsing, with TQSL's multipart
   field, filename format and result codes. The endpoint is fixed; callers supply verified TLS.

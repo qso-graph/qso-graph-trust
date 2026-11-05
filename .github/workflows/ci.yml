@@ -152,9 +152,23 @@ jobs:
           fi
           echo "RUSTSEC-2023-0071: still no fixed release; the exception stands"
 
+  # Exercise the exact release build and archive steps before merging. No signing environments
+  # or secrets are passed; the reusable workflow signs only when its sign input is true.
+  binaries:
+    name: binaries
+    permissions:
+      contents: read
+      # The reusable workflow declares these for its release-only signing and attestation steps.
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/binaries.yml
+    with:
+      sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      sign: false
+
   ci-all-green:
     name: ci-all-green
-    needs: [check, policy]
+    needs: [check, policy, binaries]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
