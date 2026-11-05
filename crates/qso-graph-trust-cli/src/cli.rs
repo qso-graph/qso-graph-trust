@@ -796,6 +796,13 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
         .clone()
         .unwrap_or_else(|| input.with_extension("tq8"));
     let signed = tq8(&signed);
+    if qso_graph_trust::upload::check_signed_log(&signed).is_err() {
+        env.message(
+            Tone::Error,
+            format_args!("{}", crate::commands::UNUPLOADABLE),
+        );
+        return Exit::TqslError;
+    }
     if let Err(e) = write_whole(&output, &signed) {
         env.message(Tone::Error, format_args!("the output file (-o): {e}"));
         return Exit::OutputError;

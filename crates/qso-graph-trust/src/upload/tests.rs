@@ -101,6 +101,34 @@ fn only_a_signed_log_is_one_to_upload() {
         )),
         Err(NotASignedLog)
     );
+    // Found in review: a key where the signed data goes. What was signed must be the QSO's own
+    // fields, so a PEM there is refused.
+    let pem = String::from_utf8(
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/corpus/pki/user-1024.key.pem"),
+        )
+        .expect("test key"),
+    )
+    .expect("text");
+    let sd = text.find("<SIGNDATA:").expect("signdata");
+    let sd_end = sd + text[sd..].find('\n').expect("line");
+    assert_eq!(
+        planted(format!(
+            "{}<SIGNDATA:{}>{pem}{}",
+            &text[..sd],
+            pem.len(),
+            &text[sd_end..]
+        )),
+        Err(NotASignedLog)
+    );
+    assert_eq!(
+        planted(format!(
+            "<TQSL_IDENT:4>TEST\n<Rec_Type:8>tCONTACT\n<SIGNDATA:{}>{pem}<eor>\n",
+            pem.len()
+        )),
+        Err(NotASignedLog)
+    );
     // Not bounded by a record count: more records than the ADIF reader takes still pass.
     let head = &text[..text.find("<Rec_Type:8>tCONTACT").expect("contact")];
     let contact = &text[text.find("<Rec_Type:8>tCONTACT").expect("contact")..];

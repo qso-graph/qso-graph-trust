@@ -1123,3 +1123,18 @@ fn an_invalid_location_from_the_log_leaves_out_that_qso_only_with_i() {
     assert_eq!(ran.code, 9, "{}", ran.err);
     assert!(dir.join("state.tq8").exists());
 }
+
+#[test]
+fn a_call_that_is_not_ascii_signs_and_uploads_with_allow_bad_calls() {
+    let ham = Ham::unsigned();
+    let dir = scratch();
+    let adi = dir.join("unicode.adi");
+    let log = String::from_utf8(read("adif/W4W-EVENT.adi")).expect("text");
+    let call = "TESTÉ";
+    let changed = log.replacen("<CALL:6>KC4QPQ", &format!("<CALL:{}>{call}", call.len()), 1);
+    assert_ne!(changed, log);
+    std::fs::write(&adi, changed).expect("write");
+    let ran = ham.run(&["send", path(&adi), "-l", "W4W-EVENT", "--allow-bad-calls"]);
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    assert_eq!(ham.sent.borrow().len(), 1);
+}

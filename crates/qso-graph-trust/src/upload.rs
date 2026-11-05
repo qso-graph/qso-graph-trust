@@ -62,31 +62,71 @@ pub fn check_signed_log(tq8: &[u8]) -> Result<(), NotASignedLog> {
         Some(Token::Field("TQSL_IDENT", v)) if printable(v, 256) => {}
         _ => return Err(NotASignedLog),
     }
-    let mut contacts = 0usize;
-    let mut kind = None;
+    let (mut certs, mut contacts) = (0usize, 0usize);
+    let mut stations: std::collections::HashMap<&[u8], Vec<(&str, &[u8])>> = Default::default();
+    let mut record: Option<(Kind, Vec<(&str, &[u8])>)> = None;
     while let Some(token) = fields.next()? {
-        match (kind, token) {
+        match (&mut record, token) {
             (None, Token::Field(name, value)) if name.eq_ignore_ascii_case("Rec_Type") => {
-                kind = Some(match value {
+                let kind = match value {
                     b"tCERT" => Kind::Cert,
                     b"tSTATION" => Kind::Station,
-                    b"tCONTACT" => {
-                        contacts += 1;
-                        Kind::Contact
-                    }
+                    b"tCONTACT" => Kind::Contact,
                     _ => return Err(NotASignedLog),
-                });
+                };
+                record = Some((kind, Vec::new()));
             }
-            (Some(_), Token::End) => kind = None,
-            (Some(kind), Token::Field(name, value)) => {
-                if !allowed(kind, name, value) {
+            (Some((kind, got)), Token::Field(name, value)) => {
+                if !allowed(*kind, name, value) || got.iter().any(|(n, _)| *n == name) {
                     return Err(NotASignedLog);
+                }
+                got.push((name, value));
+            }
+            (Some(_), Token::End) => {
+                let Some((kind, got)) = record.take() else {
+                    return Err(NotASignedLog);
+                };
+                let get = |n: &str| got.iter().find(|(f, _)| *f == n).map(|(_, v)| *v);
+                match kind {
+                    Kind::Cert => {
+                        get("CERTIFICATE").ok_or(NotASignedLog)?;
+                        certs += 1;
+                    }
+                    Kind::Station => {
+                        let uid = get("STATION_UID").ok_or(NotASignedLog)?;
+                        stations.insert(uid, got);
+                    }
+                    Kind::Contact => {
+                        // Before any QSO, a certificate that signs it.
+                        if certs == 0 || get(lotw::SIGNATURE_FIELD).is_none() {
+                            return Err(NotASignedLog);
+                        }
+                        let station = get("STATION_UID")
+                            .and_then(|uid| stations.get(uid))
+                            .ok_or(NotASignedLog)?;
+                        // What was signed is exactly this QSO's and its station's fields, in
+                        // ARRL's order, as the signer builds it: nothing else can be carried here.
+                        let mut expected = Vec::new();
+                        for name in lotw::SIGN_STATION {
+                            if let Some((_, v)) = station.iter().find(|(f, _)| f == name) {
+                                expected.extend_from_slice(v);
+                            }
+                        }
+                        for (name, _) in lotw::SIGN_CONTACT {
+                            expected.extend_from_slice(get(name).unwrap_or_default());
+                        }
+                        expected.make_ascii_uppercase();
+                        if get("SIGNDATA") != Some(expected.as_slice()) {
+                            return Err(NotASignedLog);
+                        }
+                        contacts += 1;
+                    }
                 }
             }
             _ => return Err(NotASignedLog),
         }
     }
-    if kind.is_some() || contacts == 0 {
+    if record.is_some() || contacts == 0 {
         return Err(NotASignedLog);
     }
     Ok(())
@@ -160,12 +200,12 @@ impl<'a> Fields<'a> {
     }
 }
 
-/// Printable ASCII (and the line breaks base64 holds), at most `max` bytes.
+/// Text with no control characters but the line breaks base64 holds, at most `max` bytes. UTF-8,
+/// not only ASCII: a call need not be ASCII when bad calls are allowed.
 fn printable(value: &[u8], max: usize) -> bool {
     value.len() <= max
-        && value
-            .iter()
-            .all(|&b| (0x20..0x7f).contains(&b) || b == b'\n' || b == b'\r')
+        && std::str::from_utf8(value)
+            .is_ok_and(|t| t.chars().all(|c| !c.is_control() || c == '\n' || c == '\r'))
 }
 
 const CONTACT_FIELDS: &[&str] = &[

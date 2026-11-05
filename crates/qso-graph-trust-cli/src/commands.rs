@@ -748,6 +748,11 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         output.clone()
     };
     let tq8 = signed.tq8().to_vec();
+    // Every log written can be uploaded: checked before anything is written or recorded.
+    if qso_graph_trust::upload::check_signed_log(&tq8).is_err() {
+        env.message(Tone::Error, format_args!("{UNUPLOADABLE}"));
+        return Err(Exit::TqslError);
+    }
     if let Err(e) = signed.write_to(store, &target) {
         env.message(Tone::Error, format_args!("{}: {e}", output.display()));
         return Err(Exit::OutputError);
@@ -790,6 +795,10 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         suppressed: refused > 0 || out_of_range > 0 || (before > 0 && !again),
     })
 }
+
+/// Why a signed log is not written: one LoTW's upload would not take, too large for one upload.
+pub(crate) const UNUPLOADABLE: &str = "the signed log would be too large for one upload, so nothing \
+    is written or recorded: sign it in parts, with --from and --to (-b and -e)";
 
 /// A QSO the log or station cannot sign: its place in the list given, and why.
 fn refusal(e: &LogError) -> Option<(usize, String)> {
