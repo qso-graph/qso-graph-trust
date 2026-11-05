@@ -288,16 +288,34 @@ jobs:
           rm -rf "$base"
           ls -l "$file"
           echo "file=dist/$file" >> "$GITHUB_OUTPUT"
+      # Linux: the .deb and .rpm of this same program, for packages.qso-graph.net's apt and dnf
+      # repositories (qso-graph/qso-graph-packages signs them there), beside the archive.
+      - name: Packages (Linux)
+        id: packages
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rpm cpio >/dev/null
+          version=$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[] | select(.name == "qso-graph-trust-cli") | .version')
+          bash scripts/linux-packages.sh "target/$TARGET/release/qg-trust" "$version" "$NAME" dist > "$RUNNER_TEMP/packages"
+          cat "$RUNNER_TEMP/packages"
+          { echo 'files<<EOF'; cat "$RUNNER_TEMP/packages"; echo EOF; } >> "$GITHUB_OUTPUT"
       # GitHub's signed statement, through Sigstore, that this archive was built by this workflow from
       # this commit: gh attestation verify <file> -R qso-graph/qso-graph-trust
       - name: Attest
         if: env.SIGN == 'true'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: ${{ steps.archive.outputs.file }}
+          subject-path: |
+            ${{ steps.archive.outputs.file }}
+            ${{ steps.packages.outputs.files }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: qg-trust-${{ matrix.name }}
-          path: ${{ steps.archive.outputs.file }}
+          path: |
+            ${{ steps.archive.outputs.file }}
+            ${{ steps.packages.outputs.files }}
           if-no-files-found: error
           retention-days: 7

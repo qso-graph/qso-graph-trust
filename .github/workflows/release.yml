@@ -230,7 +230,8 @@ jobs:
             gh attestation verify "$file" -R "$REPO" --signer-workflow "${REPO}/.github/workflows/binaries.yml" >/dev/null
             echo "verified $(basename "$file")"; n=$((n + 1))
           done
-          [ "$n" -eq 4 ] || { echo "::error::Expected the 4 platforms' programs; found ${n}."; exit 1; }
+          # The 4 platforms' programs, and Linux's .deb and .rpm for x86_64 and arm64.
+          [ "$n" -eq 8 ] || { echo "::error::Expected the 4 platforms' programs and 4 Linux packages; found ${n}."; exit 1; }
       - name: SHA256SUMS.txt
         run: (cd dist && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt)
       # Made here, so its provenance is this job's.
@@ -256,7 +257,7 @@ jobs:
             echo
             echo "- **macOS** (Apple silicon): signed by Greg Beam (KI7MT) with an Apple Developer ID, and notarized by Apple."
             echo "- **Windows** (x86_64): signed by Gregory Beam (KI7MT)."
-            echo "- **Linux** (x86_64, arm64): one program for every distribution."
+            echo "- **Linux** (x86_64, arm64): one program for every distribution, and \`.deb\` and \`.rpm\` packages; or install it from QSO Graph's signed apt and dnf repositories: <https://github.com/qso-graph/qso-graph-packages>."
             echo
             echo "Also on crates.io: \`cargo install qso-graph-trust-cli\`, and the library, [qso-graph-trust](https://crates.io/crates/qso-graph-trust/${VERSION})."
             echo
