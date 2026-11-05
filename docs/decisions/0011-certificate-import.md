@@ -3,7 +3,7 @@
 
 # 0011: Authenticate certificate imports before publishing them
 
-**Status: proposed**, 2026-11-04, for KI7MT to decide.
+**Status: accepted**, 2026-11-05: it does what TQSL 2.8.7 does.
 
 The library imports ARRL's `.tq6` response and password-authenticated PKCS#12 `.p12` files through
 `Store::import_tq6` and `Store::import_pkcs12`. It verifies every supplied certificate, including

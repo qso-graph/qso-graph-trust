@@ -2,7 +2,7 @@
 <!-- Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE. -->
 # 0008 — One versioned folder, with credential storage owned by the library
 
-**Status: proposed**, for KI7MT to decide. The OS credential store backends are decided in [0002](0002-no-c-in-the-library.md).
+**Status: accepted**, 2026-11-05: it does what TQSL 2.8.7 does. The OS credential store backends are decided in [0002](0002-no-c-in-the-library.md).
 
 QGD-LTW-0007 and QGD-LTW-0008 require Desktop and the command line to share certificates, keys and
 station locations even when they use different library releases. The library owns this protocol;

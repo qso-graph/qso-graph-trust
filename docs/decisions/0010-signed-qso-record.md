@@ -3,7 +3,7 @@
 
 # 0010: Keep TQSL's duplicate keys in the shared store
 
-**Status: proposed**, 2026-11-04, for KI7MT to decide.
+**Status: accepted**, 2026-11-05: it does what TQSL 2.8.7 does.
 
 The library keeps the public record of signed QSOs in `store.xml`. It imports the same keys and
 station descriptions that TQSL puts in a `.tbk`, without a database dependency. Applications choose

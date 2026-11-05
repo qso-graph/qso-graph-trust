@@ -48,9 +48,9 @@ provider in the policy checks: it may depend on `aws-lc-sys`, and any crate but 
 either fails, proved by a planted case. Only LoTW's SHA-1 signing, which `aws-lc-rs` does not make, still
 calls `aws-lc-sys` directly.
 
-## Proposed 2026-11-04: certificate requests
+## Certificate requests (2026-11-05)
 
-For KI7MT to decide.
+Accepted 2026-11-05: it does what TQSL 2.8.7 does.
 
 TQSL 2.8.7's `tqsl_createCertRequest` generates RSA-1024 with exponent 65537 and signs the
 PKCS#10 request with SHA-256. aws-lc-rs 1.18.1's `rsa/key.rs::validate_rsa_key` rejects signing

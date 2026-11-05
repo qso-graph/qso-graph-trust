@@ -3,7 +3,7 @@
 
 # 0009: Encrypt the LoTW backup part inside the library
 
-**Status: proposed**, 2026-11-04, for KI7MT to decide.
+**Status: accepted**, 2026-11-05: it does what TQSL 2.8.7 does.
 
 QGD-LTW-0010 and QGD-LTW-0011 require LoTW's certificates, keys, station locations and signed-QSO
 section to leave the store only encrypted, with restore checking the whole part before replacement.
