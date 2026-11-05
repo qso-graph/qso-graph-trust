@@ -2,14 +2,14 @@
 <!-- Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE. -->
 # 0008 — One versioned folder, with credential storage owned by the library
 
-**Status: proposed**, for KI7MT to decide. The OS credential store backends wait on their own decision.
+**Status: proposed**, for KI7MT to decide. The OS credential store backends are decided in [0002](0002-no-c-in-the-library.md).
 
 QGD-LTW-0007 and QGD-LTW-0008 require Desktop and the command line to share certificates, keys and
 station locations even when they use different library releases. The library owns this protocol;
-OS credential backends await their own dependency decision. No backend or new dependency is added.
+The OS credential backends are in [0002](0002-no-c-in-the-library.md).
 
 - The crate-private `KeyStore` seam is scoped to `io.qso-graph.trust`, or `io.qso-graph.trust.test`
-  for tests once OS backends land. Only the library can obtain a backend object or read its secrets.
+  for tests. Only the library can obtain a backend object or read its secrets.
   Its `put`, `get`, `delete`, `exists` and `names` methods use fixed error categories that cannot hold
   backend messages or secrets. `exists` and `names` never read secrets. Enumeration is necessary to
   report orphaned keys; presence checks alone cannot find them. Backends bound enumeration at 8192.

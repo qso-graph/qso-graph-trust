@@ -75,7 +75,7 @@ and DXCC, validates the private key, attaches the certificate and removes the pe
 one replacement under the lock. Pending credentials are accounted for in the open report;
 `pending_requests` lists them and `abandon_request` removes the file entry before the credential.
 No pending secret is written to the public store file. CLI commands and Desktop screens remain
-to be built; the current selectable backend is volatile memory for tests.
+to be built; the backends are the OS credential store ([0002](0002-no-c-in-the-library.md)) and volatile memory for tests.
 
 Format decisions were read from TQSL's source, not inferred: request field order and framing,
 CSR subject order (AROcallsign, commonName, emailAddress), empty attributes, SHA-256 algorithm
