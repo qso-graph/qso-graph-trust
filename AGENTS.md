@@ -26,6 +26,8 @@ removed (ARRL's [certificate security](https://lotw.arrl.org/lotw-help/certifica
   `aws-lc-rs` (QSO Graph Desktop's) for TLS and every operation it offers, certificate signature
   checks included, and AWS-LC, through QG Trust's one binding, for LoTW's RSA-SHA-1 signature, which
   aws-lc-rs does not sign (decision 0006); in QG Trust both are reached only through the binding;
+  RustCrypto is allowed only inside `secret-service`'s Desktop-default `crypto-rust` D-Bus session
+  transport (DH, HKDF/SHA-256 and AES-CBC), never for signing, certificates, TLS or other uses;
   RustCrypto's `rsa` is a test tool only, never shipped. The library never signs for a remote
   caller (decision 0002, amended 2026-11-03). *Test: `cargo xtask policy` and `cargo deny`.*
 - **Every outside crate a shipped crate uses is reviewed, or listed as not reviewed yet,** by exact
@@ -75,6 +77,21 @@ removed (ARRL's [certificate security](https://lotw.arrl.org/lotw-help/certifica
 - **House rules:** every new file starts with the SPDX header (`GPL-3.0-only`, see `CONTRIBUTING.md`);
   changes go in by pull request; branches are `feat-…`, `fix-…` or `docs-…`; match the code around you,
   and don't rename or reformat what your task doesn't need.
+
+## What an agent doesn't change unless its task names it
+
+- **`AUTHORS` lists people.** Never add a tool, a model or an agent to it, or to a copyright line.
+- **The READMEs are product pages:** the top-level one and each crate's, which crates.io shows. They say
+  what QG Trust is, who it is for and why it is better; they carry no design notes, caveats, test
+  counts or work in progress. That writing goes in `docs/decisions/`, `SECURITY.md` or this file.
+- **tqsllib and TQSL run only in the harness container**, started by `scripts/make-tqsl-corpus.sh`
+  (`podman run --network=none`). Never build or run them on the host, from a copy of the image's
+  files or any other way; a corpus made outside the container is not evidence.
+- **Nothing calls ARRL.** No test, tool or script connects to `lotw.arrl.org` or uploads anything.
+- **cargo-vet entries say why.** Prefer an audit the repo already imports; an exemption is at an exact
+  version. Adding a trusted publisher or an audit source is a decision: name it in your summary.
+- **A new decision takes the number your task gives it.** If the task gives none, use the next free
+  number and say so in your summary, because work on other branches may be using it.
 
 ## Build and check
 

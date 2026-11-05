@@ -19,8 +19,11 @@ include = ["src/**/*.rs", "README.md", "LICENSE.md", "NOTICE.md", "AUTHORS.md"]
 aws-lc-sys = { version = "=0.45.0", default-features = false, features = ["all-bindings"] }
 # AWS-LC's safe Rust API, as QSO Graph Desktop ships it (1.18.1, over the same aws-lc-sys): the
 # signature checks on certificates, which it offers; only LoTW's SHA-1 signing, which it does not,
-# goes through aws-lc-sys here.
-aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["aws-lc-sys"] }
+# goes through aws-lc-sys here. legacy-des enables read-only CBC import of TQSL’s 3DES keys.
+aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["aws-lc-sys", "legacy-des"] }
+
+# Already used throughout the workspace: generated keys and derived encryption keys are always wiped.
+zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
 
 # Not the workspace's lints, whose forbid(unsafe_code) cannot be lifted: the same ones, with unsafe
 # denied rather than forbidden, so each unsafe block carries its own allow and its SAFETY reason.

@@ -2,5 +2,5 @@
 [alias]
 # The repository's own checks: `cargo xtask policy` (see xtask/src/main.rs). --locked, so a manifest
 # changed without its lockfile fails here instead of rewriting Cargo.lock before it is checked and
-# audited (found by Codex review).
+# audited (found in review).
 xtask = "run --quiet --locked --package xtask --"

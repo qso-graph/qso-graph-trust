@@ -28,14 +28,230 @@ audit-as-crates-io = false
 [policy.xtask]
 criteria = "safe-to-run"
 
+[[exemptions.aes]]
+version = "0.9.4"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.aho-corasick]]
+version = "1.1.5"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): pattern matching in the credential backend dependency tree. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.apple-native-keyring-store]]
+version = "1.0.2"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): the default OS credential backends shared with Desktop. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.async-broadcast]]
+version = "0.7.2"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.async-channel]]
+version = "2.5.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.async-executor]]
+version = "1.14.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.async-io]]
+version = "2.6.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.async-lock]]
+version = "3.5.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.async-process]]
+version = "2.5.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.async-recursion]]
+version = "1.2.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.async-signal]]
+version = "0.2.14"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.async-task]]
+version = "4.7.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.async-trait]]
+version = "0.1.92"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.bitflags]]
+version = "2.13.2"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.block-buffer]]
+version = "0.12.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.blocking]]
+version = "1.7.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.bumpalo]]
+version = "3.20.3"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): JavaScript/WebAssembly support in the credential tree, not built for QGT shipping targets. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.byteorder]]
+version = "1.5.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.cbc]]
+version = "0.2.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.cipher]]
+version = "0.5.2"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.cmov]]
+version = "0.5.4"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.concurrent-queue]]
+version = "2.5.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.const-oid]]
+version = "0.10.2"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.core-foundation]]
+version = "0.10.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Apple OS credential APIs and their Rust wrappers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.core-foundation-sys]]
+version = "0.8.7"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Apple OS credential APIs and their Rust wrappers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.cpubits]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.crossbeam-utils]]
+version = "0.8.23"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.crypto-common]]
+version = "0.2.2"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.ctutils]]
+version = "0.4.8"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.digest]]
+version = "0.11.3"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.endi]]
+version = "1.1.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service D-Bus transport, serialization and supporting types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.enumflags2]]
+version = "0.7.12"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service D-Bus transport, serialization and supporting types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.enumflags2_derive]]
+version = "0.7.12"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service D-Bus transport, serialization and supporting types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
 [[exemptions.equivalent]]
 version = "1.0.3"
-criteria = "safe-to-run"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.errno]]
+version = "0.3.14"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): OS interfaces used by the credential backend runtime (including unshipped target bindings). Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.event-listener]]
+version = "5.4.2"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.event-listener-strategy]]
+version = "0.5.4"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.fastrand]]
+version = "2.5.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
 [[exemptions.fs_extra]]
 version = "1.3.0"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): a build tool for AWS-LC (file copying, via aws-lc-sys); runs only while AWS-LC is built, never shipped."
+
+[[exemptions.futures-core]]
+version = "0.3.34"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.futures-io]]
+version = "0.3.34"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.futures-lite]]
+version = "2.6.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.futures-macro]]
+version = "0.3.34"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.futures-task]]
+version = "0.3.34"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.futures-util]]
+version = "0.3.34"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
 [[exemptions.generic-array]]
 version = "0.14.7"
@@ -44,44 +260,222 @@ notes = "Not audited yet (decision 0004): fixed-size arrays under RustCrypto's d
 
 [[exemptions.hashbrown]]
 version = "0.17.1"
-criteria = "safe-to-run"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.hermit-abi]]
+version = "0.5.3"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): OS interfaces used by the credential backend runtime (including unshipped target bindings). Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.hkdf]]
+version = "0.13.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.hmac]]
+version = "0.13.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.hybrid-array]]
+version = "0.4.15"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
 [[exemptions.indexmap]]
 version = "2.14.2"
-criteria = "safe-to-run"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.inout]]
+version = "0.2.5"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.js-sys]]
+version = "0.3.107"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): JavaScript/WebAssembly support in the credential tree, not built for QGT shipping targets. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.keyring]]
+version = "4.2.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): the default OS credential backends shared with Desktop. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.keyring-core]]
+version = "1.0.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): keyring 4.2.0's transitive credential API, shared with Desktop. QGT does not depend on it directly or call its Windows enumeration API (decision 0002); no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.linux-raw-sys]]
+version = "0.12.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): OS interfaces used by the credential backend runtime (including unshipped target bindings). Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.log]]
+version = "0.4.35"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
 [[exemptions.memchr]]
 version = "2.8.3"
-criteria = "safe-to-run"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.memoffset]]
+version = "0.9.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.num]]
+version = "0.4.3"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.num-bigint]]
+version = "0.4.8"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
 [[exemptions.num-bigint-dig]]
 version = "0.8.6"
 criteria = "safe-to-run"
-notes = "Not audited yet (docs/decisions/0004-supply-chain.md): rsa's big-number library. The code rsa's signing reaches (Montgomery exponentiation, multiplication, division, inverse, blinding randomness, build.rs) was reviewed by Codex (gpt-6-astra, high) on 2026-11-03 and found safe-to-deploy; the rest of the crate is not reviewed. Known: an assertion message at src/monty.rs:50 would print its operands, a secret prime included, if it ever failed (no normal path does; Gate C's custody test covers it)."
+notes = "Not audited yet (docs/decisions/0004-supply-chain.md): rsa's big-number library. The code rsa's signing reaches (Montgomery exponentiation, multiplication, division, inverse, blinding randomness, build.rs) was reviewed on 2026-11-03 and found safe-to-deploy; the rest of the crate is not reviewed. Known: an assertion message at src/monty.rs:50 would print its operands, a secret prime included, if it ever failed (no normal path does; Gate C's custody test covers it)."
+
+[[exemptions.num-complex]]
+version = "0.4.6"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.num-rational]]
+version = "0.4.2"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.once_cell]]
+version = "1.21.4"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.ordered-stream]]
+version = "0.2.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service D-Bus transport, serialization and supporting types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.parking]]
+version = "2.2.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.pin-project-lite]]
+version = "0.2.17"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.piper]]
+version = "0.2.5"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.polling]]
+version = "3.11.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): OS interfaces used by the credential backend runtime (including unshipped target bindings). Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.proc-macro-crate]]
+version = "3.5.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
 [[exemptions.r-efi]]
 version = "6.0.0"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): getrandom 0.4's UEFI back end, never built for QG Trust's platforms (Windows, macOS, Linux)."
 
+[[exemptions.regex]]
+version = "1.13.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): pattern matching in the credential backend dependency tree. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.regex-automata]]
+version = "0.4.18"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): pattern matching in the credential backend dependency tree. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.regex-syntax]]
+version = "0.8.11"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): pattern matching in the credential backend dependency tree. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.rustix]]
+version = "1.1.6"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): OS interfaces used by the credential backend runtime (including unshipped target bindings). Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.rustversion]]
+version = "1.0.23"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): compiler-version detection for the credential dependency tree. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.secret-service]]
+version = "5.2.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service protocol client, shared with Desktop; also a direct dependency on non-macOS Unix for silent metadata discovery, with Desktop's crypto-rust feature, approved by KI7MT in decision 0002. Exact version already resolved through keyring 4.2.0; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.security-framework]]
+version = "3.7.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Apple OS credential APIs and their Rust wrappers; also a macOS-only direct dependency for silent metadata discovery, matching Desktop, approved by KI7MT in decision 0002. Exact version already resolved through keyring 4.2.0; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.security-framework-sys]]
+version = "2.17.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Apple OS credential APIs and their Rust wrappers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.serde_repr]]
+version = "0.1.21"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service D-Bus transport, serialization and supporting types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
 [[exemptions.serde_spanned]]
 version = "1.1.2"
 criteria = "safe-to-run"
+
+[[exemptions.sha2]]
+version = "0.11.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.signal-hook-registry]]
+version = "1.4.8"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): OS interfaces used by the credential backend runtime (including unshipped target bindings). Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.slab]]
+version = "0.4.12"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
 [[exemptions.spin]]
 version = "0.9.9"
 criteria = "safe-to-run"
 notes = "Not audited yet (decision 0004): reached only through lazy_static's no-std option, for num-bigint-dig."
 
+[[exemptions.tempfile]]
+version = "3.27.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
 [[exemptions.tls_codec]]
 version = "0.4.2"
 criteria = "safe-to-deploy"
-notes = "Never compiled (Bob, 2026-11-03): in Cargo.lock only as x509-cert's optional dependency for its sct feature, which QG Trust does not enable; absent from cargo tree --all-features and from every build."
+notes = "Never compiled (checked 2026-11-03): in Cargo.lock only as x509-cert's optional dependency for its sct feature, which QG Trust does not enable; absent from cargo tree --all-features and from every build."
 
 [[exemptions.tls_codec_derive]]
 version = "0.4.2"
 criteria = "safe-to-deploy"
-notes = "Never compiled (Bob, 2026-11-03): tls_codec's derive macros; see tls_codec."
+notes = "Never compiled (checked 2026-11-03): tls_codec's derive macros; see tls_codec."
 
 [[exemptions.toml]]
 version = "1.1.8+spec-1.1.0"
@@ -89,26 +483,124 @@ criteria = "safe-to-run"
 
 [[exemptions.toml_datetime]]
 version = "1.1.2+spec-1.1.0"
-criteria = "safe-to-run"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.toml_edit]]
+version = "0.25.18+spec-1.1.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
 [[exemptions.toml_parser]]
 version = "1.1.5+spec-1.1.0"
-criteria = "safe-to-run"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
 [[exemptions.toml_writer]]
 version = "1.1.3+spec-1.1.0"
 criteria = "safe-to-run"
+
+[[exemptions.tracing]]
+version = "0.1.44"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.tracing-attributes]]
+version = "0.1.31"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.tracing-core]]
+version = "0.1.36"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
 [[exemptions.typenum]]
 version = "1.20.1"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): type-level numbers for RustCrypto's generic-array; mostly generated tables, holds no data at run time."
 
+[[exemptions.uds_windows]]
+version = "1.2.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service D-Bus transport, serialization and supporting types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.uuid]]
+version = "1.29.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
 [[exemptions.wasi]]
 version = "0.11.1+wasi-snapshot-preview1"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): getrandom's WebAssembly back end, never built for QG Trust's platforms (Windows, macOS, Linux)."
 
+[[exemptions.wasm-bindgen]]
+version = "0.2.130"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): JavaScript/WebAssembly support in the credential tree, not built for QGT shipping targets. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.wasm-bindgen-macro]]
+version = "0.2.130"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): JavaScript/WebAssembly support in the credential tree, not built for QGT shipping targets. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.wasm-bindgen-macro-support]]
+version = "0.2.130"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): JavaScript/WebAssembly support in the credential tree, not built for QGT shipping targets. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.wasm-bindgen-shared]]
+version = "0.2.130"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): JavaScript/WebAssembly support in the credential tree, not built for QGT shipping targets. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.windows-native-keyring-store]]
+version = "1.1.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): the default OS credential backends shared with Desktop. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
 [[exemptions.winnow]]
 version = "1.0.4"
-criteria = "safe-to-run"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.zbus]]
+version = "5.19.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service D-Bus transport, serialization and supporting types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.zbus-secret-service-keyring-store]]
+version = "1.0.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): the default OS credential backends shared with Desktop. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.zbus_macros]]
+version = "5.19.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service D-Bus transport, serialization and supporting types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.zbus_names]]
+version = "4.3.5"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service D-Bus transport, serialization and supporting types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.zcheapstr]]
+version = "1.2.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service D-Bus transport, serialization and supporting types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.zvariant]]
+version = "5.15.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service D-Bus transport, serialization and supporting types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.zvariant_derive]]
+version = "5.15.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service D-Bus transport, serialization and supporting types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.zvariant_utils]]
+version = "4.2.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Secret Service D-Bus transport, serialization and supporting types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."

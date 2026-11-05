@@ -45,12 +45,19 @@ fn main() -> ExitCode {
     };
     let mut failed = false;
     for (check, problems) in [
-        ("no C in the library", no_c_on_shipping_targets(&root)),
+        (
+            "no C in the library",
+            on_shipping_targets(&root, |meta| xtask::no_c(meta, xtask::PROTECTED)),
+        ),
         (
             "dependency sources",
             xtask::unreviewed_in(&meta, xtask::SHIPPED),
         ),
         ("no unsafe code", xtask::no_unsafe(&meta)),
+        (
+            "no networking in the library",
+            on_shipping_targets(&root, xtask::no_network),
+        ),
         ("no lint overrides", xtask::no_lint_overrides(&root_dir)),
         ("the pinned compiler", xtask::pinned_compiler(&root_dir)),
         ("the wiping allocator", xtask::wiping_allocator(&meta)),
@@ -71,17 +78,16 @@ fn main() -> ExitCode {
     }
 }
 
-/// The no-C check once per platform QGT ships for, each on that platform's own
-/// dependency tree.
-fn no_c_on_shipping_targets(root: &std::path::Path) -> Vec<String> {
+/// A dependency-graph check once per shipping platform, on its own tree with
+/// every feature enabled.
+fn on_shipping_targets(
+    root: &std::path::Path,
+    check: fn(&serde_json::Value) -> Vec<String>,
+) -> Vec<String> {
     let mut problems = Vec::new();
     for target in xtask::SHIPPING_TARGETS {
         match xtask::metadata_for(root, Some(target)) {
-            Ok(meta) => problems.extend(
-                xtask::no_c(&meta, xtask::PROTECTED)
-                    .into_iter()
-                    .map(|p| format!("{target}: {p}")),
-            ),
+            Ok(meta) => problems.extend(check(&meta).into_iter().map(|p| format!("{target}: {p}"))),
             Err(e) => problems.push(format!("{target}: {e}")),
         }
     }

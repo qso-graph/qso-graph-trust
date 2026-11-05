@@ -23,16 +23,20 @@ static ALLOCATOR: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> =
     ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
     let trust = Trust::lotw();
     let mut ask = ask_password;
-    let mut out = std::io::stdout().lock();
-    let mut err = std::io::stderr().lock();
+    let choice_out = anstream::AutoStream::choice(&std::io::stdout());
+    let choice_err = anstream::AutoStream::choice(&std::io::stderr());
+    let mut out = anstream::AutoStream::new(std::io::stdout().lock(), choice_out);
+    let mut err = anstream::AutoStream::new(std::io::stderr().lock(), choice_err);
     let code = cli::run(
         &args,
         &mut cli::Env {
             trust: &trust,
             now: SystemTime::now(),
+            color_out: choice_out != anstream::ColorChoice::Never,
+            color_err: choice_err != anstream::ColorChoice::Never,
             ask_password: &mut ask,
             out: &mut out,
             err: &mut err,

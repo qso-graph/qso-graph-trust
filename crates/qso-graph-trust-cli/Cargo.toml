@@ -21,7 +21,7 @@ name = "qg-trust"
 path = "src/main.rs"
 
 [dependencies]
-qso-graph-trust = { path = "../qso-graph-trust", version = "=0.1.0-beta.4" }
+qso-graph-trust = { path = "../qso-graph-trust", version = "=0.1.0" }
 # Every block is wiped when it is freed, whichever library allocated it, so no key data is left
 # in freed memory (AGENTS.md; cargo xtask policy requires it in every program).
 zeroizing-alloc = { version = "=0.1.1", default-features = false }
@@ -30,6 +30,13 @@ zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
 # The key's password, asked for at the terminal with what is typed hidden. It sets the terminal
 # through the OS's own calls (libc on Unix, windows-sys on Windows) and holds no C.
 rpassword = { version = "=7.5.4", default-features = false }
+# The command line itself: its options, help and errors, styled at a terminal and plain otherwise.
+clap = { version = "=4.6.7", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions", "color"] }
+# Shell completions for qg-trust, written by --completions.
+clap_complete = { version = "=4.6.11", default-features = false }
+# qg-trust's own messages, styled as clap's are, and plain when they go to a file, a logger or NO_COLOR.
+anstream = { version = "=1.0.0", default-features = false, features = ["auto", "wincon"] }
+anstyle = { version = "=1.0.14", default-features = false, features = ["std"] }
 
 [lints]
 workspace = true

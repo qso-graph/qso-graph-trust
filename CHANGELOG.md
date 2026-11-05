@@ -5,6 +5,55 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-05
+
+### Added
+
+- Versioned library store with keys in the OS credential store, file locking, atomic metadata
+  updates and recovery reporting; credential-store round trips are tested on Windows, Linux and
+  macOS with a test-only service name.
+- CLI argument parsing with clap, shell completions and styled output. The command still signs
+  from a supplied backup; the library's store and new workflows need CLI and Desktop integration.
+- Release packaging for Windows x86_64, Linux x86_64 and arm64, and macOS Apple silicon. PR CI builds
+  all four unsigned archives; the release workflow signs Windows and macOS programs, notarizes
+  macOS programs and attests the archives before publishing.
+
+- Library upload request construction and bounded LoTW response parsing, with TQSL's multipart
+  field, filename format and result codes. The endpoint is fixed; callers supply verified TLS.
+  The library opens no connection. CLI and Desktop integration remains.
+- Library signed-QSO records with exact TQSL keys, backup merging, duplicate inspection and the
+  new-only/sign-again/cancel choices. Selected QSOs are recorded after their `.tq8` is written;
+  encrypted store exports carry the record. Store XML version 2 reads version 1 and keeps up to
+  100,000 records within the 32 MiB file limit. CLI and Desktop integration remains.
+- Library `.tq6` import with chain validation and atomic pending-request attachment or keyless
+  storage; MAC-authenticated `.p12` import with PBES2/AES and PKCS#12 SHA-1/3DES, bounded parsing and
+  derivation work, and private credential handoff. RC2-40 is explicitly refused, including TQSL's
+  weak export certificate bags. No dependency packages added; the pinned aws-lc-rs enables `legacy-des` for import decryption.
+- Certificate expiry lists from caller-supplied time and threshold, using X.509 validity-end UTC
+  dates and TQSL's strict warning threshold, with dates and already-expired certificates included.
+
+- Library certificate requests: new, signed additional and renewal `.tq5` files, with TQSL 2.8.7's
+  CSR subject, attributes, signatures and field order; DXCC, date and bounded text validation.
+  New RSA-1024 keys pass through an opaque request into the library-owned store, with pending
+  metadata in store.xml, response matching and abandonment. Requests identify QG Trust.
+  Desktop and CLI integration remains.
+- Library-side encrypted LoTW store exports: a generated 20-character password, AES-256-GCM and
+  PBKDF2-HMAC-SHA-256 at 600,000 iterations. Restore authenticates and checks every certificate, key
+  and station location before replacing the store; private key bytes stay inside the library.
+
+### Fixed
+
+- CBC import decryption uses the binding's safe AWS-LC API. The release custody scan caught
+  private-key fragments in RustCrypto CBC's temporary stack blocks; `.p12` imports are now
+  exercised in debug and release, with a planted password leak as a positive control.
+
+- Derive export AES keys directly into wiped heap storage, avoiding moved stack copies. Custody
+  scans now search generated export passwords and both successful and failed-open derived keys,
+  with planted-leak controls in debug and release.
+- Encrypted store parts include pending certificate requests and their keys, checked against each
+  recorded public key before restore changes the destination. The private store-part format is
+  version 2; version 1 plaintext is refused. The encryption envelope remains version 1.
+
 ## [0.1.0-beta.4] - 2026-11-04
 
 Documentation only: the library and `qg-trust` sign exactly as beta.3 does.

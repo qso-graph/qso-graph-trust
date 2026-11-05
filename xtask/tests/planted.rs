@@ -15,8 +15,8 @@ fn here(rel: &str) -> PathBuf {
 
 /// A file of a fixture crate, from the crate's directory as Cargo reports it,
 /// joined part by part, so the text is what the checks print on every platform:
-/// canonicalize gives `\\?\` paths on Windows, which Cargo does not (found by
-/// Codex review).
+/// canonicalize gives `\\?\` paths on Windows, which Cargo does not (found in
+/// review).
 fn fixture(meta: &Value, package: &str, rel: &str) -> String {
     let manifest = meta["packages"]
         .as_array()
@@ -36,7 +36,7 @@ fn fixtures() -> Value {
 }
 
 /// A fixture crate's library root as Cargo reports it, separators and all, so
-/// the expected text is right on Windows too (found by Codex review).
+/// the expected text is right on Windows too (found in review).
 fn lib_root(meta: &Value, package: &str) -> String {
     meta["packages"]
         .as_array()
@@ -113,13 +113,13 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
         lib_root(&meta, "planted-passed-hash") + " defines a macro",
         // A whole attribute passed as a meta fragment: no macro of our own is allowed.
         lib_root(&meta, "planted-meta-macro") + " defines a macro",
-        // Unstable features, and the unstable `macro` (Codex review, round 23).
+        // Unstable features, and the unstable `macro` (found in review).
         lib_root(&meta, "planted-decl-macro") + " enables an unstable feature",
         fixture(&meta, "planted-decl-macro", "src/generated.rs") + " defines a macro",
         // A procedural macro can generate unsafe code from a string.
         "planted-proc-gen is a procedural macro crate".to_string(),
         // No shebangs, so no line can be dropped by misreading one: `#! /* c */ [`
-        // and `#!` + U+200E + `[` are both attributes to Rust (Codex review).
+        // and `#!` + U+200E + `[` are both attributes to Rust (found in review).
         fixture(&meta, "planted-decoy", "src/shebang_trick.rs")
             + " begins with #! but not #![: no shebangs in a workspace crate",
         fixture(&meta, "planted-decoy", "src/lrm.rs")
@@ -146,13 +146,132 @@ fn every_planted_way_to_allow_unsafe_code_is_caught() {
 }
 
 #[test]
+fn every_planted_network_path_or_type_is_caught() {
+    let scan = |s: &str| xtask::network_tokens(s.parse().expect("Rust tokens"));
+    for planted in [
+        "use std::{net};",
+        "use std::net as n;",
+        "std::os::unix::net::UnixStream",
+        "use std::{io, net::{TcpListener}};",
+        "core::net::IpAddr",
+        "use std :: /* spacing */ net :: *;",
+        "use std::{os::{unix::{net as n}}};",
+        "use std::{r#net};",
+        "r#net::connect()",
+        "#[cfg(any())] mod disabled { use std::{net}; }",
+        "consume!(std::net)",
+    ] {
+        assert!(
+            scan(planted).contains(&"uses network path segment net"),
+            "missed {planted}"
+        );
+    }
+    for name in [
+        "TcpStream",
+        "TcpListener",
+        "UdpSocket",
+        "UnixStream",
+        "UnixListener",
+        "UnixDatagram",
+        "ToSocketAddrs",
+        "SocketAddr",
+        "SocketAddrV4",
+        "SocketAddrV6",
+        "IpAddr",
+    ] {
+        for planted in [
+            format!("use provider::{{{name} as Alias}};"),
+            format!("#[cfg(any())] fn f(_: r#{name}) {{}}"),
+        ] {
+            assert_eq!(scan(&planted).len(), 1, "missed {planted}");
+        }
+    }
+    // Identifier tokens count, not matching prose, longer identifiers or local
+    // bindings. A use's alias is not one of its source path segments.
+    for clean in [
+        "// std::net::TcpStream\nconst S: &str = \"use std::{net}; UdpSocket\";",
+        "/// TcpStream and core::net::IpAddr\nfn f() {}",
+        "fn f() { let net = 1; consume(net); }",
+        "use std::io as net;",
+        "use std::io; fn f() { let net = 1; }",
+        "struct TcpStreamBuffer; mod network {}",
+    ] {
+        assert!(scan(clean).is_empty(), "refused {clean}");
+    }
+}
+
+#[test]
+fn network_policy_scans_library_and_binding_but_allows_cli() {
+    let root = xtask::fresh_temp_dir("qso-graph-trust-planted-network").expect("fresh directory");
+    let names = [
+        "qso-graph-trust",
+        xtask::UNSAFE_BINDING,
+        "qso-graph-trust-cli",
+    ];
+    let mut packages = Vec::new();
+    for name in names {
+        let dir = root.join(name);
+        std::fs::create_dir_all(dir.join("src")).expect("mkdir");
+        std::fs::write(dir.join("Cargo.toml"), "[package]\n").expect("manifest");
+        std::fs::write(dir.join("src/lib.rs"), "pub fn clean() {}\n").expect("source");
+        packages.push(serde_json::json!({
+            "id": name,
+            "name": name,
+            "manifest_path": dir.join("Cargo.toml"),
+        }));
+    }
+    let meta = serde_json::json!({
+        "workspace_root": root,
+        "workspace_members": names,
+        "packages": packages,
+        "resolve": {"nodes": [
+            {"id": "qso-graph-trust", "deps": [
+                {"pkg": xtask::UNSAFE_BINDING, "dep_kinds": [{"kind": null}]}
+            ]},
+            {"id": xtask::UNSAFE_BINDING, "deps": []},
+            {"id": "qso-graph-trust-cli", "deps": []},
+        ]},
+    });
+    assert!(xtask::no_network(&meta).is_empty());
+    // An unreferenced file in a nested directory is scanned even if no current
+    // build would compile it. Each plant is removed before the next one.
+    for name in names {
+        let dir = root.join(name).join("src").join("disabled");
+        std::fs::create_dir(&dir).expect("mkdir");
+        let path = dir.join("payload.rs");
+        for planted in [
+            "use std::{net};",
+            "use std::net as n;",
+            "std::os::unix::net::UnixStream",
+            "use std::{io, net::{TcpListener}};",
+            "core::net::IpAddr",
+        ] {
+            std::fs::write(&path, format!("#[cfg(any())] mod disabled {{ {planted} }}"))
+                .expect("plant");
+            let findings = xtask::no_network(&meta);
+            if name == "qso-graph-trust-cli" {
+                assert!(findings.is_empty(), "CLI must be allowed: {findings:?}");
+            } else {
+                assert!(
+                    findings.contains(&format!("{} uses network path segment net", path.display())),
+                    "missed {name}: {planted}: {findings:?}"
+                );
+            }
+            std::fs::remove_file(&path).expect("remove plant");
+            assert!(xtask::no_network(&meta).is_empty());
+        }
+    }
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
 fn every_planted_way_to_override_the_lints_is_caught() {
     // A repository made for the test, planted with each way found to weaken the
-    // lints without touching a manifest or a crate root (Codex review, rounds 6
-    // and 7). --cap-lints overrides even forbid(unsafe_code).
+    // lints without touching a manifest or a crate root (found in
+    // review). --cap-lints overrides even forbid(unsafe_code).
     // Outside this repository, so its planted files are never part of the
     // repository's own scan, wherever Cargo's output directory is; and freshly
-    // created, so removing it afterwards removes nothing else (found by Codex review).
+    // created, so removing it afterwards removes nothing else (found in review).
     let root =
         xtask::fresh_temp_dir("qso-graph-trust-planted-overrides").expect("a fresh directory");
     let write = |rel: &str, text: &str| {
@@ -185,7 +304,7 @@ fn every_planted_way_to_override_the_lints_is_caught() {
         "[toolchain]\nchannel = \"nightly\"\n",
     );
     // A second configuration file inside a crate, and one whose name differs only
-    // in case, which Windows and macOS read as the same (Codex review, round 22).
+    // in case, which Windows and macOS read as the same (found in review).
     write("crates/lib/.cargo/config.toml", "[build]\nrustflags = []\n");
     write(
         "crates/other/.CARGO/config.toml",
@@ -211,6 +330,19 @@ fn every_planted_way_to_override_the_lints_is_caught() {
     write(
         ".github/workflows/d.yml",
         "env:\n  RUSTFLAGS: -l static=z\n",
+    );
+    // The Windows build's one line is allowed in binaries.yml, and only there and only exactly.
+    write(
+        ".github/workflows/binaries.yml",
+        &format!("steps:\n  - run: |\n      {}\n", xtask::WINDOWS_CRT_STATIC),
+    );
+    write(
+        ".github/workflows/e.yml",
+        &format!("steps:\n  - run: |\n      {}\n", xtask::WINDOWS_CRT_STATIC),
+    );
+    write(
+        ".github/workflows/f.yml",
+        "steps:\n  - run: |\n      export RUSTFLAGS=\"-C target-feature=+crt-static --cap-lints=allow\"\n",
     );
     let nested = root
         .join("crates")
@@ -239,7 +371,7 @@ fn every_planted_way_to_override_the_lints_is_caught() {
             root.join("crates").join("lib").join("rust-toolchain.toml").display()
         ),
         "Cargo.toml has cargo-features".to_string(),
-        // A patch consumers would not see (Codex review, round 28).
+        // A patch consumers would not see (found in review).
         "Cargo.toml has [patch]".to_string(),
         "Cargo.toml sets profile.dev.package.qso-graph-trust.rustflags".to_string(),
         "rust-toolchain.toml must name an exact stable release, not Some(\"nightly-2026-10-01\")"
@@ -248,6 +380,10 @@ fn every_planted_way_to_override_the_lints_is_caught() {
         "workflow b.yml mentions --config".to_string(),
         "workflow c.yml mentions RUSTC".to_string(),
         "workflow d.yml sets RUSTFLAGS: RUSTFLAGS: -l static=z".to_string(),
+        format!("workflow e.yml sets RUSTFLAGS: {}", xtask::WINDOWS_CRT_STATIC),
+        "workflow f.yml mentions cap-lints".to_string(),
+        "workflow f.yml sets RUSTFLAGS: export RUSTFLAGS=\"-C target-feature=+crt-static --cap-lints=allow\""
+            .to_string(),
     ];
     want.sort();
     let got = xtask::no_lint_overrides(&root);
@@ -266,7 +402,7 @@ fn the_canary_is_refused_here_and_compiles_under_a_lint_cap() {
             &root,
             &[
                 ("RUSTFLAGS", "--cap-lints=allow"),
-                // Cargo prefers this one when it is set at all (found by Codex review).
+                // Cargo prefers this one when it is set at all (found in review).
                 ("CARGO_ENCODED_RUSTFLAGS", "--cap-lints=allow"),
             ]
         ),
@@ -289,7 +425,7 @@ fn the_canary_is_refused_here_and_compiles_under_a_lint_cap() {
 }
 
 /// A symbolic link in a workspace crate is refused: it can point anywhere, and the
-/// canary's copy would not follow it (found by Codex review). Made here, in a fresh
+/// canary's copy would not follow it (found in review). Made here, in a fresh
 /// temp directory, because a committed link is not a link on every Windows checkout.
 #[cfg(unix)]
 #[test]
@@ -344,14 +480,14 @@ fn every_planted_program_without_the_wiping_allocator_is_caught() {
         // A library another language loads, with an allocator that wipes nothing.
         missing("planted-alloc-other", "planted_alloc_other"),
         no_dependency("planted-alloc-other"),
-        // Codex review: the control's name in another package, and a program named like it.
+        // Found in review: the control's name in another package, and a program named like it.
         missing("planted-alloc-control", "qgt-custody-unwiped"),
         missing("planted-alloc-control", "qgt-custody-unwiped-too"),
         no_dependency("planted-alloc-control"),
-        // Codex review: an example, which cargo install --example installs.
+        // Found in review: an example, which cargo install --example installs.
         missing("planted-alloc-example", "sign"),
         no_dependency("planted-alloc-example"),
-        // Codex review: another crate renamed into the allocator's name, behind a correct line.
+        // Found in review: another crate renamed into the allocator's name, behind a correct line.
         no_dependency("planted-alloc-renamed"),
     ];
     expected.sort();
@@ -370,11 +506,11 @@ fn the_allocator_must_be_exactly_the_wiping_one() {
         "#[cfg_attr(test, global_allocator)]\nstatic A: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> = ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);",
         // Over an allocator other than the system's.
         "#[global_allocator]\nstatic A: ::zeroizing_alloc::ZeroAlloc<::other::Alloc> = ::zeroizing_alloc::ZeroAlloc(::other::Alloc);",
-        // Codex review: relative paths, which a local module of the same name answers, here one
+        // Found in review: relative paths, which a local module of the same name answers, here one
         // that makes the line install the plain system allocator.
         "mod zeroizing_alloc { pub type ZeroAlloc<T> = T; }\n#[global_allocator]\nstatic A: zeroizing_alloc::ZeroAlloc<std::alloc::System> = zeroizing_alloc::ZeroAlloc(std::alloc::System);",
         // This crate put behind the name with a raw identifier, aliasing the allocator to plain
-        // System (Codex review round 2).
+        // System (found in review).
         "extern crate self as r#zeroizing_alloc;\npub type ZeroAlloc<T> = T;\n#[global_allocator]\nstatic A: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> = ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);",
         // Another crate put behind the name.
         "extern crate other as zeroizing_alloc;\n#[global_allocator]\nstatic A: ::zeroizing_alloc::ZeroAlloc<::std::alloc::System> = ::zeroizing_alloc::ZeroAlloc(::std::alloc::System);",
@@ -392,7 +528,7 @@ fn the_allocator_must_be_exactly_the_wiping_one() {
 #[test]
 fn this_repository_passes() {
     let meta = xtask::metadata(&here("../Cargo.toml")).expect("workspace metadata");
-    // The no-C check per shipping platform, as the policy runs it (found by Codex
+    // The no-C check per shipping platform, as the policy runs it (found in
     // review: unfiltered, it would refuse a dependency only another platform uses).
     for target in xtask::SHIPPING_TARGETS {
         let per = xtask::metadata_for(&here("../Cargo.toml"), Some(target)).expect("metadata");
@@ -401,8 +537,10 @@ fn this_repository_passes() {
             Vec::<String>::new(),
             "{target}"
         );
+        assert_eq!(xtask::no_network(&per), Vec::<String>::new(), "{target}");
     }
     assert_eq!(xtask::no_unsafe(&meta), Vec::<String>::new());
+    assert_eq!(xtask::no_network(&meta), Vec::<String>::new());
     assert_eq!(
         xtask::unreviewed_in(&meta, xtask::SHIPPED),
         Vec::<String>::new()

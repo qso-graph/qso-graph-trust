@@ -97,7 +97,8 @@ pub struct BackedUpLocation {
 /// How a log's own QTH details (its `MY_` fields) are treated, as TQSL's "Log Handling" sets it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum QthHandling {
-    /// Not looked at (TQSL_LOC_IGNORE).
+    /// Not looked at (TQSL_LOC_IGNORE). When signing, STATION_CALLSIGN and MY_DXCC are not
+    /// compared either, so another station's QSOs can be signed as the selected location's.
     Ignore,
     /// A QSO whose details disagree with the station location is refused: TQSL's default, and QG
     /// Trust's (TQSL_LOC_REPORT).
@@ -432,7 +433,7 @@ fn read_user_certificate(entry: &Element) -> Result<BackedUpCertificate, TbkErro
         }
         // A key is known by its request: its DXCC entity, where the key file records it, must be
         // its entry's; a key waiting for its certificate must record one, as tqsllib always does
-        // (found by Codex review: a pending key was reported for any entity).
+        // (found in review: a pending key was reported for any entity).
         match key.request_dxcc() {
             Some(d) if d != dxcc => {
                 return Err(mismatch("the key was requested for another DXCC entity"));
@@ -451,7 +452,7 @@ fn read_user_certificate(entry: &Element) -> Result<BackedUpCertificate, TbkErro
         }
         // A key with no password is unlocked now, which proves its private key is the public key's
         // and LoTW-shaped, and dropped at once; a protected one is checked as far as it can be
-        // without its password (found by Codex review, twice).
+        // without its password (found in review, twice).
         key.check().map_err(|error| TbkError::Key {
             callsign: callsign.clone(),
             error,
@@ -545,7 +546,7 @@ fn read_settings(section: &Element, backup: &mut Backup) -> Result<(), TbkError>
                 }
             }
             // `type;field`, as tqsllib takes one (tqsl_setCabrilloMapEntry): type 0 for HF or 1 for
-            // VHF, and the call worked in a field after the fifth (found by Codex review).
+            // VHF, and the call worked in a field after the fifth (found in review).
             ("/cabrilloMap", contest) => {
                 let (kind, field) = value.split_once(';').unwrap_or((&value, ""));
                 match (kind.trim().parse::<i64>(), field.trim().parse::<i64>()) {

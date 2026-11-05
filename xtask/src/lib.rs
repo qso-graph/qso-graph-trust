@@ -11,6 +11,9 @@
 //! - **No unsafe code** (AGENTS.md): the workspace forbids `unsafe_code`, every
 //!   member takes the workspace's lints, and every crate root says
 //!   `#![forbid(unsafe_code)]` where the compiler reads it.
+//! - **No networking in the library's workspace dependency graph**: every source
+//!   file is read as tokens, whatever its cfg; the caller supplies upload's TLS
+//!   connection. The binding may use only [`BINDING_AWS_LC_ALLOWED`].
 //!
 //! - **No key data in freed memory** (AGENTS.md): every program
 //!   a workspace crate builds (a binary, or a library another language loads)
@@ -32,7 +35,7 @@ pub const PROTECTED: &[&str] = &["qso-graph-trust"];
 
 /// The crates QGT ships. Every crate they take from outside the workspace is
 /// reviewed by exact name and version through cargo-vet, because one could hand
-/// them a macro that writes unsafe code into our own source (found by Codex
+/// them a macro that writes unsafe code into our own source (found in
 /// review: `paste!` can build the keyword from pieces). The no-C rules are the
 /// library's alone: the command line (`qso-graph-trust-cli`) carries the TLS stack, which is C (docs/decisions/0002).
 pub const SHIPPED: &[&str] = &[
@@ -49,10 +52,72 @@ pub const SHIPPED: &[&str] = &[
 /// everything they depend on still is.
 pub const CRYPTO_PROVIDERS: &[&str] = &["aws-lc-sys", "aws-lc-rs"];
 
+/// A separate pure-Rust provider exception, NOT a native-code exemption: Secret Service's
+/// Desktop-default crypto-rust session transport only (DH, HKDF/SHA-256, AES-CBC).
+/// Its sources remain scanned. No signing, certificate, TLS or other use is permitted.
+pub const SECRET_SERVICE_PROVIDER: (&str, &str) = ("secret-service", "5.2.0");
+
+/// Exact incoming edges for that provider's algorithms and DH arithmetic. These versions cannot
+/// be used directly by a signer, certificate handler, TLS stack or another shipped crate.
+const SECRET_SERVICE_CRYPTO_EDGES: &[(&str, &str, &str, &str)] = &[
+    ("secret-service", "5.2.0", "aes", "0.9.4"),
+    ("secret-service", "5.2.0", "cbc", "0.2.1"),
+    ("secret-service", "5.2.0", "hkdf", "0.13.0"),
+    ("secret-service", "5.2.0", "sha2", "0.11.1"),
+    ("secret-service", "5.2.0", "num", "0.4.3"),
+    ("hkdf", "0.13.0", "hmac", "0.13.0"),
+    ("num", "0.4.3", "num-bigint", "0.4.8"),
+    ("num-rational", "0.4.2", "num-bigint", "0.4.8"),
+];
+
 /// The one workspace crate allowed unsafe code, and the only one that may depend on a
 /// [`CRYPTO_PROVIDERS`] crate: QG Trust's binding to AWS-LC. Instead of the workspace's lints it must
 /// carry exactly [`BINDING_LINTS`] (docs/decisions/0006).
 pub const UNSAFE_BINDING: &str = "qso-graph-trust-awslc";
+
+/// AWS-LC's entire raw API surface used by the binding, including types and
+/// constants. Adding an item requires reviewing its purpose here; socket BIOs
+/// and other provider APIs are refused even when Rust's networking is absent.
+pub const BINDING_AWS_LC_ALLOWED: &[&str] = &[
+    "BIGNUM",                  // integers
+    "BN_CTX_free",             // cleanup
+    "BN_CTX_new",              // allocation
+    "BN_cmp",                  // comparison
+    "BN_free",                 // cleanup
+    "BN_is_word",              // exponent
+    "BN_new",                  // allocation
+    "BN_num_bits",             // sizing
+    "BN_primality_test",       // primality
+    "BN_set_word",             // exponent
+    "CBB",                     // marshalling
+    "CBB_cleanup",             // cleanup
+    "CBB_init_fixed",          // marshalling
+    "CBB_len",                 // sizing
+    "CBS",                     // parsing
+    "CBS_init",                // parsing
+    "EVP_PKEY",                // keys
+    "EVP_PKEY_free",           // cleanup
+    "EVP_PKEY_get1_RSA",       // extraction
+    "EVP_PKEY_new",            // allocation
+    "EVP_PKEY_set1_RSA",       // assignment
+    "EVP_marshal_private_key", // marshalling
+    "EVP_marshal_public_key",  // marshalling
+    "EVP_parse_private_key",   // parsing
+    "EVP_parse_public_key",    // parsing
+    "NID_sha1",                // signing
+    "NID_sha256",              // signing
+    "RSA",                     // keys
+    "RSA_bits",                // sizing
+    "RSA_free",                // cleanup
+    "RSA_generate_key_ex",     // generation
+    "RSA_get0_e",              // exponent
+    "RSA_get0_factors",        // factors
+    "RSA_get0_n",              // modulus
+    "RSA_new",                 // allocation
+    "RSA_sign",                // signing
+    "RSA_size",                // sizing
+    "SHA1",                    // hashing
+];
 
 /// The binding's own lints, exactly: unsafe denied unless allowed block by block, unsafe operations
 /// marked even inside unsafe functions, every unsafe block documented with its SAFETY reason, one
@@ -71,7 +136,7 @@ multiple_unsafe_ops_per_block = "deny"
 /// 1Password's `zeroizing-alloc` over the system allocator, which wipes each block
 /// as it is freed (AGENTS.md; reviewed in supply-chain/audits.toml). The paths are
 /// absolute, so they name the outside crates and never a local module of the same
-/// name (found by Codex review: a local `mod zeroizing_alloc` made the line install
+/// name (found in review: a local `mod zeroizing_alloc` made the line install
 /// the plain system allocator).
 pub const WIPING_ALLOCATOR: &str = "::zeroizing_alloc::ZeroAlloc<::std::alloc::System>";
 
@@ -82,7 +147,7 @@ pub const WIPING_ALLOCATOR_CRATE: (&str, &str) = ("zeroizing-alloc", "=0.1.1");
 /// The one program allowed to go without it: the custody test's control, which
 /// proves the test finds what an unwiped free leaves behind. Named by its package,
 /// which must be unpublished, its binary and its root, so no other program can
-/// borrow the exception (found by Codex review).
+/// borrow the exception (found in review).
 pub const UNWIPED_CONTROL: (&str, &str, &str) = (
     "qso-graph-trust-custody",
     "qgt-custody-unwiped",
@@ -144,10 +209,20 @@ fn unreviewed_reviewing(
         let name = pkg.and_then(|p| p["name"].as_str()).unwrap_or(id);
         let version = pkg.and_then(|p| p["version"].as_str()).unwrap_or("?");
         let is_reviewed = list.iter().any(|(n, v, _)| *n == name && *v == version);
+        if name == SECRET_SERVICE_PROVIDER.0 {
+            let features = nodes.get(id).and_then(|n| n["features"].as_array());
+            if version != SECRET_SERVICE_PROVIDER.1
+                || !features.is_some_and(|f| f.len() == 1 && f[0] == "crypto-rust")
+            {
+                problems.push(format!(
+                    "{name} {version}: only 5.2.0 crypto-rust session transport is allowed"
+                ));
+            }
+        }
         // What a consumer of the published crate builds, not only what this
         // workspace builds: a dependency naming both a path and a version builds
         // the path here but the registry's crate of that name once published, and
-        // another registry is another source (found by Codex review). Only our own
+        // another registry is another source (found in review). Only our own
         // shipped crates may be named both ways, since their published form is ours.
         for dep in pkg
             .and_then(|p| p["dependencies"].as_array())
@@ -167,8 +242,8 @@ fn unreviewed_reviewing(
             }
         }
         // The repository's tooling never ships: its dependencies are held only to
-        // safe-to-run, so it may not be in a shipped crate's graph (found by
-        // Codex review).
+        // safe-to-run, so it may not be in a shipped crate's graph (found in
+        // review).
         if name == "xtask" {
             problems.push("xtask is in a shipped crate's dependencies".to_string());
         }
@@ -180,7 +255,7 @@ fn unreviewed_reviewing(
         // A build script or procedural macro anywhere a shipped crate reaches, our
         // own included, is reviewed too: a build script can compile a hidden crate
         // and hand the shipped crate its search path, outside Cargo's graph (found
-        // by Codex review).
+        // in review).
         for target in pkg.and_then(|p| p["targets"].as_array()).unwrap_or(&empty) {
             let kinds = target["kind"].as_array().unwrap_or(&empty);
             for (kind, what) in [
@@ -205,6 +280,42 @@ fn unreviewed_reviewing(
                 .iter()
                 .any(|k| k["kind"].is_null() || k["kind"] == "build");
             if shipped_kind && let Some(d) = dep["pkg"].as_str() {
+                if let Some(child) = packages.get(d) {
+                    let child_name = child["name"].as_str().unwrap_or("?");
+                    let child_version = child["version"].as_str().unwrap_or("?");
+                    if child_name == SECRET_SERVICE_PROVIDER.0 {
+                        let approved_caller = name == "qso-graph-trust"
+                            || (name == "zbus-secret-service-keyring-store" && version == "1.0.1");
+                        if !approved_caller {
+                            problems.push(format!("{name} {version} uses Secret Service outside the credential backend"));
+                        }
+                        if workspace.contains(id)
+                            && pkg.is_some_and(|p| {
+                                p["dependencies"].as_array().into_iter().flatten().any(|d| {
+                                    d["name"] == "secret-service" && !d["rename"].is_null()
+                                })
+                            })
+                        {
+                            problems.push(format!(
+                                "{name} renames secret-service outside the checked transport API"
+                            ));
+                        }
+                    }
+                    let restricted = SECRET_SERVICE_CRYPTO_EDGES.iter().any(|(n, v, cn, cv)| {
+                        (*n == name && *v == version && *cn == child_name)
+                            || (*cn == child_name && *cv == child_version)
+                    });
+                    if restricted
+                        && !SECRET_SERVICE_CRYPTO_EDGES.contains(&(
+                            name,
+                            version,
+                            child_name,
+                            child_version,
+                        ))
+                    {
+                        problems.push(format!("{name} {version} uses {child_name} {child_version} outside Secret Service session transport"));
+                    }
+                }
                 queue.push_back(d);
             }
         }
@@ -233,9 +344,14 @@ const NATIVE_BUILD: &[&str] = &[
 /// and ship no C, C++ or assembly. A named category: allowed, and reviewed by exact version
 /// through cargo-vet like every outside crate (docs/decisions/0002).
 pub const OS_BINDINGS: &[&str] = &[
+    "core-foundation",
     "core-foundation-sys",
+    "errno",
     "getrandom",
     "libc",
+    "linux-raw-sys",
+    "rustix",
+    "security-framework",
     "security-framework-sys",
     "windows-link",
     "windows-sys",
@@ -249,6 +365,38 @@ pub const OS_BINDINGS: &[&str] = &[
     "windows_x86_64_gnullvm",
     "windows_x86_64_msvc",
 ];
+
+/// Foreign declarations read individually in crates that are not OS bindings. Only this
+/// finding in this file at this exact version is allowed; native links and source still fail.
+/// These crates remain subject to cargo-vet, like every outside crate.
+pub const FOREIGN_DECLARATIONS: &[(&str, &str, &str, &str)] = &[
+    (
+        "zbus",
+        "5.19.0",
+        "src/fdo/peer.rs",
+        "macOS gethostuuid, from the OS, supplies the D-Bus machine identifier",
+    ),
+    (
+        "uuid",
+        "1.29.0",
+        "src/rng.rs",
+        "wasm-bindgen imports JavaScript crypto.getRandomValues; not built on shipping targets",
+    ),
+    (
+        "uuid",
+        "1.29.0",
+        "src/timestamp.rs",
+        "wasm-bindgen imports JavaScript Date.now; not built on shipping targets",
+    ),
+];
+
+fn reviewed_foreign_declaration(name: &str, version: &str, finding: &str) -> bool {
+    FOREIGN_DECLARATIONS.iter().any(|(n, v, file, _)| {
+        name == *n
+            && version == *v
+            && finding.strip_suffix(" declares foreign functions") == Some(*file)
+    })
+}
 
 /// The platforms QGT ships for. The no-C check reads each one's dependency tree,
 /// and no other: code for platforms QGT never builds is not shipped.
@@ -279,7 +427,7 @@ const IMPORT_LIBRARIES: &[&str] = &["a", "lib"];
 
 /// `cargo metadata` for every platform and every feature, of the workspace at
 /// `manifest`, from its committed lockfile: a native dependency behind a feature
-/// nobody enables by default is still one a user can switch on (found by Codex
+/// nobody enables by default is still one a user can switch on (found in
 /// review).
 pub fn metadata(manifest: &Path) -> Result<Value, String> {
     metadata_for(manifest, None)
@@ -372,7 +520,7 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
             .collect();
         // A renamed or missing crate must fail, or the check passes by checking
         // nothing; and one moved out of the workspace would escape the unsafe check
-        // (found by Codex review).
+        // (found in review).
         if found.is_empty() {
             problems.push(format!("protected crate {want} is not in this workspace"));
         }
@@ -405,7 +553,7 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
             .and_then(|m| Path::new(m).parent())
         {
             // A target's source outside its crate's directory would be outside the
-            // search below (found by Codex review).
+            // search below (found in review).
             for target in pkg.and_then(|p| p["targets"].as_array()).unwrap_or(&empty) {
                 // Compared canonically: Cargo reports `crate/../elsewhere/lib.rs`
                 // as written, which starts with `crate` lexically. A path that
@@ -430,6 +578,9 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
             };
             for found in scanned {
                 if outside && found.ends_with(" holds assembly") {
+                    continue;
+                }
+                if outside && reviewed_foreign_declaration(&name, &version, &found) {
                     continue;
                 }
                 problems.push(format!("{name} {version}: {found}"));
@@ -505,7 +656,7 @@ pub fn native_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
             TokenTree::Ident(id) => {
                 // `r#extern` is an identifier, never the keyword, so the keyword
                 // is matched as spelled; `r#asm` is still the macro `asm`
-                // (found by Codex review).
+                // (found in review).
                 let keyword = id.to_string();
                 let name = keyword.strip_prefix("r#").unwrap_or(&keyword);
                 let next = trees.get(i + 1);
@@ -528,7 +679,7 @@ pub fn native_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
             }
             TokenTree::Group(g) => {
                 // An attribute is `#[...]` or `#![...]`: a `!` alone is a macro
-                // call, as in `assert![link]` (Codex review, round 37).
+                // call, as in `assert![link]` (found in review).
                 let punct = |k: usize, c: char| matches!(trees.get(k), Some(TokenTree::Punct(p)) if p.as_char() == c);
                 let after_hash =
                     i > 0 && (punct(i - 1, '#') || i > 1 && punct(i - 1, '!') && punct(i - 2, '#'));
@@ -621,7 +772,7 @@ fn native_in(dir: &Path, skip: &[PathBuf], os_binding: bool) -> Vec<String> {
                 found.push(format!("{rel} is native code"));
             } else if ext == "rs" && !os_binding {
                 // Read as Rust tokens, not text: syn's parser naming `extern "C"`
-                // in a string is not a binding (found by Watson's review).
+                // in a string is not a binding (found in review).
                 match std::fs::read_to_string(&path) {
                     Ok(text) => match text.parse::<proc_macro2::TokenStream>() {
                         Ok(tokens) => {
@@ -637,6 +788,59 @@ fn native_in(dir: &Path, skip: &[PathBuf], os_binding: bool) -> Vec<String> {
         }
     }
     found
+}
+
+/// Directories belonging to other packages or Cargo's output, shared by the
+/// source-token checks. A directory inside a crate cannot escape its scan.
+fn source_scan_skips(meta: &Value) -> Vec<PathBuf> {
+    let empty = Vec::new();
+    let workspace = members(meta);
+    // Directories Cargo treats as other packages: each member's own directory,
+    // and each path the workspace's manifest excludes.
+    let mut skip: Vec<PathBuf> = meta["packages"]
+        .as_array()
+        .unwrap_or(&empty)
+        .iter()
+        .filter(|p| p["id"].as_str().is_some_and(|id| workspace.contains(id)))
+        .filter_map(|p| p["manifest_path"].as_str())
+        .filter_map(|m| {
+            Path::new(m)
+                .parent()
+                .and_then(|d| std::fs::canonicalize(d).ok())
+        })
+        .collect();
+    // Cargo's output directory, by where Cargo says it is, never a directory
+    // that merely has its name: a source module may be called `target` (found in
+    // review).
+    let member_dirs = skip.clone();
+    let mut outside: Vec<PathBuf> = Vec::new();
+    if let Some(out) = meta["target_directory"]
+        .as_str()
+        .and_then(|t| std::fs::canonicalize(t).ok())
+    {
+        outside.push(out);
+    }
+    if let Some(root) = meta["workspace_root"].as_str() {
+        let excluded = read_toml(&Path::new(root).join("Cargo.toml"))
+            .ok()
+            .and_then(|t| t.get("workspace")?.get("exclude")?.as_array().cloned())
+            .unwrap_or_default();
+        outside.extend(
+            excluded
+                .iter()
+                .filter_map(toml::Value::as_str)
+                .filter_map(|e| std::fs::canonicalize(Path::new(root).join(e)).ok()),
+        );
+    }
+    // The output directory and excluded paths are skipped only when they lie
+    // outside every crate: inside one, `mod` can still load them, so they are
+    // scanned like any other source (found in review).
+    skip.extend(
+        outside
+            .into_iter()
+            .filter(|o| !member_dirs.iter().any(|m| o.starts_with(m))),
+    );
+    skip
 }
 
 /// Every way unsafe code could get into the workspace, sorted: the workspace not
@@ -663,51 +867,7 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
         }
         None => problems.push("cargo metadata names no workspace root".to_string()),
     }
-    // Directories Cargo treats as other packages: each member's own directory,
-    // and each path the workspace's manifest excludes.
-    let mut skip: Vec<PathBuf> = meta["packages"]
-        .as_array()
-        .unwrap_or(&empty)
-        .iter()
-        .filter(|p| p["id"].as_str().is_some_and(|id| workspace.contains(id)))
-        .filter_map(|p| p["manifest_path"].as_str())
-        .filter_map(|m| {
-            Path::new(m)
-                .parent()
-                .and_then(|d| std::fs::canonicalize(d).ok())
-        })
-        .collect();
-    // Cargo's output directory, by where Cargo says it is, never a directory
-    // that merely has its name: a source module may be called `target` (found by
-    // Codex review).
-    let member_dirs = skip.clone();
-    let mut outside: Vec<PathBuf> = Vec::new();
-    if let Some(out) = meta["target_directory"]
-        .as_str()
-        .and_then(|t| std::fs::canonicalize(t).ok())
-    {
-        outside.push(out);
-    }
-    if let Some(root) = meta["workspace_root"].as_str() {
-        let excluded = read_toml(&Path::new(root).join("Cargo.toml"))
-            .ok()
-            .and_then(|t| t.get("workspace")?.get("exclude")?.as_array().cloned())
-            .unwrap_or_default();
-        outside.extend(
-            excluded
-                .iter()
-                .filter_map(toml::Value::as_str)
-                .filter_map(|e| std::fs::canonicalize(Path::new(root).join(e)).ok()),
-        );
-    }
-    // The output directory and excluded paths are skipped only when they lie
-    // outside every crate: inside one, `mod` can still load them, so they are
-    // scanned like any other source (found by Codex review).
-    skip.extend(
-        outside
-            .into_iter()
-            .filter(|o| !member_dirs.iter().any(|m| o.starts_with(m))),
-    );
+    let skip = source_scan_skips(meta);
     for pkg in meta["packages"].as_array().unwrap_or(&empty) {
         if !pkg["id"].as_str().is_some_and(|id| workspace.contains(id)) {
             continue;
@@ -716,7 +876,7 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
         // Edition 2024 makes an `extern` block without `unsafe` a hard error, so with
         // unsafe code forbidden the compiler refuses every foreign block, all
         // assembly and `no_mangle` in a workspace crate. Edition 2021 accepts
-        // `extern "C" {}` without `unsafe` even under forbid (found by Codex review,
+        // `extern "C" {}` without `unsafe` even under forbid (found in review,
         // and checked against rustc 1.99.1).
         for target in pkg["targets"].as_array().unwrap_or(&empty) {
             let edition = target["edition"].as_str().unwrap_or("?");
@@ -744,7 +904,7 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
         // Every source file of the crate, whatever cfg or feature would compile it:
         // code that no CI build compiles (`#[cfg(not(debug_assertions))]`) is still
         // code a release build of a consumer compiles, with this crate's lints
-        // capped (found by Codex review).
+        // capped (found in review).
         if let Some(dir) = pkg["manifest_path"]
             .as_str()
             .and_then(|m| Path::new(m).parent())
@@ -757,7 +917,7 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
                 continue;
             };
             // A procedural macro generates code from strings no scan reads, so no
-            // workspace crate may be one (found by Codex review).
+            // workspace crate may be one (found in review).
             if target["kind"]
                 .as_array()
                 .is_some_and(|k| k.iter().any(|k| k == "proc-macro"))
@@ -765,7 +925,7 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
                 problems.push(format!("{pkg_name} is a procedural macro crate"));
             }
             // The library may not switch itself off with a crate-level `#![cfg]`:
-            // that would also switch off the canary's probe (found by Codex review).
+            // that would also switch off the canary's probe (found in review).
             if PROTECTED.contains(&pkg_name)
                 && std::fs::read_to_string(src).is_ok_and(|s| has_crate_cfg(&s))
             {
@@ -776,7 +936,7 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
                 problems.push(format!("{src} is a crate root that is not a .rs file"));
             }
             // And one outside its crate's directory too, for every workspace crate,
-            // not only the library's tree (found by Codex review).
+            // not only the library's tree (found in review).
             if let Some(dir) = pkg["manifest_path"]
                 .as_str()
                 .and_then(|m| Path::new(m).parent())
@@ -802,6 +962,265 @@ pub fn no_unsafe(meta: &Value) -> Vec<String> {
 /// own `Cargo.toml` is another package and is left to its own check (the planted
 /// fixtures are such a package). A file that does not tokenize is a finding.
 pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
+    source_tokens_in(dir, skip, unsafe_tokens)
+}
+
+/// Networking in every workspace crate in the library's normal dependency
+/// graph, sorted; empty passes. Metadata enables every feature, and policy runs
+/// this for every shipping target. Walk through outside crates too, but scan only
+/// workspace sources: outside crates are reviewed through cargo-vet. The CLI's
+/// own dependencies are outside this rule. Scan tests and cfg-disabled modules
+/// too, using the unsafe check's walker.
+pub fn no_network(meta: &Value) -> Vec<String> {
+    let workspace = members(meta);
+    let skip = source_scan_skips(meta);
+    let mut found = Vec::new();
+    let packages: HashMap<&str, &Value> = meta["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| Some((p["id"].as_str()?, p)))
+        .collect();
+    let nodes: HashMap<&str, &Value> = meta["resolve"]["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|n| Some((n["id"].as_str()?, n)))
+        .collect();
+    let mut queue = VecDeque::new();
+    for want in PROTECTED {
+        let roots: Vec<_> = packages
+            .iter()
+            .filter(|(id, p)| workspace.contains(*id) && p["name"] == *want)
+            .map(|(id, _)| *id)
+            .collect();
+        if roots.is_empty() {
+            found.push(format!("protected crate {want} is not a workspace member"));
+        }
+        queue.extend(roots);
+    }
+    let mut seen = BTreeSet::new();
+    while let Some(id) = queue.pop_front() {
+        if !seen.insert(id) {
+            continue;
+        }
+        match nodes.get(id) {
+            Some(node) => {
+                for dep in node["deps"].as_array().into_iter().flatten() {
+                    // A normal edge can share a package with a build/dev edge.
+                    if dep["dep_kinds"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|kind| kind["kind"].is_null())
+                        && let Some(dep_id) = dep["pkg"].as_str()
+                    {
+                        queue.push_back(dep_id);
+                    }
+                }
+            }
+            None => found.push(format!("{id} has no dependency node")),
+        }
+    }
+    for pkg in meta["packages"].as_array().into_iter().flatten() {
+        let name = pkg["name"].as_str().unwrap_or("?");
+        if !pkg["id"]
+            .as_str()
+            .is_some_and(|id| workspace.contains(id) && seen.contains(id))
+        {
+            continue;
+        }
+        if name == UNSAFE_BINDING {
+            // Cargo can rename the provider before Rust's imports are scanned.
+            // Keep every raw provider reference under one of the checked names.
+            for dep in pkg["dependencies"].as_array().into_iter().flatten() {
+                if dep["name"] == "aws-lc-sys"
+                    && let Some(alias) = dep["rename"].as_str()
+                    && !["aws_lc_sys", "sys"].contains(&alias.replace('-', "_").as_str())
+                {
+                    found.push(format!(
+                        "{name} renames aws-lc-sys to {alias}: only aws_lc_sys or sys are checked"
+                    ));
+                }
+            }
+        }
+        match pkg["manifest_path"]
+            .as_str()
+            .and_then(|m| Path::new(m).parent())
+        {
+            Some(dir) => {
+                found.extend(source_tokens_in(dir, &skip, network_tokens));
+                let allowed = format!(
+                    "{} uses Secret Service transport API",
+                    // One component at a time, so the path prints as the scan reports it on Windows.
+                    dir.join("src")
+                        .join("store")
+                        .join("keys")
+                        .join("os.rs")
+                        .display()
+                );
+                found.extend(
+                    source_tokens_in(dir, &skip, secret_service_tokens)
+                        .into_iter()
+                        .filter(|finding| !(name == "qso-graph-trust" && *finding == allowed)),
+                );
+                if name == UNSAFE_BINDING {
+                    found.extend(source_tokens_in(dir, &skip, binding_tokens));
+                }
+            }
+            None => found.push(format!("{name} has no manifest directory")),
+        }
+    }
+    found.sort();
+    found
+}
+
+/// Only the credential backend may use Secret Service, and only its connection, encryption-mode
+/// and error types. Public session encrypt/decrypt functions, globs and namespace aliases cannot
+/// turn the transport exception into a signing/certificate primitive. Scan cfg-disabled code too.
+pub fn secret_service_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
+    use proc_macro2::TokenTree;
+    fn approved(tree: &syn::UseTree, prefix: &str) -> bool {
+        match tree {
+            syn::UseTree::Path(p) => approved(
+                &p.tree,
+                &format!("{prefix}{}::", p.ident.to_string().trim_start_matches("r#")),
+            ),
+            syn::UseTree::Group(g) => g.items.iter().all(|t| approved(t, prefix)),
+            syn::UseTree::Name(n) => ["Error", "EncryptionType", "blocking::SecretService"]
+                .contains(
+                    &format!("{prefix}{}", n.ident.to_string().trim_start_matches("r#")).as_str(),
+                ),
+            syn::UseTree::Rename(n) => ["Error", "EncryptionType", "blocking::SecretService"]
+                .contains(
+                    &format!("{prefix}{}", n.ident.to_string().trim_start_matches("r#")).as_str(),
+                ),
+            _ => false,
+        }
+    }
+    let trees: Vec<_> = tokens.into_iter().collect();
+    let ident = |i: usize, name: &str| matches!(trees.get(i), Some(TokenTree::Ident(id)) if id.to_string().trim_start_matches("r#") == name);
+    let colon = |i: usize| matches!(trees.get(i), Some(TokenTree::Punct(p)) if p.as_char() == ':');
+    let mut found = Vec::new();
+    for (i, tree) in trees.iter().enumerate() {
+        if ident(i, "secret_service") {
+            found.push("uses Secret Service transport API");
+            let permitted = colon(i + 1)
+                && colon(i + 2)
+                && match trees.get(i + 3) {
+                    Some(TokenTree::Group(g)) => {
+                        syn::parse2::<syn::UseTree>(TokenTree::Group(g.clone()).into())
+                            .is_ok_and(|t| approved(&t, ""))
+                    }
+                    Some(TokenTree::Ident(_)) => {
+                        ident(i + 3, "Error")
+                            || ident(i + 3, "EncryptionType")
+                            || (ident(i + 3, "blocking")
+                                && colon(i + 4)
+                                && colon(i + 5)
+                                && ident(i + 6, "SecretService"))
+                    }
+                    _ => false,
+                };
+            if !permitted {
+                found.push("uses Secret Service outside the permitted transport API");
+            }
+        }
+        if let TokenTree::Group(g) = tree {
+            found.extend(secret_service_tokens(g.stream()));
+        }
+    }
+    found
+}
+
+/// The binding can use unsafe blocks, but cannot load unscanned code or define
+/// macros. Raw AWS-LC items must be named explicitly, either through
+/// `aws_lc_sys` or its sole namespace alias `use aws_lc_sys as sys;`. Individual
+/// allowed items may be renamed; namespace re-exports and glob imports cannot
+/// hide which provider API is used. All groups are scanned, whatever their cfg.
+pub fn binding_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
+    use proc_macro2::TokenTree;
+
+    fn ident(tree: Option<&TokenTree>, want: &str) -> bool {
+        matches!(tree, Some(TokenTree::Ident(id))
+            if id.to_string().trim_start_matches("r#") == want)
+    }
+
+    fn allowed(name: &proc_macro2::Ident) -> bool {
+        BINDING_AWS_LC_ALLOWED.contains(&name.to_string().trim_start_matches("r#"))
+    }
+
+    fn imports(tree: &syn::UseTree) -> bool {
+        match tree {
+            syn::UseTree::Name(n) => allowed(&n.ident),
+            syn::UseTree::Rename(n) => allowed(&n.ident),
+            syn::UseTree::Group(g) => g.items.iter().all(imports),
+            // No submodules or globs in the provider's allowed surface.
+            _ => false,
+        }
+    }
+
+    fn scan(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
+        let trees: Vec<_> = tokens.into_iter().collect();
+        let mut found = Vec::new();
+        let colon =
+            |i: usize| matches!(trees.get(i), Some(TokenTree::Punct(p)) if p.as_char() == ':');
+        for (i, tree) in trees.iter().enumerate() {
+            match tree {
+                TokenTree::Ident(_) => {
+                    if ident(Some(tree), "include_str") || ident(Some(tree), "include_bytes") {
+                        found.push(
+                            "loads a file through include_str or include_bytes in the binding",
+                        );
+                    }
+                    if !ident(Some(tree), "aws_lc_sys") && !ident(Some(tree), "sys") {
+                        continue;
+                    }
+                    // The one namespace import, with raw spellings accepted.
+                    let namespace_import = |start: usize| {
+                        ident(trees.get(start), "use")
+                            && ident(trees.get(start + 1), "aws_lc_sys")
+                            && ident(trees.get(start + 2), "as")
+                            && ident(trees.get(start + 3), "sys")
+                            && matches!(trees.get(start + 4), Some(TokenTree::Punct(p)) if p.as_char() == ';')
+                    };
+                    if (i >= 1 && namespace_import(i - 1)) || (i >= 3 && namespace_import(i - 3)) {
+                        continue;
+                    }
+                    let permitted = colon(i + 1)
+                        && colon(i + 2)
+                        && match trees.get(i + 3) {
+                            Some(TokenTree::Ident(item)) => allowed(item),
+                            Some(TokenTree::Group(g)) => {
+                                syn::parse2::<syn::UseTree>(TokenTree::Group(g.clone()).into())
+                                    .is_ok_and(|tree| imports(&tree))
+                            }
+                            _ => false,
+                        };
+                    if !permitted {
+                        found.push("uses AWS-LC outside BINDING_AWS_LC_ALLOWED (no namespace aliases or glob imports)");
+                    }
+                }
+                TokenTree::Group(g) => found.extend(scan(g.stream())),
+                _ => {}
+            }
+        }
+        found
+    }
+
+    let mut found: Vec<_> = unsafe_tokens(tokens.clone())
+        .into_iter()
+        .filter(|what| *what != "uses unsafe")
+        .collect();
+    found.extend(scan(tokens));
+    found
+}
+
+fn source_tokens_in(
+    dir: &Path,
+    skip: &[PathBuf],
+    scan: fn(proc_macro2::TokenStream) -> Vec<&'static str>,
+) -> Vec<String> {
     let mut found = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
@@ -821,7 +1240,7 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
             };
             // No symbolic links in a workspace crate, as in the library's tree: one
             // can point anywhere, and the canary's copy cannot follow it either
-            // (found by Codex review).
+            // (found in review).
             if kind.is_symlink() {
                 found.push(format!("{} is a symbolic link", path.display()));
                 continue;
@@ -830,7 +1249,7 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
                 // Left out only when Cargo itself treats it as something else:
                 // another package of the workspace, or a path its manifest
                 // excludes (the planted fixtures). A Cargo.toml alone is not
-                // enough (found by Codex review: a decoy one hid a directory).
+                // enough (found in review: a decoy one hid a directory).
                 let canon = std::fs::canonicalize(&path).ok();
                 let other = canon.as_ref().is_some_and(|c| skip.iter().any(|s| s == c));
                 if !other {
@@ -839,7 +1258,7 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
             } else if !path.extension().is_some_and(|e| e == "rs") {
                 // Only Rust, manifests and notes in a crate: a file of any other
                 // kind could be compiled as code through a path this scan cannot
-                // follow, so it is not allowed there (found by Codex review).
+                // follow, so it is not allowed there (found in review).
                 if !path.extension().is_some_and(|e| e == "toml" || e == "md") {
                     found.push(format!(
                         "{} is not a .rs, .toml or .md file",
@@ -848,7 +1267,7 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
                 }
             } else {
                 // A file that cannot be read is a finding, never empty text that
-                // scans clean (found by Codex review).
+                // scans clean (found in review).
                 let text = match std::fs::read_to_string(&path) {
                     Ok(text) => text,
                     Err(e) => {
@@ -860,7 +1279,7 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
                     }
                 };
                 // No shebangs in a workspace crate: Rust decides one with rules about
-                // whitespace and comments that were misread twice (found by Codex
+                // whitespace and comments that were misread twice (found in
                 // review), and the crates need none. A file beginning `#!` must
                 // begin `#![`.
                 let body = text.strip_prefix('\u{feff}').unwrap_or(&text);
@@ -873,7 +1292,7 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
                 }
                 match body.parse::<proc_macro2::TokenStream>() {
                     Ok(tokens) => {
-                        for what in unsafe_tokens(tokens) {
+                        for what in scan(tokens) {
                             found.push(format!("{} {what}", path.display()));
                         }
                     }
@@ -888,16 +1307,70 @@ pub fn unsafe_tokens_in(dir: &Path, skip: &[PathBuf]) -> Vec<String> {
     found
 }
 
+/// Network type identifiers and the `net` path segment, including raw spellings,
+/// grouped and aliased imports. Comments and literals are not identifiers; cfg
+/// does not hide tokens. A plain local variable called `net` is not a path.
+pub fn network_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
+    fn scan(tokens: proc_macro2::TokenStream, mut in_use: bool) -> Vec<&'static str> {
+        use proc_macro2::TokenTree;
+        const TYPES: &[(&str, &str)] = &[
+            ("TcpStream", "uses network identifier TcpStream"),
+            ("TcpListener", "uses network identifier TcpListener"),
+            ("UdpSocket", "uses network identifier UdpSocket"),
+            ("UnixStream", "uses network identifier UnixStream"),
+            ("UnixListener", "uses network identifier UnixListener"),
+            ("UnixDatagram", "uses network identifier UnixDatagram"),
+            ("ToSocketAddrs", "uses network identifier ToSocketAddrs"),
+            ("SocketAddr", "uses network identifier SocketAddr"),
+            ("SocketAddrV4", "uses network identifier SocketAddrV4"),
+            ("SocketAddrV6", "uses network identifier SocketAddrV6"),
+            ("IpAddr", "uses network identifier IpAddr"),
+        ];
+        let trees: Vec<_> = tokens.into_iter().collect();
+        let colon =
+            |i: usize| matches!(trees.get(i), Some(TokenTree::Punct(p)) if p.as_char() == ':');
+        let mut found = Vec::new();
+        for (i, tree) in trees.iter().enumerate() {
+            match tree {
+                TokenTree::Ident(id) => {
+                    let name = id.to_string();
+                    let name = name.strip_prefix("r#").unwrap_or(&name);
+                    if name == "use" {
+                        in_use = true;
+                    }
+                    let alias =
+                        i > 0 && matches!(&trees[i - 1], TokenTree::Ident(id) if id == "as");
+                    if name == "net"
+                        && ((in_use && !alias)
+                            || (i >= 2 && colon(i - 2) && colon(i - 1))
+                            || (colon(i + 1) && colon(i + 2)))
+                    {
+                        found.push("uses network path segment net");
+                    }
+                    if let Some((_, what)) = TYPES.iter().find(|(n, _)| *n == name) {
+                        found.push(*what);
+                    }
+                }
+                TokenTree::Group(g) => found.extend(scan(g.stream(), in_use)),
+                TokenTree::Punct(p) if p.as_char() == ';' => in_use = false,
+                _ => {}
+            }
+        }
+        found
+    }
+    scan(tokens, false)
+}
+
 /// Identifiers no workspace source may contain, wherever they appear, with what
 /// each brings: matched as identifiers, never text, after removing `r#`, so a
 /// raw identifier, an import alias (`use core::include as load` names
-/// `include`) and any macro delimiter are all caught (found by Codex review).
+/// `include`) and any macro delimiter are all caught (found in review).
 const REFUSED_IDENTS: &[(&str, &str)] = &[
     ("unsafe", "uses unsafe"),
-    // A macro can assemble code no scan sees whole (Codex review found five ways
+    // A macro can assemble code no scan sees whole (review found five ways
     // in turn), so the workspace's crates define none.
     ("macro_rules", "defines a macro"),
-    // `macro`, the unstable declarative macro (found by Codex review).
+    // `macro`, the unstable declarative macro (found in review).
     ("macro", "defines a macro"),
     ("include", "uses include"),
     ("asm", "uses asm"),
@@ -920,7 +1393,7 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
         // In Rust a `#` only ever begins an attribute, `#[...]` or `#![...]`. One
         // followed by anything else is a piece a macro could join to brackets
         // passed separately, assembling `#[path]` where no scan sees it (found by
-        // Codex review: `# $a` with `$a` = `[path = "..."]`).
+        // Found in review: `# $a` with `$a` = `[path = "..."]`).
         let pending = after_hash || last_hash;
         let mut hash_now = false;
         match &tree {
@@ -956,18 +1429,18 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                     found.push(DANGLING);
                 }
                 // `path = ...` loads a module from any file, `.rs` or not, which
-                // this scan would not read (found by Codex review); the workspace's
+                // this scan would not read (found in review); the workspace's
                 // crates do not need it, so it is refused. Only in an attribute:
                 // with no macros allowed and no lone `#`, every attribute in the
                 // source is a literal `#[...]`, and a `path = 1` binding inside an
-                // array is not one (found by Codex review).
+                // array is not one (found in review).
                 let bracket = g.delimiter() == proc_macro2::Delimiter::Bracket;
                 if attribute && assigns_path(g.stream()) {
                     found.push("uses #[path]");
                 }
                 // Unstable features: stable code needs none, and they include
-                // ways to build unsafe code from pieces (found by Codex review).
-                // Anywhere in the attribute, so inside cfg_attr too (found by Codex
+                // ways to build unsafe code from pieces (found in review).
+                // Anywhere in the attribute, so inside cfg_attr too (found in
                 // review); `cfg(feature = "x")` selects a Cargo feature and is not one.
                 if attribute && enables_feature(g.stream()) {
                     found.push("enables an unstable feature");
@@ -979,12 +1452,12 @@ pub fn unsafe_tokens(tokens: proc_macro2::TokenStream) -> Vec<&'static str> {
                     found.push("builds an attribute from a macro variable");
                 }
                 // A derive macro may parse a string in its attribute as Rust:
-                // `#[serde(bound = "... unsafe { ... } ...")]` (found by Codex
+                // `#[serde(bound = "... unsafe { ... } ...")]` (found in
                 // review). Every string in an attribute but a doc comment is read
                 // as tokens and held to the same rules.
                 // Strings in an attribute a derive macro may parse as Rust, read as
                 // tokens; Rust's own prose attributes excepted, inside `cfg_attr` too
-                // (found by Codex review, rounds 31 to 33).
+                // (found in review, rounds 31 to 33).
                 if attribute {
                     for text in code_strings(g.stream()) {
                         if let Ok(inner) = text.parse::<proc_macro2::TokenStream>() {
@@ -1077,7 +1550,7 @@ const PROSE_ATTRIBUTES: &[&str] = &[
 fn code_strings(attr: proc_macro2::TokenStream) -> Vec<String> {
     use proc_macro2::TokenTree;
     let trees: Vec<TokenTree> = attr.into_iter().collect();
-    // `r#must_use` is `must_use` (found by Codex review).
+    // `r#must_use` is `must_use` (found in review).
     let first = match trees.first() {
         Some(TokenTree::Ident(i)) => {
             let name = i.to_string();
@@ -1149,7 +1622,7 @@ fn assigns_path(tokens: proc_macro2::TokenStream) -> bool {
             let name = id.to_string();
             // A standalone `=`: in `path == 0` or `path => x` the `=` is joined to
             // the next character, which is an expression, not an attribute (found
-            // by Codex review).
+            // in review).
             name.strip_prefix("r#").unwrap_or(&name) == "path"
                 && matches!(trees.get(i + 1), Some(TokenTree::Punct(p))
                     if p.as_char() == '=' && p.spacing() == proc_macro2::Spacing::Alone)
@@ -1167,8 +1640,8 @@ fn read_toml(path: &Path) -> Result<toml::Table, String> {
 }
 
 /// Whether a member's manifest says `[lints] workspace = true` and nothing else
-/// under `[lints]`, read as TOML, so text inside a string never counts (found by
-/// Codex review).
+/// under `[lints]`, read as TOML, so text inside a string never counts (found in
+/// review).
 pub fn takes_workspace_lints(manifest: &toml::Table) -> bool {
     manifest
         .get("lints")
@@ -1198,8 +1671,13 @@ pub fn workspace_forbids_unsafe(manifest: &toml::Table) -> bool {
     }
 }
 
+/// The one RUSTFLAGS line a workflow may hold besides `RUSTFLAGS: -D warnings`: binaries.yml's,
+/// which links Windows' C runtime into `qg-trust.exe`, so it needs no Visual C++ runtime installed.
+pub const WINDOWS_CRT_STATIC: &str =
+    r#"if [ "$RUNNER_OS" = Windows ]; then export RUSTFLAGS="-C target-feature=+crt-static"; fi"#;
+
 /// Every way a build of this repository could have its lints weakened, sorted.
-/// `--cap-lints` overrides even `forbid(unsafe_code)` (found by Codex review, and
+/// `--cap-lints` overrides even `forbid(unsafe_code)` (found in review, and
 /// checked against rustc 1.99.1), as do `-A`/`-W`/`--force-warn unsafe_code`. So:
 /// the repository's one Cargo configuration file is `.cargo/config.toml`, holding
 /// only `[alias]`; no other Cargo configuration file exists anywhere in it; no
@@ -1215,7 +1693,7 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
                     ".cargo/config.toml has [{key}]: only [alias] is allowed"
                 ));
             }
-            // An alias can pass any flag (found by Codex review), so the one alias is
+            // An alias can pass any flag (found in review), so the one alias is
             // exactly the one this repository needs.
             let want: toml::Table =
                 [("xtask".to_string(), toml::Value::String(XTASK_ALIAS.into()))]
@@ -1233,7 +1711,7 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
     }
     // The pinned stable toolchain, which refuses `cargo-features`, so manifest
     // profile flags and other unstable Cargo features cannot be switched on;
-    // and no `rustflags` in any profile (found by Codex review).
+    // and no `rustflags` in any profile (found in review).
     match read_toml(&root.join("rust-toolchain.toml")) {
         Ok(t) => {
             let channel = t
@@ -1255,7 +1733,7 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
             }
             // A patch or replacement holds only here: a consumer building QGT as a
             // dependency ignores it and gets the crate the patch stood in for,
-            // unchecked (found by Codex review). What is checked must be what
+            // unchecked (found in review). What is checked must be what
             // consumers build, so neither is allowed.
             for key in ["patch", "replace"] {
                 if t.contains_key(key) {
@@ -1292,10 +1770,10 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
             }
             // rustup reads `rust-toolchain` before `rust-toolchain.toml`, and the
             // nearest one to where Cargo runs, so the root's `.toml` is the only
-            // toolchain file there may be (found by Codex review).
+            // toolchain file there may be (found in review).
             // Names compared without regard to case, on every host: on Windows and
-            // macOS `.CARGO/config.toml` is a Cargo configuration file (found by
-            // Codex review). Only the root's exact `rust-toolchain.toml` and
+            // macOS `.CARGO/config.toml` is a Cargo configuration file (found in
+            // review). Only the root's exact `rust-toolchain.toml` and
             // `.cargo/config.toml` are allowed.
             let lower = name.to_ascii_lowercase();
             let exact_root_toolchain = d == root && name == "rust-toolchain.toml";
@@ -1320,9 +1798,13 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
                     }
                 }
                 // RUSTFLAGS only as the one workflow-wide line; a job or step setting
-                // it would not reach this check's own environment.
+                // it would not reach this check's own environment. The one exception is
+                // the release's Windows build linking the C runtime in, exactly as
+                // WINDOWS_CRT_STATIC says it, in binaries.yml alone: a target feature,
+                // which neither weakens a lint nor links anything but Microsoft's runtime.
                 for line in text.lines().filter(|l| l.contains("RUSTFLAGS")) {
-                    if line.trim() != "RUSTFLAGS: -D warnings" {
+                    let crt_static = name == "binaries.yml" && line.trim() == WINDOWS_CRT_STATIC;
+                    if line.trim() != "RUSTFLAGS: -D warnings" && !crt_static {
                         problems.push(format!("workflow {name} sets RUSTFLAGS: {}", line.trim()));
                     }
                 }
@@ -1339,7 +1821,7 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
 /// each folder above it and Cargo's home, that changes how the repository
 /// compiles: a crate's own configuration stays inside the repository, but a configuration above the
 /// checkout reaches every build in it, and the canary, working elsewhere, would
-/// not see it (found by Codex review).
+/// not see it (found in review).
 pub fn outside_configs(root: &Path) -> Vec<String> {
     let mut files = Vec::new();
     let mut dir = std::fs::canonicalize(root)
@@ -1350,11 +1832,11 @@ pub fn outside_configs(root: &Path) -> Vec<String> {
         dir = d.parent().map(Path::to_path_buf);
     }
     // The effective Cargo home: CARGO_HOME if set, otherwise the user's home
-    // directory as the platform defines it (USERPROFILE on Windows; found by
-    // Codex review). Cargo reads no other home, so neither does this.
+    // directory as the platform defines it (USERPROFILE on Windows; found in
+    // review). Cargo reads no other home, so neither does this.
     files.extend(
         std::env::var_os("CARGO_HOME")
-            // Empty is unset, as Cargo treats it (found by Codex review).
+            // Empty is unset, as Cargo treats it (found in review).
             .filter(|h| !h.is_empty())
             .map(PathBuf::from)
             .or_else(|| std::env::home_dir().map(|h| h.join(".cargo"))),
@@ -1362,11 +1844,11 @@ pub fn outside_configs(root: &Path) -> Vec<String> {
     let mut problems = Vec::new();
     for cargo_dir in files {
         // Each filename probed directly, as Cargo does: a directory that cannot be
-        // listed can still have a file Cargo opens (found by Codex review). Only
+        // listed can still have a file Cargo opens (found in review). Only
         // "not found" is no finding; on a case-insensitive file system the probe
         // finds any case of the name, as Cargo's does.
         // Cargo reads `config` when it exists and `config.toml` only otherwise, so
-        // the first that exists is the one checked (found by Codex review).
+        // the first that exists is the one checked (found in review).
         for name in ["config", "config.toml"] {
             let path = cargo_dir.join(name);
             let read = std::fs::read_to_string(&path);
@@ -1500,7 +1982,7 @@ pub const XTASK_ALIAS: &str = "run --quiet --locked --package xtask --";
 
 /// Words no workflow may contain: each is a way to hand the compiler flags,
 /// another configuration, another compiler or a linker argument that this
-/// check would not see (found by Codex review). Failing on the word, even in a
+/// check would not see (found in review). Failing on the word, even in a
 /// comment, fails closed.
 const WORKFLOW_REFUSED: &[&str] = &[
     "cap-lints",
@@ -1517,16 +1999,16 @@ const WORKFLOW_REFUSED: &[&str] = &[
 
 /// Every variable in an environment that would change how this repository is
 /// compiled beyond the allowed lint flags: flags outside [`flags_allowed`], or a
-/// different compiler, wrapper or linker (found by Codex review: wrappers and
+/// different compiler, wrapper or linker (found in review: wrappers and
 /// response files reach rustc without passing through RUSTFLAGS's words).
 pub fn env_problems(vars: impl IntoIterator<Item = (String, String)>) -> Vec<String> {
     let mut problems = Vec::new();
     for (var, value) in vars {
         // Compared without regard to case: Cargo reads `rustflags` as `RUSTFLAGS`
-        // on Windows (found by Codex review).
+        // on Windows (found in review).
         let var = var.to_ascii_uppercase();
         // RUSTC_BOOTSTRAP unlocks unstable features on a stable compiler, among
-        // them ways to build unsafe code the scan cannot see (found by Codex review).
+        // them ways to build unsafe code the scan cannot see (found in review).
         if var == "RUSTC_BOOTSTRAP" {
             problems.push(format!("{var} unlocks unstable features: {value}"));
             continue;
@@ -1559,7 +2041,7 @@ pub fn env_problems(vars: impl IntoIterator<Item = (String, String)>) -> Vec<Str
 /// forms, each naming a lint), none of them `unsafe_code`. Anything else fails:
 /// a lint cap, a response file (`@path`), a native library (`-l`), a codegen or
 /// linker option, an unstable flag. An allowlist, because each list of refused
-/// flags so far had a way around it (found by Codex review).
+/// flags so far had a way around it (found in review).
 pub fn flags_allowed(flags: &str) -> bool {
     let words: Vec<&str> = flags
         .split(|c: char| c.is_whitespace() || c == '\u{1f}')
@@ -1595,7 +2077,7 @@ pub fn flags_allowed(flags: &str) -> bool {
 /// What the canary appends to the library: unsafe code the compiler must refuse.
 /// An anonymous constant holding an empty `unsafe` block: it takes no name and
 /// looks none up, so nothing the library declares can collide with it or redirect
-/// it (Codex review, rounds 37, 39 and 40: a module named `core`, a function of
+/// it (Found in review: a module named `core`, a function of
 /// the probe's name, `extern crate self as core`).
 pub const CANARY_PROBE: &str =
     "\n// The canary's probe: the compiler must refuse it.\nconst _: () = unsafe {};\n";
@@ -1607,20 +2089,20 @@ pub const CANARY_PROBE: &str =
 /// The other checks look for known ways to weaken the lints; this one measures
 /// the result on the crate that matters, so a way nobody listed still fails it.
 /// It reads the compiler's JSON diagnostics: an `unsafe_code` warning beside an
-/// unrelated error is not a refusal (found by Codex review, as were the profile
+/// unrelated error is not a refusal (found in review, as were the profile
 /// flags a stand-in crate could not see). `extra_env` is for the planted test.
 pub fn canary(root: &Path, extra_env: &[(&str, &str)]) -> Result<(), String> {
     let work = fresh_temp_dir("qso-graph-trust-canary")?;
     let result = canary_in(root, &work, extra_env);
     // Only the directory this call created, so cleaning up can never remove
-    // anything else (found by Codex review: given a path, it once could).
+    // anything else (found in review: given a path, it once could).
     let _ = std::fs::remove_dir_all(&work);
     result
 }
 
 /// A fresh directory under the system's temporary directory, created by this
 /// call (never one that already existed), outside the repository wherever
-/// Cargo's output directory is (found by Codex review: inside it, the copy
+/// Cargo's output directory is (found in review: inside it, the copy
 /// recursed into itself and left a Cargo configuration the policy then found).
 pub fn fresh_temp_dir(prefix: &str) -> Result<PathBuf, String> {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -1651,7 +2133,7 @@ fn canary_in(root: &Path, work: &Path, extra_env: &[(&str, &str)]) -> Result<(),
     // Cargo's output directory, if it is inside the repository, is left out of the copy.
     let output = std::env::var_os("CARGO_TARGET_DIR").map(|d| root.join(d));
     copy_repository(root, &copy, output.as_deref())?;
-    // The library's root as Cargo has it, not an assumed path (found by Codex review).
+    // The library's root as Cargo has it, not an assumed path (found in review).
     let meta = metadata(&copy.join("Cargo.toml"))?;
     let lib = meta["packages"]
         .as_array()
@@ -1660,7 +2142,7 @@ fn canary_in(root: &Path, work: &Path, extra_env: &[(&str, &str)]) -> Result<(),
         .and_then(|ts| {
             ts.iter().find(|t| {
                 t["kind"].as_array().is_some_and(|k| {
-                    // Every kind Cargo reports for a library (found by Codex review).
+                    // Every kind Cargo reports for a library (found in review).
                     k.iter().any(|k| {
                         ["lib", "rlib", "dylib", "cdylib", "staticlib"]
                             .iter()
@@ -1674,7 +2156,7 @@ fn canary_in(root: &Path, work: &Path, extra_env: &[(&str, &str)]) -> Result<(),
         .ok_or("the copy has no qso-graph-trust library target")?;
     // Only ever write inside the copy: a library path that resolves elsewhere, such
     // as an absolute path back into the checkout, would put the probe into the
-    // real source (found by Codex review).
+    // real source (found in review).
     let copy_abs = std::fs::canonicalize(&copy)
         .map_err(|e| format!("cannot resolve {}: {e}", copy.display()))?;
     if !std::fs::canonicalize(&lib).is_ok_and(|l| l.starts_with(&copy_abs)) {
@@ -1723,8 +2205,8 @@ fn canary_in(root: &Path, work: &Path, extra_env: &[(&str, &str)]) -> Result<(),
 }
 
 /// Whether Cargo's JSON messages hold an `unsafe_code` diagnostic at level
-/// `error`: a warning of it beside some other error is not a refusal (found by
-/// Codex review).
+/// `error`: a warning of it beside some other error is not a refusal (found in
+/// review).
 pub fn refused_by_unsafe_code(json_lines: &str) -> bool {
     json_lines.lines().any(|line| {
         serde_json::from_str::<Value>(line).is_ok_and(|m| {
@@ -1757,7 +2239,7 @@ fn copy_repository(from: &Path, to: &Path, output: Option<&Path>) -> Result<(), 
                     .as_ref()
                     .is_some_and(|o| std::fs::canonicalize(&path).is_ok_and(|p| p == *o));
                 // `target` only at the root, where Cargo puts it: a source module
-                // may be named `target` (found by Codex review).
+                // may be named `target` (found in review).
                 if name == ".git" || (src == from && name == "target") || is_output {
                     continue;
                 }
@@ -1766,7 +2248,7 @@ fn copy_repository(from: &Path, to: &Path, output: Option<&Path>) -> Result<(), 
                 std::fs::copy(&path, dst.join(&name))
                     .map_err(|e| format!("cannot copy {}: {e}", path.display()))?;
             } else {
-                // A link or anything else is not copied silently (found by Codex review).
+                // A link or anything else is not copied silently (found in review).
                 return Err(format!(
                     "{} is not a plain file or directory: the canary will not copy it",
                     path.display()
@@ -1778,10 +2260,10 @@ fn copy_repository(from: &Path, to: &Path, output: Option<&Path>) -> Result<(), 
 }
 
 /// Whether a path is the single identifier `name`, raw spelling included:
-/// `r#unsafe_code` is `unsafe_code` (found by Codex review).
+/// `r#unsafe_code` is `unsafe_code` (found in review).
 /// Every program the workspace builds must install [`WIPING_ALLOCATOR`]: every
 /// target whose crate types include `bin`, `cdylib` or `staticlib`, examples
-/// included, as `cargo install --example` installs one (found by Codex review).
+/// included, as `cargo install --example` installs one (found in review).
 /// Tests, benches and build scripts are not checked: they run on the machine that
 /// builds, and none is ever distributed. Its root must hold, at the top level and
 /// with no attribute but documentation, `#[global_allocator] static NAME:
@@ -1900,7 +2382,7 @@ pub fn installs_wiping_allocator(source: &str) -> bool {
         idents(path) == ["zeroizing_alloc", "ZeroAlloc"] && path.leading_colon.is_some()
     };
     // An `extern crate` binding the name would put another crate, or this one, behind it, raw
-    // identifier or not (found by Codex review: `extern crate self as r#zeroizing_alloc;`).
+    // identifier or not (found in review: `extern crate self as r#zeroizing_alloc;`).
     if file.items.iter().any(|item| {
         use syn::ext::IdentExt;
         matches!(item, syn::Item::ExternCrate(e)
@@ -1968,7 +2450,7 @@ fn has_crate_cfg(source: &str) -> bool {
 /// `cfg_attr`. The file is parsed by `syn`, a complete Rust parser, so shebangs,
 /// comments, raw strings, raw identifiers and raw lifetimes are read as Rust reads
 /// them; text inside any of them is never taken for the attribute. A hand-written
-/// lexer was tried first and each of four Codex review rounds found a construct it
+/// lexer was tried first and each of four review rounds found a construct it
 /// misread, so it was replaced. A file `syn` cannot parse counts as absent: the
 /// check fails closed.
 pub fn forbids_unsafe(source: &str) -> bool {
@@ -1979,8 +2461,8 @@ pub fn forbids_unsafe(source: &str) -> bool {
         if !matches!(a.style, syn::AttrStyle::Inner(_)) || !names(a.path(), "forbid") {
             return false;
         }
-        // `forbid(...)` only: rustc rejects `forbid[...]` and `forbid{...}` (found by
-        // Codex review), so neither may count.
+        // `forbid(...)` only: rustc rejects `forbid[...]` and `forbid{...}` (found in
+        // review), so neither may count.
         let syn::Meta::List(list) = &a.meta else {
             return false;
         };
@@ -2047,7 +2529,7 @@ mod tests {
     #[test]
     fn every_outside_crate_a_shipped_crate_needs_is_reviewed() {
         // A dependency of the command line, not the library, is held to the same
-        // sources: crates.io, reviewed through cargo-vet (Codex review, round 19).
+        // sources: crates.io, reviewed through cargo-vet (found in review).
         let mut g = graph(json!("dev"));
         g["packages"][0]["name"] = json!("qso-graph-trust-cli");
         assert!(unreviewed_in(&g, &["qso-graph-trust-cli"]).is_empty());
@@ -2061,7 +2543,7 @@ mod tests {
             vec!["shipped crate gone is not a workspace member"]
         );
         // A path and a version together build something else once published
-        // (Codex review, round 29); our own shipped crates may be named so.
+        // (found in review); our own shipped crates may be named so.
         let mut h = graph(json!("dev"));
         h["packages"][0]["name"] = json!("qso-graph-trust-cli");
         h["packages"][0]["dependencies"] = json!([
@@ -2085,7 +2567,7 @@ mod tests {
             !found.iter().any(|f| f.contains("on qso-graph-trust")),
             "{found:?}"
         );
-        // The shipped crate's own build script is reviewed too (Codex review, round 25).
+        // The shipped crate's own build script is reviewed too (found in review).
         let mut k = graph(json!("dev"));
         k["packages"][0]["name"] = json!("qso-graph-trust-cli");
         k["packages"][0]["targets"] = json!([{"kind": ["bin"]}, {"kind": ["custom-build"]}]);
@@ -2165,9 +2647,173 @@ mod tests {
         );
     }
 
+    #[test]
+    fn secret_service_crypto_is_limited_to_the_reviewed_session_edges() {
+        let mut g = graph(json!(null));
+        g["packages"][1]["name"] = json!("secret-service");
+        g["packages"][1]["version"] = json!("5.2.0");
+        g["packages"][2]["name"] = json!("aes");
+        g["packages"][2]["version"] = json!("0.9.4");
+        g["resolve"]["nodes"][1]["features"] = json!(["crypto-rust"]);
+        assert!(unreviewed_in(&g, PROTECTED).is_empty());
+        // PLANTED: the transport exception grants no native-link privilege.
+        g["packages"][1]["links"] = json!("planted_native");
+        assert!(
+            no_c(&g, PROTECTED)
+                .iter()
+                .any(|p| p.contains("links the native library planted_native"))
+        );
+        g["packages"][1]["links"] = Value::Null;
+        assert!(no_c(&g, PROTECTED).is_empty());
+        // PLANTED: a signer/certificate handler cannot borrow the algorithm exception.
+        g["packages"][1]["name"] = json!("certificate-handler");
+        assert!(
+            unreviewed_in(&g, PROTECTED)
+                .iter()
+                .any(|p| p.contains("outside Secret Service session transport"))
+        );
+        g["packages"][1]["name"] = json!("secret-service");
+        assert!(unreviewed_in(&g, PROTECTED).is_empty());
+        // PLANTED: direct use, including from the CLI/TLS path, remains forbidden.
+        let edge = json!({"pkg": "cc", "dep_kinds": [{"kind": null}]});
+        g["resolve"]["nodes"][0]["deps"]
+            .as_array_mut()
+            .expect("deps")
+            .push(edge);
+        assert!(
+            unreviewed_in(&g, PROTECTED)
+                .iter()
+                .any(|p| p.contains("qso-graph-trust 0.1.0 uses aes"))
+        );
+        g["packages"][0]["name"] = json!("qso-graph-trust-cli");
+        assert!(
+            unreviewed_in(&g, &["qso-graph-trust-cli"])
+                .iter()
+                .any(|p| p.contains("outside Secret Service session transport"))
+        );
+        g["packages"][0]["name"] = json!("qso-graph-trust");
+        g["resolve"]["nodes"][0]["deps"]
+            .as_array_mut()
+            .expect("deps")
+            .pop();
+        assert!(unreviewed_in(&g, PROTECTED).is_empty());
+        // PLANTED: transport/algorithm upgrades and another crypto feature need new review.
+        for (package, version) in [(1, "5.3.0"), (2, "0.9.5")] {
+            let original = g["packages"][package]["version"].clone();
+            g["packages"][package]["version"] = json!(version);
+            assert!(!unreviewed_in(&g, PROTECTED).is_empty());
+            g["packages"][package]["version"] = original;
+            assert!(unreviewed_in(&g, PROTECTED).is_empty());
+        }
+        g["resolve"]["nodes"][1]["features"] = json!(["crypto-rust", "crypto-openssl"]);
+        assert!(!unreviewed_in(&g, PROTECTED).is_empty());
+        g["resolve"]["nodes"][1]["features"] = json!(["crypto-rust"]);
+        assert!(unreviewed_in(&g, PROTECTED).is_empty());
+    }
+
+    #[test]
+    fn secret_service_api_is_only_available_to_the_credential_backend() {
+        let dir = fresh_temp_dir("qgt-session-transport-policy").expect("temporary directory");
+        let backend = dir.join("src/store/keys/os.rs");
+        std::fs::create_dir_all(backend.parent().expect("parent")).expect("mkdir");
+        let approved = "use secret_service::{EncryptionType, blocking::SecretService};";
+        std::fs::write(&backend, approved).expect("approved transport import");
+        let mut g = graph(json!("dev"));
+        g["packages"][0]["manifest_path"] = json!(dir.join("Cargo.toml"));
+        assert!(no_network(&g).is_empty());
+        // PLANTED: even the connection API cannot be used from signing/certificate code.
+        let signer = dir.join("src/signing.rs");
+        std::fs::write(&signer, approved).expect("plant another use");
+        assert!(
+            no_network(&g)
+                .iter()
+                .any(|p| p.contains("signing.rs uses Secret Service"))
+        );
+        std::fs::remove_file(signer).expect("remove plant");
+        assert!(no_network(&g).is_empty());
+        for planted in [
+            "use secret_service::session::encrypt;",
+            "#[cfg(any())] fn sign() { secret_service::session::decrypt(); }",
+            "use secret_service as crypto;",
+            "use secret_service::*;",
+            "use secret_service::{blocking as b};",
+            "extern crate secret_service as transport;",
+        ] {
+            std::fs::write(&backend, planted).expect("plant crypto API");
+            assert!(
+                no_network(&g)
+                    .iter()
+                    .any(|p| p.contains("outside the permitted transport API")),
+                "missed {planted}"
+            );
+            std::fs::write(&backend, approved).expect("remove plant");
+            assert!(no_network(&g).is_empty());
+        }
+        std::fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn foreign_declaration_exceptions_require_the_exact_crate_version_and_file() {
+        for (name, version, file, _) in FOREIGN_DECLARATIONS {
+            assert!(!OS_BINDINGS.contains(name));
+            let dir = fresh_temp_dir("qgt-foreign-declaration").expect("fresh directory");
+            let path = dir.join(file);
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+            std::fs::write(&path, "extern \"C\" { fn planted(); }").expect("plant");
+            let mut g = graph(json!("dev"));
+            g["packages"][1]["name"] = json!(name);
+            g["packages"][1]["version"] = json!(version);
+            g["packages"][1]["manifest_path"] = json!(dir.join("Cargo.toml"));
+            assert!(no_c(&g, PROTECTED).is_empty());
+
+            // PLANTED: the same file in another version or crate must fail, and passes again
+            // only when the reviewed identity is restored.
+            for (field, value, restore) in [
+                ("version", "99.0.0", *version),
+                ("name", "planted-unreviewed", *name),
+            ] {
+                g["packages"][1][field] = json!(value);
+                assert_eq!(no_c(&g, PROTECTED).len(), 1);
+                g["packages"][1][field] = json!(restore);
+                assert!(no_c(&g, PROTECTED).is_empty());
+            }
+
+            // PLANTED: a new file in the allowed crate and version is still scanned.
+            let extra = dir.join("src/planted.rs");
+            std::fs::copy(&path, &extra).expect("plant another file");
+            assert_eq!(
+                no_c(&g, PROTECTED),
+                [format!(
+                    "{name} {version}: src/planted.rs declares foreign functions"
+                )]
+            );
+            std::fs::remove_file(extra).expect("remove plant");
+            assert!(no_c(&g, PROTECTED).is_empty());
+
+            // PLANTED: even in the reviewed file a new native link is refused.
+            std::fs::write(
+                &path,
+                "#[link(name = \"planted\")] extern \"C\" { fn planted(); }",
+            )
+            .expect("plant link");
+            assert_eq!(
+                no_c(&g, PROTECTED),
+                [format!("{name} {version}: {file} has a #[link] attribute")]
+            );
+            std::fs::write(&path, "extern \"C\" { fn planted(); }").expect("remove link");
+            assert!(no_c(&g, PROTECTED).is_empty());
+            let native = dir.join("src/planted.c");
+            std::fs::write(&native, "void planted(void) {}").expect("plant native source");
+            assert_eq!(no_c(&g, PROTECTED).len(), 1);
+            std::fs::remove_file(native).expect("remove native source");
+            assert!(no_c(&g, PROTECTED).is_empty());
+            std::fs::remove_dir_all(dir).expect("cleanup");
+        }
+    }
+
     /// The probe compiles beside whatever a valid library declares, so only the
-    /// lints can refuse it: a library with its own `mod core` once broke it (Codex
-    /// review, round 37), as would one without the implicit prelude.
+    /// lints can refuse it: a library with its own `mod core` once broke it (found in
+    /// review), as would one without the implicit prelude.
     #[test]
     fn the_canary_probe_compiles_beside_any_library_and_only_lints_refuse_it() {
         let dir = fresh_temp_dir("qso-graph-trust-probe").expect("a fresh directory");
@@ -2241,14 +2887,14 @@ mod tests {
         );
         // Rust calling Rust is not a native binding.
         assert!(scan("extern \"Rust\" { fn f(); }").is_empty());
-        // `assert![link]` is a macro call, not a `#![link]` attribute (Codex review,
-        // round 37); `#![link]` and `#[link]` still are.
+        // `assert![link]` is a macro call, not a `#![link]` attribute (found in
+        // review); `#![link]` and `#[link]` still are.
         assert!(scan("pub fn f(link: bool) { assert![link]; }").is_empty());
         assert_eq!(
             scan("#![link(name = \"z\")]"),
             vec!["has a #[link] attribute"]
         );
-        // `r#extern` is an identifier, not the keyword (found by Codex review);
+        // `r#extern` is an identifier, not the keyword (found in review);
         // `r#asm!` is still the asm macro, and `#[r#link]` still the attribute.
         assert!(scan("pub struct r#extern { pub value: u8 }").is_empty());
         assert_eq!(scan("r#asm!(\"nop\");"), vec!["holds assembly"]);
@@ -2408,7 +3054,7 @@ mod tests {
 
     #[test]
     fn tricks_found_by_the_second_review_are_not_the_attribute() {
-        // A raw string whose text looks like an attribute (Codex review, round 2).
+        // A raw string whose text looks like an attribute (found in review).
         assert!(!forbids_unsafe(
             "#![doc = r#\"\"\n]\n#![forbid(unsafe_code)]\n\"#]\npub fn f() {}"
         ));
@@ -2465,7 +3111,7 @@ mod tests {
 
     #[test]
     fn a_raw_identifier_is_one_token() {
-        // `r#r` is a raw identifier; the string after it is ordinary (Codex review, round 4).
+        // `r#r` is a raw identifier; the string after it is ordinary (found in review).
         assert!(!forbids_unsafe(
             r##"#![cfg_attr(any(), arbitrary(r#r"\"))]
 #![forbid(unsafe_code)]
@@ -2480,7 +3126,7 @@ pub fn proof() {}
 
     #[test]
     fn a_raw_lifetime_is_one_token() {
-        // `'r#r` is a raw lifetime; the string after it is ordinary (Codex review, round 5).
+        // `'r#r` is a raw lifetime; the string after it is ordinary (found in review).
         assert!(!forbids_unsafe(
             r##"#![cfg_attr(any(), arbitrary('r#r"\"))]
 #![forbid(unsafe_code)]
@@ -2553,7 +3199,7 @@ pub fn proof() {}
             assert_eq!(env(&[(var, "/x")]).len(), 1, "{var}");
         }
         assert_eq!(env(&[("RUSTFLAGS", "@/tmp/ci.rsp")]).len(), 1);
-        // Any case, as Windows reads them, and the bootstrap switch (Codex review, round 23).
+        // Any case, as Windows reads them, and the bootstrap switch (found in review).
         assert_eq!(env(&[("rustflags", "-l winmm")]).len(), 1);
         assert_eq!(env(&[("Rustc_Wrapper", "/x")]).len(), 1);
         assert_eq!(env(&[("RUSTC_BOOTSTRAP", "1")]).len(), 1);
@@ -2562,7 +3208,7 @@ pub fn proof() {}
     #[test]
     fn unsafe_is_found_whatever_would_compile_it() {
         let scan = |s: &str| unsafe_tokens(s.parse().expect("tokens"));
-        // Code no CI build compiles is still code (Codex review, round 11).
+        // Code no CI build compiles is still code (found in review).
         assert_eq!(
             scan(
                 "#[cfg(not(debug_assertions))] pub fn f() -> u8 { unsafe { core::ptr::read(&7) } }"
@@ -2575,18 +3221,18 @@ pub fn proof() {}
             vec!["uses unsafe"]
         );
         assert_eq!(scan("include!(\"../elsewhere.rs\");"), vec!["uses include"]);
-        // A module from a file the scan would not read (Codex review, round 12).
+        // A module from a file the scan would not read (found in review).
         assert_eq!(
             scan("#[cfg(not(debug_assertions))] #[path = \"release.inc\"] mod release;"),
             vec!["uses #[path]"]
         );
         assert!(scan("let path = [1]; let v = [path];").is_empty());
-        // A binding inside an array is not an attribute (Codex review, round 21).
+        // A binding inside an array is not an attribute (found in review).
         assert!(scan("pub fn paths() -> [u8; 1] { [{ let path = 1; path }] }").is_empty());
-        // Comparisons are not assignments (Codex review, round 20).
+        // Comparisons are not assignments (found in review).
         assert!(scan("pub fn f(path: u8) -> bool { [path == 0][0] }").is_empty());
         assert!(scan("let v = [match x { path => 1 }];").is_empty());
-        // Codex review, round 13: a raw `path`, and an attribute named by a macro variable.
+        // Found in review: a raw `path`, and an attribute named by a macro variable.
         assert_eq!(
             scan("#[r#path = \"payload.inc\"] mod hidden;"),
             vec!["uses #[path]"]
@@ -2595,7 +3241,7 @@ pub fn proof() {}
             scan("macro_rules! m { ($a:ident) => { #[$a = \"payload.inc\"] mod hidden; } }")
                 .contains(&"builds an attribute from a macro variable")
         );
-        // The # passed into a macro separately (Codex review, round 16).
+        // The # passed into a macro separately (found in review).
         let passed = scan(
             "macro_rules! load { ($h:tt [$i:ident]) => { $h [path = \"hidden.md\"] pub mod hidden; }; } load!(#[doc]);",
         );
@@ -2610,19 +3256,19 @@ pub fn proof() {}
             scan("macro_rules! v { ($($x:expr),*) => { [$($x),*] } }"),
             vec!["defines a macro"]
         );
-        // A feature switched on only in some configurations (Codex review, round 24).
+        // A feature switched on only in some configurations (found in review).
         assert!(
             scan("#![cfg_attr(not(debug_assertions), feature(decl_macro))]")
                 .contains(&"enables an unstable feature")
         );
         // Selecting a Cargo feature is not enabling an unstable one.
         assert!(scan("#[cfg(feature = \"std\")] fn f() {} #[cfg_attr(feature = \"x\", derive(Debug))] struct S;").is_empty());
-        // Rust in a string a derive macro parses (Codex review, round 31).
+        // Rust in a string a derive macro parses (found in review).
         let bound = scan(
             "#[serde(bound(deserialize = \"[(); unsafe { core::ptr::read(&7usize) }]: Sized\"))] pub struct P;",
         );
         assert!(bound.contains(&"uses unsafe"), "{bound:?}");
-        // Prose in Rust's own attributes is not code (Codex review, round 32).
+        // Prose in Rust's own attributes is not code (found in review).
         assert!(
             scan("#[must_use = \"include this value in the report\"] pub fn f() -> usize { 0 }")
                 .is_empty()
@@ -2644,7 +3290,7 @@ pub fn proof() {}
             scan("#[allow(dead_code, reason = \"asm! is mentioned here\")] fn h() {}").is_empty()
         );
         // Every built-in attribute whose string is a name, a number or a reason
-        // (Codex review, round 38, debugger_visualizer; the rest from the Rust
+        // (found in review, debugger_visualizer; the rest from the Rust
         // Reference's index of built-in attributes, so the class is closed).
         for attr in [
             "#![debugger_visualizer(gdb_script_file = \"unsafe.md\")]",
@@ -2666,20 +3312,20 @@ pub fn proof() {}
             scan("/// Holds no unsafe code; see include! and asm! in the docs.\npub struct P;")
                 .is_empty()
         );
-        // The unstable `macro` and any unstable feature (Codex review, round 23).
+        // The unstable `macro` and any unstable feature (found in review).
         let decl = scan(
             "#![feature(decl_macro, macro_metavar_expr_concat)] macro read_value() { ${concat(un, safe)} { 7 } }",
         );
         assert!(decl.contains(&"defines a macro"), "{decl:?}");
         assert!(decl.contains(&"enables an unstable feature"), "{decl:?}");
-        // A macro of our own is refused outright (Codex review, round 17).
+        // A macro of our own is refused outright (found in review).
         assert!(
             scan(
                 "macro_rules! load { ($h:tt [$i:ident] $a:meta) => { $h [$a] pub mod hidden; }; }"
             )
             .contains(&"defines a macro")
         );
-        // A # assembled with brackets by a macro (Codex review, round 15).
+        // A # assembled with brackets by a macro (found in review).
         let assembled = scan(
             "macro_rules! load { ($a:tt) => { # $a pub mod hidden; }; } load!([path = \"hidden.md\"]);",
         );
@@ -2695,7 +3341,7 @@ pub fn proof() {}
             scan("#![forbid(unsafe_code)] #[derive(Debug)] struct S; const R: &str = r#\"x\"#;")
                 .is_empty()
         );
-        // Inside cfg_attr (Codex review, round 14).
+        // Inside cfg_attr (found in review).
         assert_eq!(
             scan(
                 "macro_rules! m { ($a:ident) => { #[cfg_attr(not(debug_assertions), $a = \"hidden.md\")] mod hidden; } }"
@@ -2705,12 +3351,12 @@ pub fn proof() {}
                 "builds an attribute from a macro variable"
             ]
         );
-        // Inside cfg_attr (Codex review, round 13).
+        // Inside cfg_attr (found in review).
         assert_eq!(
             scan("#[cfg_attr(not(debug_assertions), path = \"release.inc\")] mod release;"),
             vec!["uses #[path]"]
         );
-        // Raw identifiers, aliases and any delimiter (Codex review, round 12).
+        // Raw identifiers, aliases and any delimiter (found in review).
         assert_eq!(scan("r#include!(\"payload.txt\");"), vec!["uses include"]);
         assert_eq!(
             scan("use core::include as load; load!(\"payload.txt\");"),
@@ -2772,7 +3418,7 @@ pub fn proof() {}
             "#!/usr/bin/env run-cargo-script\n#![forbid(unsafe_code)]"
         ));
         assert!(forbids_unsafe("#![forbid(missing_docs, unsafe_code)]"));
-        // Raw spellings, which rustc enforces the same (Codex review, round 35).
+        // Raw spellings, which rustc enforces the same (found in review).
         assert!(forbids_unsafe("#![forbid(r#unsafe_code)]"));
         assert!(forbids_unsafe("#![r#forbid(unsafe_code)]"));
         assert!(forbids_unsafe("#![ forbid ( unsafe_code ) ]"));

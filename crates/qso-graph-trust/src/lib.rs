@@ -6,17 +6,26 @@
 #![warn(missing_docs)]
 
 pub mod certificate;
+pub mod export;
 // gzip is public for this repository's own tests, which edit TQSL backups; it is not part of the
 // API and may change in any release.
 #[doc(hidden)]
 pub mod gzip;
+pub mod import;
 mod lotw;
+mod memory;
+pub mod options;
+mod pkcs12;
+mod protected_key;
 pub mod qso;
 pub mod records;
+pub mod request;
 pub mod signed_log;
 pub mod signing;
 pub mod station;
+pub mod store;
 pub mod tbk;
+pub mod upload;
 mod xml;
 
 /// This library's version, as Cargo has it.

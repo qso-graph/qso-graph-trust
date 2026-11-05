@@ -138,7 +138,7 @@ impl Certificate {
         let validity = &tbs.validity;
         // The serial, big-endian, with no leading zeros: how ARRL numbers the certificates it issues,
         // and how TQSL tells one call's certificates apart. RFC 5280 makes it positive, and ARRL's
-        // are; a negative one is refused (found by Codex review: its sign was dropped).
+        // are; a negative one is refused (found in review: its sign was dropped).
         let bytes = tbs.serial_number.as_bytes();
         if bytes.first().is_some_and(|&b| b & 0x80 != 0) {
             return Err(CertificateError::NotLotw);
@@ -205,6 +205,10 @@ impl Certificate {
         &self.spki
     }
 
+    pub(crate) fn der(&self) -> &[u8] {
+        &self.der
+    }
+
     /// The certificate as a tCERT record carries it: base64 of the DER, in lines of 64
     /// characters, each ended by a newline.
     pub fn tcert_base64(&self) -> String {
@@ -256,7 +260,7 @@ impl Trust {
 }
 
 /// The digest a certificate's signature algorithm names: RSA PKCS#1 v1.5 only, with its parameters
-/// absent or NULL, as RFC 4055 section 5 requires (found by Codex review: parameters were not read).
+/// absent or NULL, as RFC 4055 section 5 requires (found in review: parameters were not read).
 fn digest_of(algorithm: &x509_cert::spki::AlgorithmIdentifierOwned) -> Option<Digest> {
     const SHA1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.5");
     const SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.11");
@@ -333,7 +337,7 @@ fn allows(cert: &X509, usage: KeyUsages) -> bool {
 }
 
 /// Whether the extensions this check reads can be read: none given twice, and basic constraints
-/// and key usage, where present, decoded (found by Codex review: a second basic constraints went
+/// and key usage, where present, decoded (found in review: a second basic constraints went
 /// unread, and an undecodable one counted as none).
 fn extensions_well_formed(cert: &X509) -> bool {
     let extensions: Vec<_> = cert.tbs_certificate.extensions.iter().flatten().collect();
@@ -348,7 +352,7 @@ fn extensions_well_formed(cert: &X509) -> bool {
 
 /// Whether every extension marked critical is one this check reads (basic constraints and key
 /// usage): an unknown critical one, name constraints among them, means the certificate's limits are
-/// not known, so it is not trusted (RFC 5280 section 4.2; found by Codex review).
+/// not known, so it is not trusted (RFC 5280 section 4.2; found in review).
 fn criticals_understood(cert: &X509) -> bool {
     cert.tbs_certificate
         .extensions
@@ -364,54 +368,75 @@ impl Certificate {
     /// root or CA past its dates still counts, as in TQSL; this certificate's own dates are checked
     /// when it signs.
     pub fn verify(&self, trust: &Trust, intermediates: &[Vec<u8>]) -> Result<(), CertificateError> {
-        let cert = X509::from_der(&self.der).map_err(|_| CertificateError::NotACertificate)?;
-        let others: Vec<X509> = intermediates
-            .iter()
-            .filter_map(|d| X509::from_der(d).ok())
-            .collect();
-        // A CA here is one that says it is, may sign certificates, and has no limit this check does
-        // not read (found by Codex review: key usage and critical extensions were not read).
-        let cas: Vec<&X509> = trust
-            .authorities
-            .iter()
-            .chain(others.iter())
-            .filter(|c| {
-                extensions_well_formed(c)
-                    && is_ca(c)
-                    && allows(c, KeyUsages::KeyCertSign)
-                    && criticals_understood(c)
-            })
-            .collect();
-        let untrusted = |c: &X509| CertificateError::Untrusted {
-            issuer: c.tbs_certificate.issuer.to_string(),
-        };
-        // The callsign certificate itself: not a CA, allowed to sign data, limits all read.
-        if !extensions_well_formed(&cert)
-            || is_ca(&cert)
-            || !allows(&cert, KeyUsages::DigitalSignature)
-            || !criticals_understood(&cert)
-        {
-            return Err(untrusted(&cert));
-        }
-        let mut current = cert;
-        // The CA certificates passed so far lie below the one looked for next: a CA's path length is
-        // the most it may have under it (RFC 5280 section 4.2.1.9; found by Codex review).
-        for below in 0..MAX_CHAIN {
-            if trust.roots.iter().any(|root| signed_by(&current, root)) {
-                return Ok(());
-            }
-            let fits = |ca: &&&X509| {
-                basic_constraints(ca)
-                    .and_then(|b| b.path_len_constraint)
-                    .is_none_or(|limit| usize::from(limit) >= below)
-            };
-            let Some(next) = cas.iter().filter(fits).find(|ca| signed_by(&current, ca)) else {
-                return Err(untrusted(&current));
-            };
-            current = (*next).clone();
-        }
-        Err(untrusted(&current))
+        verify_imported(&self.der, trust, intermediates, false)
     }
+}
+
+// Importers check every supplied authority too, including unused roots. A supplied root is
+// accepted only if it is already trusted or chains to caller trust, never for being in the file.
+pub(crate) fn verify_imported(
+    der: &[u8],
+    trust: &Trust,
+    intermediates: &[Vec<u8>],
+    authority: bool,
+) -> Result<(), CertificateError> {
+    let cert = X509::from_der(der).map_err(|_| CertificateError::NotACertificate)?;
+    let others: Vec<X509> = intermediates
+        .iter()
+        .filter_map(|d| X509::from_der(d).ok())
+        .collect();
+    // A CA here is one that says it is, may sign certificates, and has no limit this check does
+    // not read (found in review: key usage and critical extensions were not read).
+    let cas: Vec<&X509> = trust
+        .authorities
+        .iter()
+        .chain(others.iter())
+        .filter(|c| {
+            extensions_well_formed(c)
+                && is_ca(c)
+                && allows(c, KeyUsages::KeyCertSign)
+                && criticals_understood(c)
+        })
+        .collect();
+    let untrusted = |c: &X509| CertificateError::Untrusted {
+        issuer: c.tbs_certificate.issuer.to_string(),
+    };
+    // Require the declared role and its key usage, with every critical limit understood.
+    if !extensions_well_formed(&cert)
+        || is_ca(&cert) != authority
+        || !allows(
+            &cert,
+            if authority {
+                KeyUsages::KeyCertSign
+            } else {
+                KeyUsages::DigitalSignature
+            },
+        )
+        || !criticals_understood(&cert)
+    {
+        return Err(untrusted(&cert));
+    }
+    let mut current = cert;
+    // The CA certificates passed so far lie below the one looked for next: a CA's path length is
+    // the most it may have under it (RFC 5280 section 4.2.1.9; found in review).
+    if authority && trust.roots.iter().any(|root| root == &current) {
+        return Ok(());
+    }
+    for below in usize::from(authority)..MAX_CHAIN {
+        if trust.roots.iter().any(|root| signed_by(&current, root)) {
+            return Ok(());
+        }
+        let fits = |ca: &&&X509| {
+            basic_constraints(ca)
+                .and_then(|b| b.path_len_constraint)
+                .is_none_or(|limit| usize::from(limit) >= below)
+        };
+        let Some(next) = cas.iter().filter(fits).find(|ca| signed_by(&current, ca)) else {
+            return Err(untrusted(&current));
+        };
+        current = (*next).clone();
+    }
+    Err(untrusted(&current))
 }
 
 /// The text of a UTF8String, PrintableString or IA5String value, as a callsign is written.
@@ -513,7 +538,7 @@ mod tests {
     #[test]
     fn a_chain_must_keep_its_cas_limits() {
         assert_eq!(verify_chain("leaf-good", &["ca-good"]), Ok(()));
-        // Codex review: limits a CA states were not read, though every signature checked.
+        // Found in review: limits a CA states were not read, though every signature checked.
         let untrusted =
             |r: Result<(), CertificateError>| matches!(r, Err(CertificateError::Untrusted { .. }));
         // A CA allowed no CA under it, with one under it.
@@ -531,7 +556,7 @@ mod tests {
         assert!(untrusted(verify_chain("leaf-critical", &["ca-good"])));
         // A callsign certificate that says it is a CA.
         assert!(untrusted(verify_chain("leaf-is-ca", &["ca-good"])));
-        // Codex review round 3: a callsign certificate whose critical basic constraints cannot be
+        // Found in review: a callsign certificate whose critical basic constraints cannot be
         // decoded, which counted as having none.
         assert!(untrusted(verify_chain(
             "leaf-bad-constraints",
@@ -541,7 +566,7 @@ mod tests {
 
     #[test]
     fn an_extension_given_twice_is_not_read() {
-        // Codex review round 3: a CA's basic constraints given twice, no limit then pathlen 0; only
+        // Found in review: a CA's basic constraints given twice, no limit then pathlen 0; only
         // the first was read. (openssl will not issue one, so it is made here: its signature no
         // longer checks, so the rule is tested on its own.)
         let ca = X509::from_pem(chain("ca-good")).expect("a CA");
@@ -564,7 +589,7 @@ mod tests {
 
     #[test]
     fn a_signature_algorithm_with_parameters_is_not_one() {
-        // Codex review: RFC 4055 allows these algorithms no parameters but NULL.
+        // Found in review: RFC 4055 allows these algorithms no parameters but NULL.
         use x509_cert::der::Any;
         use x509_cert::spki::AlgorithmIdentifierOwned;
         let sha256 = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.11");
@@ -590,7 +615,7 @@ mod tests {
         let cert = Certificate::from_pem_or_der(&chain("leaf-good")).expect("certificate");
         assert_eq!(cert.serial(), Some(1));
         let mut c = cert.clone();
-        // 2^56: eight bytes, a signed 64-bit number (Codex review: refused at seven).
+        // 2^56: eight bytes, a signed 64-bit number (found in review: refused at seven).
         c.serial = vec![1, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!(c.serial(), Some(1 << 56));
         c.serial = vec![0x80, 0, 0, 0, 0, 0, 0, 0];
@@ -612,7 +637,7 @@ mod tests {
 
     #[test]
     fn a_certificate_too_large_to_be_lotws_is_refused_unread() {
-        // Codex review: a 16 MiB extension was decoded, copied and re-encoded.
+        // Found in review: a 16 MiB extension was decoded, copied and re-encoded.
         let mut big = corpus();
         big.resize(MAX_CERTIFICATE_LEN + 1, b'\n');
         assert_eq!(

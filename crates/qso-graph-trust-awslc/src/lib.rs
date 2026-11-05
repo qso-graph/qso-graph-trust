@@ -9,13 +9,22 @@
 //! it frees (`OPENSSL_free`, `crypto/mem.c`), so the key's numbers and their temporaries are wiped.
 //!
 //! The interface is safe: [`RsaKey`] owns its AWS-LC key, frees it when dropped, and can only be
-//! checked and used to sign. Nothing here returns or prints the private key.
+//! checked and used to sign. Generation hands wiped PKCS#8 directly to the library for custody;
+//! an imported key cannot be read back out or printed.
 
 use std::ffi::c_int;
 use std::fmt;
 use std::ptr::NonNull;
 
 use aws_lc_sys as sys;
+use zeroize::Zeroizing;
+
+mod encryption;
+pub use encryption::{
+    EncryptionError, ImportCipher, ImportDigest, aes256_gcm_open, aes256_gcm_seal,
+    import_cbc_decrypt, import_digest, import_hmac, import_hmac_verify, import_pbkdf2,
+    pbkdf2_sha256,
+};
 
 /// An RSA private key held by AWS-LC. It cannot be read back out.
 pub struct RsaKey {
@@ -35,6 +44,10 @@ pub enum Error {
     NotRsa,
     /// AWS-LC could not make the signature.
     Signing,
+    /// AWS-LC could not generate or encode a key.
+    Generation,
+    /// The operating system could not supply random bytes.
+    Random,
 }
 
 impl fmt::Display for Error {
@@ -42,11 +55,18 @@ impl fmt::Display for Error {
         f.write_str(match self {
             Self::NotRsa => "not an RSA key AWS-LC can read",
             Self::Signing => "AWS-LC could not sign",
+            Self::Generation => "AWS-LC could not generate or encode a key",
+            Self::Random => "AWS-LC could not supply random bytes",
         })
     }
 }
 
 impl std::error::Error for Error {}
+
+/// Fill a buffer with cryptographically secure random bytes from AWS-LC's safe API.
+pub fn random(bytes: &mut [u8]) -> Result<(), Error> {
+    aws_lc_rs::rand::fill(bytes).map_err(|_| Error::Random)
+}
 
 /// An AWS-LC key read from DER, `parse` being EVP_parse_private_key or EVP_parse_public_key, as the
 /// RSA it holds. The EVP wrapper is freed here; the RSA is the caller's to free.
@@ -126,6 +146,61 @@ fn free_rsa(rsa: NonNull<sys::RSA>) {
 }
 
 impl RsaKey {
+    /// Generate the key tqsllib 2.8.7 generates: RSA-1024 with exponent 65537.
+    /// The private PKCS#8 DER is wiped on drop; the other result is public SPKI DER.
+    /// This low-level custody handoff is for the library, not application key export.
+    pub fn generate_lotw() -> Result<(Zeroizing<Vec<u8>>, Vec<u8>), Error> {
+        #[allow(unsafe_code)]
+        // SAFETY: RSA_new takes no arguments and returns an owned RSA or null.
+        let rsa = NonNull::new(unsafe { sys::RSA_new() }).ok_or(Error::Generation)?;
+        let key = Self { rsa };
+        #[allow(unsafe_code)]
+        // SAFETY: BN_new takes no arguments and returns an owned BIGNUM or null.
+        let e = NonNull::new(unsafe { sys::BN_new() }).ok_or(Error::Generation)?;
+        #[allow(unsafe_code)]
+        // SAFETY: e is owned and live; BN_set_word writes only to that BIGNUM.
+        let set = unsafe { sys::BN_set_word(e.as_ptr(), 65_537) };
+        let generated = if set == 1 {
+            #[allow(unsafe_code)]
+            // SAFETY: rsa and e are live and owned; no callback is supplied. The RSA owns
+            // its generated components; e is only borrowed and freed below, also on failure.
+            unsafe {
+                sys::RSA_generate_key_ex(rsa.as_ptr(), 1024, e.as_ptr(), std::ptr::null_mut())
+            }
+        } else {
+            0
+        };
+        #[allow(unsafe_code)]
+        // SAFETY: e is owned, non-null and no longer borrowed; freed exactly once.
+        unsafe {
+            sys::BN_free(e.as_ptr())
+        };
+        if generated != 1 {
+            return Err(Error::Generation);
+        }
+        #[allow(unsafe_code)]
+        // SAFETY: EVP_PKEY_new returns an owned wrapper or null.
+        let pkey = NonNull::new(unsafe { sys::EVP_PKEY_new() }).ok_or(Error::Generation)?;
+        let pkey = OwnedPkey(pkey);
+        #[allow(unsafe_code)]
+        // SAFETY: both objects are live; set1 takes its own RSA reference, leaving key owned here.
+        let assigned = unsafe { sys::EVP_PKEY_set1_RSA(pkey.0.as_ptr(), key.rsa.as_ptr()) };
+        if assigned != 1 {
+            return Err(Error::Generation);
+        }
+        let private = marshal(&pkey, sys::EVP_marshal_private_key)?;
+        let public = marshal(&pkey, sys::EVP_marshal_public_key)?.to_vec();
+        Ok((private, public))
+    }
+
+    /// RSA PKCS#1 v1.5 over SHA-256 for TQSL's PKCS#10 request.
+    /// aws-lc-rs rejects RSA signing keys smaller than 2048 bits, so only the RSA operation
+    /// uses the direct binding; hashing uses its safe API.
+    pub fn sign_sha256(&self, data: &[u8]) -> Result<Vec<u8>, Error> {
+        let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, data);
+        self.sign_digest(sys::NID_sha256 as c_int, digest.as_ref())
+    }
+
     /// Read a PKCS#8 RSA private key (DER). The caller keeps and wipes its own copy of `der`.
     pub fn from_pkcs8_der(der: &[u8]) -> Result<RsaKey, Error> {
         parse_rsa(der, sys::EVP_parse_private_key)
@@ -205,17 +280,21 @@ impl RsaKey {
         unsafe {
             sys::SHA1(data.as_ptr(), data.len(), digest.as_mut_ptr())
         };
+        self.sign_digest(sys::NID_sha1 as c_int, &digest)
+    }
+
+    fn sign_digest(&self, nid: c_int, digest: &[u8]) -> Result<Vec<u8>, Error> {
         #[allow(unsafe_code)]
         // SAFETY: `rsa` is this key's live RSA; RSA_size only reads it.
         let size = unsafe { sys::RSA_size(self.rsa.as_ptr()) } as usize;
         let mut out = vec![0u8; size];
         let mut out_len: std::ffi::c_uint = 0;
         #[allow(unsafe_code)]
-        // SAFETY: `digest` is 20 bytes, as NID_sha1 requires; `out` holds RSA_size bytes, the most
+        // SAFETY: the private callers provide the digest length required by nid; `out` holds RSA_size bytes, the most
         // RSA_sign writes; `out_len` receives the length; `rsa` is live for the call.
         let ok = unsafe {
             sys::RSA_sign(
-                sys::NID_sha1 as c_int,
+                nid,
                 digest.as_ptr(),
                 digest.len(),
                 out.as_mut_ptr(),
@@ -228,6 +307,58 @@ impl RsaKey {
         }
         Ok(out)
     }
+}
+
+// An owned EVP wrapper, including its RSA reference, freed on every error path.
+struct OwnedPkey(NonNull<sys::EVP_PKEY>);
+
+impl Drop for OwnedPkey {
+    fn drop(&mut self) {
+        #[allow(unsafe_code)]
+        // SAFETY: this wrapper uniquely owns the non-null EVP_PKEY, freed exactly once.
+        unsafe {
+            sys::EVP_PKEY_free(self.0.as_ptr())
+        };
+    }
+}
+
+// A fixed wiped buffer avoids both copying private DER out of a C allocation and unbounded
+// allocation. 2048 bytes is more than PKCS#8 or SPKI for RSA-1024 can need.
+fn marshal(
+    key: &OwnedPkey,
+    encode: unsafe extern "C" fn(*mut sys::CBB, *const sys::EVP_PKEY) -> c_int,
+) -> Result<Zeroizing<Vec<u8>>, Error> {
+    let mut out = Zeroizing::new(vec![0u8; 2048]);
+    let mut cbb = sys::CBB::default();
+    #[allow(unsafe_code)]
+    // SAFETY: cbb is writable; out has the given capacity and remains live and unmoved until
+    // cleanup. A fixed CBB never grows or takes ownership of this Rust buffer.
+    unsafe {
+        sys::CBB_init_fixed(&mut cbb, out.as_mut_ptr(), out.len())
+    };
+    #[allow(unsafe_code)]
+    // SAFETY: cbb is initialised, key is live; only the two EVP marshal functions are passed.
+    let ok = unsafe { encode(&mut cbb, key.0.as_ptr()) };
+    let len = if ok == 1 {
+        #[allow(unsafe_code)]
+        // SAFETY: successful marshal flushed all children; cbb is live and initialised.
+        unsafe {
+            sys::CBB_len(&cbb)
+        }
+    } else {
+        0
+    };
+    #[allow(unsafe_code)]
+    // SAFETY: cbb was initialised exactly once and is no longer used; cleanup frees child state,
+    // never the fixed buffer, which Rust owns and wipes on all paths.
+    unsafe {
+        sys::CBB_cleanup(&mut cbb)
+    };
+    if ok != 1 || len == 0 || len > out.len() {
+        return Err(Error::Generation);
+    }
+    out.truncate(len);
+    Ok(out)
 }
 
 impl Drop for RsaKey {
@@ -273,8 +404,7 @@ mod tests {
 
     #[test]
     fn a_key_prints_nothing_of_itself() {
-        let pem = include_str!("../../../tests/corpus/pki/user-1024.key.pem");
-        let der = pem_body(pem);
+        let der = pem_body(&test_key_pem());
         let key = RsaKey::from_pkcs8_der(&der).expect("key");
         assert_eq!(format!("{key:?}"), "RsaKey(..)");
         assert!(key.is_lotw_shaped());
@@ -282,9 +412,17 @@ mod tests {
 
     #[test]
     fn trailing_bytes_after_a_key_are_refused() {
-        let mut der = pem_body(include_str!("../../../tests/corpus/pki/user-1024.key.pem"));
+        let mut der = pem_body(&test_key_pem());
         der.push(0);
         assert_eq!(RsaKey::from_pkcs8_der(&der).err(), Some(Error::NotRsa));
+    }
+
+    fn test_key_pem() -> String {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/corpus/pki/user-1024.key.pem"),
+        )
+        .expect("test key PEM")
     }
 
     /// A PEM's base64 body, decoded by hand so these tests need nothing outside this crate.

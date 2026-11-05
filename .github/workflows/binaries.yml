@@ -1,0 +1,260 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Binaries: qg-trust built for each platform QSO Graph Desktop ships for, as one self-contained program
+# that needs neither Rust nor anything else installed: macOS (Apple silicon), Linux x86_64 and arm64,
+# and Windows x86_64.
+#
+# release.yml calls it with sign: true, from main, before anything is published, so a release whose
+# binaries do not build or sign publishes nothing. Run by hand (Actions -> Binaries -> Run workflow)
+# on any branch, it builds the same programs unsigned and publishes nothing, to try a change.
+#
+# Signed in KI7MT's name, as QSO Graph Desktop's installers are: macOS with his Apple Developer ID
+# (Greg Beam) and notarized by Apple, Windows as Gregory Beam through Azure Artifact Signing. The
+# secrets are in the macos-signing and windows-signing Environments, which admit main only; a run
+# that does not sign is given neither Environment. Linux programs carry no signature of their own:
+# GitHub's attestation of each archive says this workflow built it from this commit.
+name: Binaries
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        description: 'The commit to build'
+        required: true
+        type: string
+      sign:
+        description: 'Sign, notarize and attest (a release); otherwise an unsigned trial build'
+        required: true
+        type: boolean
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: qg-trust (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-arm64, os: macos-latest, target: aarch64-apple-darwin }
+          - { name: linux-x86_64, os: ubuntu-latest, target: x86_64-unknown-linux-musl }
+          - { name: linux-arm64, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
+          - { name: windows-x86_64, os: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    # A signing run's Mac waits on Apple's notarization queue; the others take minutes.
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 90 || 45 }}
+    environment: ${{ inputs.sign && (matrix.os == 'macos-latest' && 'macos-signing' || matrix.os == 'windows-latest' && 'windows-signing' || '') || '' }}
+    permissions:
+      contents: read
+      # GitHub's token: for Azure, by the Windows signing, and for Sigstore, by the attestation.
+      id-token: write
+      attestations: write
+    env:
+      TARGET: ${{ matrix.target }}
+      NAME: ${{ matrix.name }}
+      SIGN: ${{ inputs.sign && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.sha || github.sha }}
+      # rust-toolchain.toml names the version; rustup installs it, and the target, here.
+      - name: Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v rustup || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none && echo "$HOME/.cargo/bin" >> "$GITHUB_PATH" && export PATH="$HOME/.cargo/bin:$PATH"; }
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add "$TARGET"
+      # Linux is built against musl and linked statically, so one program runs on every distribution,
+      # whatever C library it has.
+      - name: musl (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Windows: the C runtime linked in, so nothing else needs installing first.
+          if [ "$RUNNER_OS" = Windows ]; then export RUSTFLAGS="-C target-feature=+crt-static"; fi
+          cargo build --release --locked -p qso-graph-trust-cli --target "$TARGET"
+      # Self-contained, said rather than assumed: what the program loads besides the OS's own.
+      - name: It needs nothing installed
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="target/$TARGET/release"
+          case "$RUNNER_OS" in
+            Linux)
+              file "$dir/qg-trust"
+              file "$dir/qg-trust" | grep -q 'statically linked\|static-pie linked' || { echo "::error::qg-trust is not statically linked"; exit 1; } ;;
+            macOS)
+              otool -L "$dir/qg-trust"
+              others=$(otool -L "$dir/qg-trust" | tail -n +2 | awk '{print $1}' | grep -vE '^/(usr/lib|System/Library)/' || true)
+              [ -z "$others" ] || { echo "::error::qg-trust loads libraries macOS does not have: $others"; exit 1; } ;;
+            Windows)
+              # vswhere answers in Windows line endings: the \r is taken off, or the path names nothing.
+              dumpbin=$("/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' -find '**/Hostx64/x64/dumpbin.exe' | tr -d '\r' | head -1)
+              [ -n "$dumpbin" ] || { echo "::error::dumpbin was not found"; exit 1; }
+              deps=$("$dumpbin" -nologo -dependents "$dir/qg-trust.exe" | tr -d '\r' | grep -iE '^\s+[a-z0-9_.-]+\.dll$' | tr -d ' ')
+              echo "$deps"
+              # Windows' own DLLs only: no Visual C++ runtime (vcruntime, msvcp, ucrtbase as a DLL to ship).
+              bad=$(echo "$deps" | grep -ivE '^(kernel32|advapi32|bcrypt|bcryptprimitives|ntdll|ws2_32|userenv|user32|crypt32|secur32|ole32|oleaut32|shell32|api-ms-win-[a-z0-9-]+)\.dll$' || true)
+              [ -z "$bad" ] || { echo "::error::qg-trust.exe needs DLLs Windows does not have: $bad"; exit 1; } ;;
+          esac
+          "$dir/qg-trust" --version
+
+      # macOS: signed with the hardened runtime and a secure timestamp, then notarized by Apple.
+      # Apple's ticket cannot be stapled to a bare program, so Gatekeeper checks it online the first
+      # time the program is opened. The secrets reach this step and no other.
+      - name: Sign and notarize (macOS)
+        if: runner.os == 'macOS' && env.SIGN == 'true'
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          keychain="$RUNNER_TEMP/qgt-signing.keychain-db"
+          p12="$RUNNER_TEMP/qgt-signing.p12"
+          key="$RUNNER_TEMP/notary-key.p8"
+          searched=$(security list-keychains -d user | tr -d '"')
+          # Whatever happens, the signing key leaves with this step: the keychain deleted, the search
+          # list put back, and the certificate and notary key files removed.
+          cleanup() {
+            # shellcheck disable=SC2086
+            security list-keychains -d user -s $searched >/dev/null 2>&1 || true
+            security delete-keychain "$keychain" >/dev/null 2>&1 || true
+            rm -f "$p12" "$key"
+          }
+          trap cleanup EXIT
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_TEAM_ID; do
+            [ -n "${!name}" ] || { echo "::error::The macos-signing Environment has no $name."; exit 1; }
+          done
+          # Each secret's shape, said plainly, never its value.
+          [[ "$APPLE_API_KEY_ID" =~ ^[A-Z0-9]{10}$ ]] || { echo "::error::APPLE_API_KEY_ID should be the 10-character Key ID."; exit 1; }
+          [[ "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || { echo "::error::APPLE_TEAM_ID should be the 10-character Team ID."; exit 1; }
+          [[ "$APPLE_API_ISSUER" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] || { echo "::error::APPLE_API_ISSUER should be the Issuer ID, a UUID."; exit 1; }
+          [[ "$APPLE_API_KEY_P8" == *"-----BEGIN PRIVATE KEY-----"*"-----END PRIVATE KEY-----"* ]] || { echo "::error::APPLE_API_KEY_P8 should be the whole .p8 file."; exit 1; }
+          # A keychain of this run's own, with a random password that dies with the runner. Apple's
+          # Developer ID G2 intermediate goes in beside the certificate so the identity is valid.
+          keychain_password=$(openssl rand -base64 32)
+          echo "::add-mask::$keychain_password"
+          printf '%s' "$CSC_LINK" | tr -d ' \r\n' | base64 --decode > "$p12"
+          unset CSC_LINK
+          curl --proto '=https' --tlsv1.2 -fsSL -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$keychain"
+          security import "$p12" -k "$keychain" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
+          unset CSC_KEY_PASSWORD
+          rm -f "$p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+          # This run's keychain first, then the user's own, one word each.
+          # shellcheck disable=SC2086
+          security list-keychains -d user -s "$keychain" $searched
+          program="target/$TARGET/release/qg-trust"
+          codesign --force --options runtime --timestamp --keychain "$keychain" \
+            --identifier org.qso-graph.qg-trust \
+            --sign "Developer ID Application: Greg Beam (${APPLE_TEAM_ID})" "$program"
+          codesign --verify --strict --verbose=2 "$program"
+          codesign -dv --verbose=2 "$program" 2>&1 | grep -E '^(Authority|TeamIdentifier|Runtime|Identifier)'
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$key"
+          unset APPLE_API_KEY_P8
+          ditto -c -k "$program" "$RUNNER_TEMP/qg-trust-notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/qg-trust-notarize.zip" --key "$key" --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" --wait --timeout 80m --output-format json > "$RUNNER_TEMP/notary.json"
+          cat "$RUNNER_TEMP/notary.json"
+          [ "$(jq -r .status "$RUNNER_TEMP/notary.json")" = Accepted ] || { echo "::error::Apple did not accept qg-trust for notarization."; exit 1; }
+          "$program" --version
+
+      # Windows: signed as Gregory Beam through Azure Artifact Signing. Azure is signed in to with
+      # GitHub's token for this Environment, so no credential is held; the three IDs only say which
+      # app, directory and subscription, and stay masked as the Environment's secrets.
+      - name: Azure sign-in for signing (Windows)
+        if: runner.os == 'Windows' && env.SIGN == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      # The account, profile and endpoint are names, not secrets: QSO Graph Desktop's. Its default
+      # timestamp server is Microsoft's RFC 3161 service, whose answers are themselves signed.
+      - name: Sign (Windows)
+        if: runner.os == 'Windows' && env.SIGN == 'true'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: https://wus2.codesigning.azure.net
+          signing-account-name: qsographsigning
+          certificate-profile-name: qso-graph
+          files: ${{ github.workspace }}\target\${{ matrix.target }}\release\qg-trust.exe
+          file-digest: SHA256
+          timestamp-digest: SHA256
+          description: qg-trust
+          description-url: https://github.com/qso-graph/qso-graph-trust
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+      # What Windows will say: validly signed, by Gregory Beam.
+      - name: Signature (Windows)
+        if: runner.os == 'Windows' && env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $signature = Get-AuthenticodeSignature "target\$env:TARGET\release\qg-trust.exe"
+          $subject = $signature.SignerCertificate.Subject
+          Write-Output "qg-trust.exe: $($signature.Status), $subject"
+          if ($signature.Status -ne 'Valid') { throw "qg-trust.exe is not validly signed: $($signature.StatusMessage)" }
+          if ($subject -notmatch '(^|, )CN=Gregory Beam(,|$)') { throw "qg-trust.exe is signed by someone else: $subject" }
+
+      # One archive per platform: the program, its README, the licence and the notices. A .zip on
+      # Windows, a .tar.gz elsewhere, named qg-trust-<version>-<platform>.
+      - name: Archive
+        id: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[] | select(.name == "qso-graph-trust-cli") | .version')
+          base="qg-trust-${version}-${NAME}"
+          mkdir -p "dist/$base"
+          exe=qg-trust; [ "$RUNNER_OS" = Windows ] && exe=qg-trust.exe
+          cp "target/$TARGET/release/$exe" "dist/$base/"
+          cp crates/qso-graph-trust-cli/README.md "dist/$base/README.md"
+          cp LICENSE NOTICE AUTHORS "dist/$base/"
+          cd dist
+          if [ "$RUNNER_OS" = Windows ]; then
+            7z a -tzip -bso0 "$base.zip" "$base" && file="$base.zip"
+          else
+            tar -czf "$base.tar.gz" "$base" && file="$base.tar.gz"
+          fi
+          rm -rf "$base"
+          ls -l "$file"
+          echo "file=dist/$file" >> "$GITHUB_OUTPUT"
+      # GitHub's signed statement, through Sigstore, that this archive was built by this workflow from
+      # this commit: gh attestation verify <file> -R qso-graph/qso-graph-trust
+      - name: Attest
+        if: env.SIGN == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.archive.outputs.file }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: qg-trust-${{ matrix.name }}
+          path: ${{ steps.archive.outputs.file }}
+          if-no-files-found: error
+          retention-days: 7

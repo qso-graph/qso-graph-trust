@@ -16,14 +16,14 @@ use zeroize::Zeroizing;
 /// The longest value accepted: larger than any key, certificate or signature tqsllib writes.
 pub const MAX_VALUE_LEN: usize = 64 * 1024;
 /// The longest tag accepted, `<` and `>` aside: the longest tqsllib writes is far shorter, and no
-/// name or type is allocated before this is checked (found by Codex review).
+/// name or type is allocated before this is checked (found in review).
 pub const MAX_TAG_LEN: usize = 64;
 /// The most fields in one record.
 pub const MAX_FIELDS: usize = 256;
 /// The most records in one input: a signed log of 100,000 QSOs, plus its header records.
 pub const MAX_RECORDS: usize = 100_010;
 /// The most fields in all records together, so input made of many tiny records cannot make memory
-/// grow without bound (found by Codex review): 20 for each of [`MAX_RECORDS`].
+/// grow without bound (found in review): 20 for each of [`MAX_RECORDS`].
 pub const MAX_TOTAL_FIELDS: usize = 20 * MAX_RECORDS;
 
 /// One field: its name as written, its type letter if it has one, and its value's bytes, wiped
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn many_tiny_records_cannot_grow_memory_without_bound() {
-        // Codex review: every ten bytes made a record, without any limit on the whole.
+        // Found in review: every ten bytes made a record, without any limit on the whole.
         let records = b"<A:0><eor>".repeat(MAX_RECORDS + 1);
         assert!(matches!(
             parse(&records),
@@ -291,7 +291,7 @@ mod tests {
 
     #[test]
     fn a_long_name_or_type_is_refused_before_it_is_kept() {
-        // Codex review: a 256 MiB name passed every other limit.
+        // Found in review: a 256 MiB name passed every other limit.
         let long = [b"<".as_slice(), &[b'A'; MAX_TAG_LEN + 1], b":0><eor>"].concat();
         assert_eq!(parse(&long), Err(RecordError::BadField { offset: 0 }));
         let longest = [b"<".as_slice(), &[b'A'; MAX_TAG_LEN - 2], b":0><eor>"].concat();

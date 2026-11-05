@@ -296,7 +296,7 @@ fn only_a_trusted_root_makes_a_certificate_trusted() {
             ..
         })
     ));
-    // A certificate whose signature is changed (Codex review: fields alone were checked).
+    // A certificate whose signature is changed (found in review: fields alone were checked).
     let forged = edited(|xml| {
         let at = xml.find("<UserCert CallSign=\"KN4YU\"").expect("entry");
         let end = at + xml[at..].find("-----END CERTIFICATE-----").expect("end");
@@ -334,7 +334,7 @@ fn pending(dxcc: &str, edit: impl Fn(String) -> String) -> Vec<u8> {
 fn a_key_waiting_for_its_certificate_must_name_its_entity() {
     let backup = read(&pending("291", |r| r)).expect("a pending key");
     assert!(backup.certificates[0].certificate.is_none() && backup.certificates[0].key.is_some());
-    // Codex review: a pending key was reported for any entity.
+    // Found in review: a pending key was reported for any entity.
     let other = |r: Result<tbk::Backup, TbkError>| matches!(r, Err(TbkError::Mismatch { .. }));
     assert!(other(read(&pending("1", |r| r))));
     assert!(other(read(
@@ -397,7 +397,7 @@ fn settings_that_change_what_is_signed_are_taken_and_where_logs_go_never() {
 
 #[test]
 fn a_protected_key_is_checked_as_far_as_it_can_be_without_its_password() {
-    // Codex review round 4: a key that only starts like an encrypted one was taken.
+    // Found in review: a key that only starts like an encrypted one was taken.
     let fake = "<CALLSIGN:5>KN4YU<PUBLIC_KEY:1>x<PRIVATE_KEY:37>-----BEGIN ENCRYPTED PRIVATE KEY-----<TQSL_CRQ_DXCC_ENTITY:3>291<eor>";
     assert!(matches!(
         read(&pending("291", |_| fake.to_string())),

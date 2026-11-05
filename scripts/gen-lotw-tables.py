@@ -112,6 +112,17 @@ def generate():
     w("];")
     w("")
 
+    w("/// List labels that differ from their stored values: (field, dependency, value, label).")
+    w("pub const LOC_LABELS: &[(&str, &str, &str, &str)] = &[")
+    for f in top.find("locfields"):
+        for group in f.findall("enums"):
+            for e in group.findall("enum"):
+                label = (e.text or "").strip()
+                if label and label.upper() != e.get("value").upper():
+                    w(f"    ({rs(f.get('Id'))}, {rs(group.get('dependency') or '')}, {rs(e.get('value'))}, {rs(label)}),")
+    w("];")
+    w("")
+
     w("pub const LOC_PAGES: &[LocPage] = &[")
     for p in top.find("locpages"):
         fields = ", ".join(rs(x.text.strip()) for x in p.findall("pageField"))

@@ -24,7 +24,7 @@ openssl version | grep -q '^OpenSSL 3\.' || { echo "needs OpenSSL 3" >&2; exit 1
 
 # Everything is made in a fresh directory of its own, removed when done, so the script never deletes
 # or writes through anything it did not create; the corpus is replaced only at the end, by renaming
-# (found by Codex review).
+# (found in review).
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 out="$work/stage"
@@ -89,7 +89,7 @@ for bits in 1024; do
 
   # The .tq6 ARRL would send: gzipped XML (gzip -n, so no name or time inside). Written as a file
   # first, one command at a time, so a failed read stops the script instead of leaving an empty
-  # element (found by Codex review).
+  # element (found in review).
   xml="$work/$name.xml"
   printf '<?xml version="1.0" encoding="UTF-8"?>\n<tqsldata>\n<tqslcerts>\n' > "$xml"
   for part in "rootcert:root" "cacert:ca" "usercert:$name"; do
@@ -104,7 +104,7 @@ for bits in 1024; do
   # and its weak-crypto option (RC2-40 for the certificates, 3DES for the key, SHA-1 MAC),
   # src/openssl_cert.cpp:2436-2469, with the chain to the root. They are not TQSL's own backups:
   # TQSL also adds bag attributes (callsign, QSO dates, DXCC), so its backups are made by tqsllib
-  # itself in phase 2 (found by Codex review).
+  # itself in phase 2 (found in review).
   cat "$out/ca.pem" "$out/root.pem" > "$work/chain.pem"
   openssl pkcs12 -export -inkey "$out/$name.key.pem" -in "$out/$name.pem" -certfile "$work/chain.pem" \
     -name "$CALL" -passout "pass:$P12_PASSWORD" -out "$out/$name-aes.p12"
@@ -123,7 +123,7 @@ for bits in 1024; do
   grep -q "1\.3\.6\.1\.4\.1\.12348\.1\.1=$CALL," <<<"$subject"
   text=$(openssl x509 -in "$out/user-$bits.pem" -noout -text)
   # Each extension's value, exactly: the whole octet string, read from the DER, must be the text's
-  # own bytes and nothing more (found by Codex review: a printed first word accepted trailing data).
+  # own bytes and nothing more (found in review: a printed first word accepted trailing data).
   der="$work/user-$bits.der"
   openssl x509 -in "$out/user-$bits.pem" -outform DER -out "$der"
   asn=$(openssl asn1parse -inform DER -in "$der")

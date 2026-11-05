@@ -29,7 +29,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | List | Features | Done | Part done | To do |
 |---|---|---|---|---|
-| Needed for 0.7.0 | 43 | 16 | 5 | 22 |
+| Needed for 0.7.0 | 43 | 35 | 7 | 1 |
 | Nice to have | 15 |  |  | 15 |
 | Won't add | 15 | | | |
 
@@ -52,19 +52,19 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| Keys kept in the OS credential store | a file | | 0.7.0 | #172 |
-| Certificates and locations saved, in one format the command line and Desktop share | files | | 0.7.0 | #172 |
-| Record of QSOs already signed (the duplicate check) | `uploaded.db` | | 0.7.0 | #172 |
+| Keys kept in the OS credential store | a file | The store keeps keys behind an interface no caller can read through; the macOS, Windows and Linux stores plug into it once their crates are decided | Part done | #172 |
+| Certificates and locations saved, in one format the command line and Desktop share | files | One versioned `store.xml`, replaced whole under a lock; a newer version is refused, never rewritten | Done | #172 |
+| Record of QSOs already signed (the duplicate check) | `uploaded.db` | TQSL's own duplicate key, checked against TQSL's record of the standard set | Done | #172 |
 
 ### 1.3 Moving from TQSL
 
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| Export certificates, keys and the signed-QSO record to one file | File menu | A part of QSO Graph Desktop's one export file, beside Callsigns and Locations and Settings; all ticked exports everything. This part alone is encrypted, under a password QG Trust makes up. To move only some calls, delete the others first | 0.7.0 | #172, #174 |
-| Import it on any computer (macOS, Windows, Linux), keys into that computer's credential store | File: Restore | Part by part, onto a clean slate: what this computer holds is removed first, nothing merged | 0.7.0 | #172, #174 |
-| Read TQSL's `.tbk` file: certificates, keys, locations | File menu | Reads and checks it; saving what it holds waits on 1.2 | Part done | #172 |
-| Restore TQSL's record of QSOs already signed | File: Restore | Read; saving waits on 1.2 | Part done | #172 |
-| Use TQSL's settings that change what's signed: custom mode mappings, ignore seconds, ignore callsigns in the log, non-amateur calls, location details in the log | Preferences | Read from the `.tbk` file; not yet used when signing | Part done | #172 |
+| Export certificates, keys and the signed-QSO record to one file | File menu | A part of QSO Graph Desktop's one export file, beside Callsigns and Locations and Settings; all ticked exports everything. This part alone is encrypted (AES-256-GCM), under a 20-character password QG Trust makes up. To move only some calls, delete the others first | Done | #172, #174 |
+| Import it on any computer (macOS, Windows, Linux), keys into that computer's credential store | File: Restore | Part by part, onto a clean slate: everything is checked first, then what this computer holds is replaced, nothing merged; the OS stores wait on 1.2 | Part done | #172, #174 |
+| Read TQSL's `.tbk` file: certificates, keys, locations | File menu | Reads, checks and saves what it holds; keys at rest wait on 1.2 | Part done | #172 |
+| Restore TQSL's record of QSOs already signed | File: Restore | Merged into the record, never overwriting what is there | Done | #172 |
+| Use TQSL's settings that change what's signed: custom mode mappings, ignore seconds, ignore callsigns in the log, non-amateur calls, location details in the log | Preferences | [Signing options](SIGNING-OPTIONS.md), by hand or from a `.tbk`'s preferences; checked against tqsllib | Done | #172 |
 | Say which of TQSL's settings were not taken | | Listed | Done | #172 |
 
 ### 1.4 Certificates
@@ -72,11 +72,11 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
 | Check a certificate leads to LoTW's root | on load | A file's own root certificates count for nothing | Done | #172 |
-| Load a certificate from ARRL (`.tq6`) | Load Callsign Certificate | Reads its fields; loading not yet | 0.7.0 | #172 |
-| Load a certificate and key (`.p12`) | Load Callsign Certificate | | 0.7.0 | #172 |
+| Load a certificate from ARRL (`.tq6`) | Load Callsign Certificate | Every certificate checked; attached to its request's key | Done | #172 |
+| Load a certificate and key (`.p12`) | Load Callsign Certificate | AES or 3DES protection; RC2-40 refused | Done | #172 |
 | Certificate details: call, DXCC, QSO dates, valid dates, serial | Display Properties | Read | Done | #172 |
-| Delete a certificate | Delete Callsign Certificate | | 0.7.0 | #172 |
-| Warn before a certificate expires | at startup, 60 days | | 0.7.0 | #172 |
+| Delete a certificate | Delete Callsign Certificate | With its key | Done | #172 |
+| Warn before a certificate expires | at startup, 60 days | Those ending within the days given, and those already expired, as TQSL counts them | Done | #172 |
 
 ### 1.5 Station locations
 
@@ -87,8 +87,8 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Zones must fit the entity and state | wizard warns | Refused | Done | #172 |
 | Grid squares, including VUCC lists of two or four | wizard | | Done | #172 |
 | IOTA reference | wizard | | Done | #172 |
-| Edit a station location | Edit Station Location | | 0.7.0 | #172 |
-| Delete a station location | Delete | | 0.7.0 | #172 |
+| Edit a station location | Edit Station Location | | Done | #172 |
+| Delete a station location | Delete | | Done | #172 |
 
 ### 1.6 Signing choices
 
@@ -96,27 +96,27 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 |---|---|---|---|---|
 | Sign only QSOs in a date range | dialog | `qg-trust -b`, `-e` | Done | #173 |
 | Confirm the station location before signing | dialog | | 0.7.0 | #174 |
-| QSOs signed before: new only, sign again, or cancel | dialog | Needs 1.2's record | 0.7.0 | #172 |
-| Show which QSOs were signed before | dialog | | 0.7.0 | #172 |
+| QSOs signed before: new only, sign again, or cancel | dialog | Recorded once the `.tq8` is written, as TQSL does | Done | #172 |
+| Show which QSOs were signed before | dialog | With where and when, when known | Done | #172 |
 | Report what was signed and what was refused | Status Log | `qg-trust` gives the count and names every QSO left out, with the reason; Desktop's view to come | Part done | #173, #174 |
 
 ### 1.7 New certificates
 
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| Request a new certificate (`.tq5`), matching TQSL's | Request New Callsign Certificate | | 0.7.0 | #172 |
-| Request: call, DXCC entity, first and last QSO date | wizard | | 0.7.0 | #172 |
-| Request: name, address, email | wizard | | 0.7.0 | #172 |
-| Request: kind of call (club, DXpedition, special event, former, replacing, QSL manager) | wizard | | 0.7.0 | #172 |
-| Request signed by a certificate already held | wizard | | 0.7.0 | #172 |
-| Renew a certificate | Renew Callsign Certificate | | 0.7.0 | #172 |
+| Request a new certificate (`.tq5`), matching TQSL's | Request New Callsign Certificate | Matches tqsllib's but the key, signatures and identification line; the request waits in the store for ARRL's answer | Done | #172 |
+| Request: call, DXCC entity, first and last QSO date | wizard | | Done | #172 |
+| Request: name, address, email | wizard | | Done | #172 |
+| Request: kind of call (club, DXpedition, special event, former, replacing, QSL manager) | wizard | Recorded as the operator's choice; TQSL's request carries no field for it | Done | #172 |
+| Request signed by a certificate already held | wizard | | Done | #172 |
+| Renew a certificate | Renew Callsign Certificate | With a new key | Done | #172 |
 
 ### 1.8 Upload to LoTW
 
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| Upload a signed log and report LoTW's answer | Sign and upload | Never in tests: nothing is uploaded to ARRL | 0.7.0 | #172 |
-| Always check LoTW's server certificate | a setting | Never turned off | 0.7.0 | #172 |
+| Upload a signed log and report LoTW's answer | Sign and upload | The request and LoTW's answer, as TQSL makes and reads them; the connection is the caller's (the command line's or Desktop's). Never in tests: nothing is uploaded to ARRL | Part done | #172 |
+| Always check LoTW's server certificate | a setting | A requirement on the connection's owner; never turned off | Part done | #172 |
 
 ## 2. Nice to have
 
@@ -134,7 +134,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Rebuild the record of signed QSOs from LoTW | Help: Synchronize | Needs upload first | Later |
 | Ask LoTW whether a certificate is still good (by serial) | | Calls ARRL; needs a decision first | Later |
 | Take a new ARRL configuration (`config.xml`) without a new release | automatic | A release with new tables works meanwhile | Later |
-| Wipe the record of signed QSOs | `-w` | Rarely needed | Later |
+| Wipe the record of signed QSOs | `-w` | Library: `Store::wipe_signed_qsos`; CLI integration remains | Part done |
 | Create a new ADIF file (QSO entry) | Create New ADIF file | A logger's job | Later |
 | Edit an ADIF file | Edit existing ADIF file | A logger's job | Later |
 

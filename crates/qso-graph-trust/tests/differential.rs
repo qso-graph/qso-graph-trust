@@ -14,9 +14,10 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use qso_graph_trust::certificate::Certificate;
+use qso_graph_trust::options::SigningOptions;
 use qso_graph_trust::qso::Qso;
 use qso_graph_trust::records::{self, Record};
-use qso_graph_trust::signed_log::{LogError, sign_log, tq8};
+use qso_graph_trust::signed_log::{LogError, sign_log, sign_log_with_options, tq8};
 use qso_graph_trust::signing::{KeyEntry, KeyError, tqsl_base64};
 use qso_graph_trust::station::StationLocation;
 
@@ -153,6 +154,18 @@ fn writes_the_log_tqsllib_wrote(case: &str, password: Option<&[u8]>) {
     let cert =
         Certificate::from_pem_or_der(&corpus(case, "tqsl/certs/user")).expect("the certificate");
     let ours = sign_log(&cert, &signer, &kansas(), &test_log(), SystemTime::now()).expect("signs");
+    assert_eq!(
+        ours,
+        sign_log_with_options(
+            &cert,
+            &signer,
+            &kansas(),
+            &test_log(),
+            SystemTime::now(),
+            &SigningOptions::default()
+        )
+        .expect("default options")
+    );
     // The .tq8 is the same log, gzipped: unzipped, it is this log exactly.
     let gz = tq8(&ours);
     let unzipped =
@@ -230,7 +243,7 @@ fn a_log_is_signed_only_for_the_certificates_station_and_dates() {
         sign(&kansas(), &early, SystemTime::now()),
         Err(LogError::QsoOutsideCertificate { index: 2 })
     );
-    // Codex review: a QSO naming another station was signed for this one.
+    // Found in review: a QSO naming another station was signed for this one.
     let other = [
         qsos[0].clone(),
         adif("20261101", "<STATION_CALLSIGN:7>QG1TEST"),
