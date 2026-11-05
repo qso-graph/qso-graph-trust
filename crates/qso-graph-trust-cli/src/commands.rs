@@ -24,7 +24,7 @@ use qso_graph_trust::store::{DuplicateChoice, Store, StoreError, StoredCertifica
 use qso_graph_trust::upload::{UploadOutcome, UploadRequest};
 use qso_graph_trust::{VERSION, records, tbk};
 
-use crate::cli::{Action, Env, Exit, Tone, Verify, read_file};
+use crate::cli::{Action, Env, Exit, Tone, UploadFailure, Verify, read_file};
 
 /// The words that start a command. Anything else is the TQSL-style command line loggers use.
 pub(crate) const COMMANDS: &[&str] = &["sign", "upload", "send", "import", "cert", "location"];
@@ -564,6 +564,9 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
                 qsos.push(qso);
             }
             Err(e) => {
+                if a.action == Some(Action::Abort) {
+                    return Err(abort(env, i + 1, &e.to_string()));
+                }
                 env.message(
                     Tone::Warning,
                     format_args!("QSO {} in the log: not signed: {e}", i + 1),
@@ -586,23 +589,29 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
     // A QSO the certificate or station cannot sign is named and left out, and the rest are signed.
     let now = env.now;
     let (signed, before, count) = loop {
-        let plan = if options == SigningOptions::default() {
-            store.prepare_signing(&qsos, station)
-        } else {
-            store.prepare_signing_with_options(&qsos, station, &options)
-        };
-        let plan = match plan {
+        // The options-aware path, whatever the options: it is the one that does TQSL's location
+        // checks (a log may fill a field the location leaves empty), as tqslconvert.cpp does.
+        let plan = match store.prepare_signing_with_options(&qsos, station, &options) {
             Ok(p) => p,
-            Err(StoreError::Log(LogError::Location { index, error })) => {
-                env.message(
-                    Tone::Warning,
-                    format_args!("QSO {} in the log: not signed: {error}", numbers[index]),
-                );
-                numbers.remove(index);
-                qsos.remove(index);
-                refused += 1;
-                continue;
-            }
+            Err(StoreError::Log(e)) => match refusal(&e) {
+                Some((index, reason)) => {
+                    if a.action == Some(Action::Abort) {
+                        return Err(abort(env, numbers[index], &reason));
+                    }
+                    env.message(
+                        Tone::Warning,
+                        format_args!("QSO {} in the log: not signed: {reason}", numbers[index]),
+                    );
+                    numbers.remove(index);
+                    qsos.remove(index);
+                    refused += 1;
+                    continue;
+                }
+                None => {
+                    env.message(Tone::Error, format_args!("the log: {e}"));
+                    return Err(Exit::TqslError);
+                }
+            },
             Err(e) => return Err(store_error(env, "the log", &e)),
         };
         let before = plan.signed_before().len();
@@ -659,25 +668,18 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
             .map_err(|e| store_error(env, &format!("{}'s key", cert.certificate.callsign()), &e))?;
         let (index, reason) = match result {
             Ok(signed) => break (signed, before, selection.qsos().len()),
-            Err(LogError::QsoOutsideCertificate { index }) => (
-                index,
-                "outside the QSO dates the certificate covers".to_string(),
-            ),
-            Err(LogError::QsoFromAnotherStation {
-                index,
-                field,
-                value,
-            }) => (
-                index,
-                format!("its {field} is {value:?}, not this station location's"),
-            ),
-            Err(LogError::Location { index, error }) => (index, error.to_string()),
-            Err(e) => {
-                env.message(Tone::Error, format_args!("the log: {e}"));
-                return Err(Exit::TqslError);
-            }
+            Err(e) => match refusal(&e) {
+                Some(r) => r,
+                None => {
+                    env.message(Tone::Error, format_args!("the log: {e}"));
+                    return Err(Exit::TqslError);
+                }
+            },
         };
         let at = picked[index];
+        if a.action == Some(Action::Abort) {
+            return Err(abort(env, numbers[at], &reason));
+        }
         env.message(
             Tone::Warning,
             format_args!("QSO {} in the log: not signed: {reason}", numbers[at]),
@@ -687,22 +689,40 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         refused += 1;
     };
 
-    if a.force
-        && output.exists()
-        && let Err(e) = std::fs::remove_file(&output)
-    {
-        env.message(Tone::Error, format_args!("{}: {e}", output.display()));
-        return Err(Exit::OutputError);
-    }
-    if output.exists() {
+    // write_to makes a new file and refuses the store's own names and folder. With --force, it
+    // makes a new one beside the output, which then replaces it: nothing is deleted first.
+    let replacing = output.exists();
+    if replacing && !a.force {
         env.message(
             Tone::Error,
             format_args!("{} is there already; --force replaces it", output.display()),
         );
         return Err(Exit::OutputError);
     }
-    if let Err(e) = signed.write_to(store, &output) {
+    let target = if replacing {
+        match crate::cli::new_partial(&output) {
+            Ok(p) => p,
+            Err(e) => {
+                env.message(Tone::Error, format_args!("{}: {e}", output.display()));
+                return Err(Exit::OutputError);
+            }
+        }
+    } else {
+        output.clone()
+    };
+    if let Err(e) = signed.write_to(store, &target) {
         env.message(Tone::Error, format_args!("{}: {e}", output.display()));
+        return Err(Exit::OutputError);
+    }
+    if replacing && let Err(e) = std::fs::rename(&target, &output) {
+        env.message(
+            Tone::Error,
+            format_args!(
+                "{}: {e}; the signed log is in {}, and its QSOs are recorded as signed",
+                output.display(),
+                target.display()
+            ),
+        );
         return Err(Exit::OutputError);
     }
     let again = a.again || a.action == Some(Action::All);
@@ -730,6 +750,35 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         path: output,
         suppressed: refused > 0 || out_of_range > 0 || (before > 0 && !again),
     })
+}
+
+/// A QSO the log or station cannot sign: its place in the list given, and why.
+fn refusal(e: &LogError) -> Option<(usize, String)> {
+    match e {
+        LogError::QsoOutsideCertificate { index } => Some((
+            *index,
+            "outside the QSO dates the certificate covers".to_string(),
+        )),
+        LogError::QsoFromAnotherStation {
+            index,
+            field,
+            value,
+        } => Some((
+            *index,
+            format!("its {field} is {value:?}, not this station location's"),
+        )),
+        LogError::Location { index, error } => Some((*index, error.to_string())),
+        _ => None,
+    }
+}
+
+/// `-a abort`: TQSL's batch mode stops at the first QSO it cannot sign and signs nothing.
+fn abort(env: &mut Env<'_>, number: usize, reason: &str) -> Exit {
+    env.message(
+        Tone::Error,
+        format_args!("QSO {number} in the log cannot be signed: {reason}; aborted, nothing signed"),
+    );
+    Exit::NoQsos
 }
 
 /// The certificate that signs for this call and entity: in force now, with its key; of several,
@@ -861,7 +910,20 @@ pub(crate) fn upload_file(path: &Path, env: &mut Env<'_>) -> Done {
     let _ = writeln!(env.out, "Uploading {} to LoTW…", path.display());
     let (status, body) = match (env.upload)(&request) {
         Ok(r) => r,
-        Err(e) => {
+        Err(UploadFailure {
+            message,
+            maybe_sent: true,
+        }) => {
+            env.message(
+                Tone::Error,
+                format_args!(
+                    "{message} after the log was sent, so whether LoTW has it is not known; \
+                     check your LoTW account before uploading it again"
+                ),
+            );
+            return Err(Exit::UnexpectedResponse);
+        }
+        Err(UploadFailure { message: e, .. }) => {
             env.message(Tone::Error, format_args!("LoTW could not be reached: {e}"));
             env.message(
                 Tone::Warning,
@@ -1834,12 +1896,27 @@ fn json_str(s: &str) -> String {
 
 /// A new file, refused if it is there unless `force`; written beside it, then renamed.
 fn write_new(path: &Path, bytes: &[u8], force: bool) -> std::io::Result<()> {
-    if !force && path.exists() {
-        return Err(std::io::Error::other(
-            "it is there already; --force replaces it",
-        ));
+    use std::io::Write as _;
+    if force {
+        return crate::cli::write_whole(path, bytes);
     }
-    crate::cli::write_whole(path, bytes)
+    // Made new or not at all: an existing file, or a link, is never written through.
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::AlreadyExists => {
+                std::io::Error::other("it is there already; --force replaces it")
+            }
+            _ => e,
+        })?;
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
+    if written.is_err() {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+    }
+    written
 }
 
 #[cfg(test)]

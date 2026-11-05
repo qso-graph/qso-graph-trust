@@ -72,7 +72,17 @@ impl Exit {
 }
 
 /// Sends an upload and returns LoTW's HTTP status and answer, or why none came.
-pub(crate) type Upload<'a> = dyn FnMut(&UploadRequest) -> Result<(u16, Vec<u8>), String> + 'a;
+pub(crate) type Upload<'a> =
+    dyn FnMut(&UploadRequest) -> Result<(u16, Vec<u8>), UploadFailure> + 'a;
+
+/// Why no answer came from LoTW, and whether the log may have reached it anyway.
+#[derive(Debug)]
+pub(crate) struct UploadFailure {
+    /// What went wrong, in words; never the request.
+    pub message: String,
+    /// False only when the log cannot have been sent: no connection, or a certificate refused.
+    pub maybe_sent: bool,
+}
 
 /// What the program gives `run`.
 pub(crate) struct Env<'a> {
@@ -457,6 +467,12 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
             },
             env,
         ))
+    } else if options.action.is_some_and(|a| a != Action::All) {
+        Some(syntax_error(
+            env,
+            "-a abort, compliant and ask need the record of QSOs signed before, which is in the \
+             store: qg-trust import the backup, then leave out -i",
+        ))
     } else if options.verify.is_some_and(|v| v != Verify::Report) {
         Some(syntax_error(
             env,
@@ -810,15 +826,15 @@ pub(crate) fn read_file(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
 }
 
 /// `bytes` written to `path` whole or not at all: to a file beside it, then renamed over it.
+/// The temporary file is new, made with a name of its own (never an existing file or a link
+/// followed), so nothing but `path` is ever replaced.
 pub(crate) fn write_whole(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let name = path
-        .file_name()
-        .ok_or_else(|| io::Error::other("not a file name"))?;
-    let mut partial = name.to_os_string();
-    partial.push(".partial");
-    let partial = path.with_file_name(partial);
+    let partial = new_partial(path)?;
     let written = (|| {
-        let mut file = std::fs::File::create(&partial)?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&partial)?;
         file.write_all(bytes)?;
         file.sync_all()
     })();
@@ -829,6 +845,23 @@ pub(crate) fn write_whole(path: &Path, bytes: &[u8]) -> io::Result<()> {
             Err(e)
         }
     }
+}
+
+/// A name beside `path` for a temporary file, `.NAME.<pid>-<n>.partial`, not yet taken.
+pub(crate) fn new_partial(path: &Path) -> io::Result<PathBuf> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::other("not a file name"))?;
+    let mut partial = std::ffi::OsString::from(".");
+    partial.push(name);
+    partial.push(format!(
+        ".{}-{}.partial",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ));
+    Ok(path.with_file_name(partial))
 }
 
 #[cfg(test)]

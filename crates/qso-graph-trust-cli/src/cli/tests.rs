@@ -97,7 +97,7 @@ fn run_os_with_colors(
             panic!("the TQSL-style command line does not open the store")
         };
     let mut no_upload =
-        |_: &qso_graph_trust::upload::UploadRequest| -> Result<(u16, Vec<u8>), String> {
+        |_: &qso_graph_trust::upload::UploadRequest| -> Result<(u16, Vec<u8>), super::UploadFailure> {
             panic!("the TQSL-style command line does not upload")
         };
     let code = run(

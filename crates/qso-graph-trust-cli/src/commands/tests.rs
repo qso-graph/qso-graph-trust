@@ -18,7 +18,7 @@ use qso_graph_trust::upload::UploadRequest;
 use qso_graph_trust::{gzip, tbk};
 use zeroize::Zeroizing;
 
-use crate::cli::{Env, run};
+use crate::cli::{Env, UploadFailure, run};
 
 fn set(file: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -53,12 +53,15 @@ enum Lotw {
     Refuses,
     Unreachable,
     Garbled,
+    /// The connection fails after the log has gone.
+    Silent,
 }
 
 /// A ham's computer: a store in memory that lasts across commands, the test root, a time when
 /// every test certificate is in force, and a stand-in for LoTW that records what it was sent.
 struct Ham {
     store: Store,
+    dir: PathBuf,
     trust: Trust,
     now: SystemTime,
     lotw: Lotw,
@@ -86,6 +89,7 @@ impl Ham {
         let now = w4w.certificate.as_ref().expect("W4W's").validity().0 + Duration::from_secs(3600);
         Self {
             store,
+            dir,
             trust,
             now,
             lotw: Lotw::Accepts,
@@ -108,7 +112,7 @@ impl Ham {
             Err(io::Error::other("no password was expected"))
         };
         let store = || -> Result<&Store, StoreError> { Ok(&self.store) };
-        let mut upload = |request: &UploadRequest| -> Result<(u16, Vec<u8>), String> {
+        let mut upload = |request: &UploadRequest| -> Result<(u16, Vec<u8>), UploadFailure> {
             assert_eq!(request.url(), "https://lotw.arrl.org/lotw/upload");
             self.sent.borrow_mut().push(request.body().to_vec());
             match self.lotw {
@@ -121,7 +125,14 @@ impl Ham {
                     b"<!-- .UPL.  rejected -->\n<!-- .UPLMESSAGE. bad signature -->".to_vec(),
                 )),
                 Lotw::Garbled => Ok((502, b"<html>Bad Gateway</html>".to_vec())),
-                Lotw::Unreachable => Err("the connection timed out".into()),
+                Lotw::Unreachable => Err(UploadFailure {
+                    message: "the connection timed out".into(),
+                    maybe_sent: false,
+                }),
+                Lotw::Silent => Err(UploadFailure {
+                    message: "the connection was reset".into(),
+                    maybe_sent: true,
+                }),
             }
         };
         let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -742,4 +753,213 @@ fn a_logger_chooses_what_the_logs_own_location_details_do_with_f() {
         "{}",
         bad.err
     );
+}
+
+#[test]
+fn force_never_touches_the_stores_own_files() {
+    let ham = Ham::imported();
+    let store_xml = ham.dir.join("store.xml");
+    let before = std::fs::read(&store_xml).expect("the store file");
+    for args in [
+        vec![
+            "sign",
+            path(&set("adif/W4W-EVENT.adi")),
+            "-l",
+            "W4W-EVENT",
+            "--again",
+            "--force",
+            "-o",
+            path(&store_xml),
+        ],
+        vec![
+            "-x",
+            "-a",
+            "all",
+            "-l",
+            "W4W-EVENT",
+            "-o",
+            path(&store_xml),
+            path(&set("adif/W4W-EVENT.adi")),
+        ],
+    ] {
+        let ran = ham.run(&args);
+        assert_eq!(ran.code, 7, "{args:?}: {}", ran.err);
+        assert_eq!(
+            std::fs::read(&store_xml).expect("still there"),
+            before,
+            "{args:?}"
+        );
+        assert_eq!(ham.store.certificates().expect("certificates").len(), 3);
+    }
+}
+
+#[test]
+fn abort_signs_nothing_when_any_qso_cannot_be_signed() {
+    let ham = Ham::unsigned();
+    let dir = scratch();
+    let adi = dir.join("bad.adi");
+    let log = String::from_utf8(read("adif/W4W-EVENT.adi")).expect("text");
+    // One QSO with no mode: the rest are fine.
+    let bad = log.replacen("<MODE:2>CW ", "", 1);
+    assert_ne!(bad, log);
+    std::fs::write(&adi, bad).expect("write");
+    let ran = ham.run(&["-x", "-u", "-a", "abort", "-l", "W4W-EVENT", path(&adi)]);
+    assert_eq!(ran.code, 8, "{}", ran.err);
+    assert!(ran.err.contains("aborted, nothing signed"), "{}", ran.err);
+    assert!(!dir.join("bad.tq8").exists());
+    assert!(ham.sent.borrow().is_empty());
+    assert!(ham.store.signed_qsos().expect("record").is_empty());
+    // compliant signs the others and says some were left out.
+    let ran = ham.run(&["-x", "-a", "compliant", "-l", "W4W-EVENT", path(&adi)]);
+    assert_eq!(ran.code, 9, "{}", ran.err);
+}
+
+#[test]
+fn an_action_that_needs_the_signed_record_is_refused_with_i() {
+    let ham = Ham::new();
+    for action in ["abort", "compliant", "ask"] {
+        let ran = ham.run(&[
+            "-x",
+            "-a",
+            action,
+            "-i",
+            path(&set("standard.tbk")),
+            "-l",
+            "W4W-EVENT",
+            path(&set("adif/W4W-EVENT.adi")),
+        ]);
+        assert_eq!(ran.code, 10, "{action}: {}", ran.err);
+        assert!(ran.err.contains("leave out -i"), "{}", ran.err);
+        assert!(ham.sent.borrow().is_empty());
+    }
+}
+
+#[test]
+fn a_failure_after_the_log_was_sent_is_not_a_safe_retry() {
+    let mut ham = Ham::imported();
+    let dir = scratch();
+    let adi = dir.join("event.adi");
+    std::fs::copy(set("adif/W4W-EVENT.adi"), &adi).expect("copy");
+    ham.lotw = Lotw::Silent;
+    let ran = ham.run(&["send", path(&adi), "-l", "W4W-EVENT", "--again"]);
+    assert_eq!(ran.code, 3, "{}", ran.err);
+    assert!(
+        ran.err.contains("whether LoTW has it is not known"),
+        "{}",
+        ran.err
+    );
+    assert!(!ran.err.contains("tries again"), "{}", ran.err);
+}
+
+#[test]
+fn report_lets_the_log_fill_a_field_the_location_leaves_empty() {
+    let ham = Ham::unsigned();
+    let event = ham
+        .store
+        .locations()
+        .expect("locations")
+        .into_iter()
+        .find(|l| l.name == "W4W-EVENT")
+        .expect("W4W-EVENT");
+    let (field, adif) = [("CQZ", "MY_CQ_ZONE"), ("ITUZ", "MY_ITU_ZONE")]
+        .into_iter()
+        .find(|(f, _)| event.station.get(f).is_some())
+        .expect("the location gives a zone");
+    let value = event.station.get(field).expect("zone").to_string();
+    let fields: Vec<(&str, &str)> = event
+        .station
+        .fields()
+        .filter(|(k, _)| *k != field)
+        .collect();
+    let without = qso_graph_trust::station::StationLocation::new(&fields).expect("a location");
+    ham.store.add_location("NO-ZONE", &without).expect("added");
+
+    let dir = scratch();
+    let adi = dir.join("zone.adi");
+    let log = String::from_utf8(read("adif/W4W-EVENT.adi")).expect("text");
+    std::fs::write(
+        &adi,
+        log.replace("<EOR>", &format!("<{adif}:{}>{value} <EOR>", value.len())),
+    )
+    .expect("write");
+    for args in [
+        vec![
+            "-x",
+            "-a",
+            "all",
+            "-f",
+            "report",
+            "-l",
+            "NO-ZONE",
+            path(&adi),
+        ],
+        vec!["-x", "-a", "all", "-l", "NO-ZONE", path(&adi)],
+    ] {
+        let ran = ham.run(&args);
+        assert_eq!(ran.code, 0, "{args:?}: {}", ran.err);
+    }
+}
+
+#[test]
+fn a_qso_from_another_station_is_left_out_whatever_the_options() {
+    let ham = Ham::unsigned();
+    let dir = scratch();
+    let adi = dir.join("other.adi");
+    let log = String::from_utf8(read("adif/W4W-EVENT.adi")).expect("text");
+    let other = log.replacen("<EOR>", "<STATION_CALLSIGN:6>N0CALL <EOR>", 1);
+    std::fs::write(&adi, other).expect("write");
+    for verify in ["update", "report", "ignore"] {
+        let ran = ham.run(&[
+            "-x",
+            "-a",
+            "all",
+            "-f",
+            verify,
+            "-l",
+            "W4W-EVENT",
+            path(&adi),
+        ]);
+        if verify == "ignore" {
+            // TQSL's ignore does not compare STATION_CALLSIGN.
+            assert_eq!(ran.code, 0, "{verify}: {}", ran.err);
+        } else {
+            assert_eq!(ran.code, 9, "{verify}: {}", ran.err);
+            assert!(
+                ran.err.contains("STATION_CALLSIGN"),
+                "{verify}: {}",
+                ran.err
+            );
+        }
+    }
+}
+
+#[test]
+fn a_request_never_writes_through_another_file() {
+    let ham = Ham::new();
+    let dir = scratch();
+    let tq5 = dir.join("N0CALL.tq5");
+    let bystander = dir.join("N0CALL.tq5.partial");
+    std::fs::write(&bystander, b"someone else's file").expect("write");
+    let mut args = REQUEST.to_vec();
+    args.push(path(&tq5));
+    let ran = ham.run(&args);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        std::fs::read(&bystander).expect("kept"),
+        b"someone else's file"
+    );
+    #[cfg(unix)]
+    {
+        // A link where the request goes is refused, not followed.
+        let link = dir.join("link.tq5");
+        std::os::unix::fs::symlink(&bystander, &link).expect("link");
+        let mut args = REQUEST.to_vec();
+        args.push(path(&link));
+        let ran = ham.run(&args);
+        assert_eq!(ran.code, 7, "{}", ran.err);
+        assert_eq!(
+            std::fs::read(&bystander).expect("kept"),
+            b"someone else's file"
+        );
+    }
 }
