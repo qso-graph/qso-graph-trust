@@ -44,6 +44,9 @@ versions follow [Semantic Versioning](https://semver.org/).
   updates and recovery reporting; credential-store round trips are tested on Windows, Linux and
   macOS with a test-only service name.
 - CLI argument parsing with clap, shell completions and styled output.
+- `.deb` and `.rpm` packages of `qg-trust` for Linux x86_64 and arm64, on each release beside the
+  archives, with shell completions; QSO Graph's apt and dnf repositories at packages.qso-graph.net
+  sign and serve them.
 - Release packaging for Windows x86_64, Linux x86_64 and arm64, and macOS Apple silicon. PR CI builds
   all four unsigned archives; the release workflow signs Windows and macOS programs, notarizes
   macOS programs and attests the archives before publishing.
