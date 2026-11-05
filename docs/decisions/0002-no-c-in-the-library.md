@@ -115,7 +115,9 @@ Decided by KI7MT, 2026-11-03, after a review measured that phase 2's first depen
 Still forbidden: C, C++ or assembly source a crate compiles or ships, a crate whose job is
 building native code, and a native link to anything but the operating system.
 
-## Proposed 2026-11-04, for KI7MT: OS credential store shared with Desktop
+## OS credential store shared with Desktop
+
+Decided by KI7MT, 2026-11-04.
 
 Use Desktop's `keyring = "=4.2.0"` with its default backends: Keychain on macOS,
 Credential Manager on Windows and Secret Service on Linux. `Os` selects the fixed test service
