@@ -52,7 +52,23 @@ fn only_a_signed_log_is_one_to_upload() {
         .expect(f)
     };
     let tq7 = corpus("signed/W4W-EVENT.tq7");
-    assert_eq!(check_signed_log(&crate::signed_log::tq8(&tq7)), Ok(()));
+    let tq8 = crate::signed_log::tq8(&tq7);
+    assert_eq!(check_signed_log(&tq8), Ok(tq8.clone()));
+    // Found in review: a key in gzip's comment field, which decompressing skips. What is returned
+    // to upload is the checked log alone, gzipped afresh.
+    let mut commented = tq8[..10].to_vec();
+    commented[3] |= 0x10; // FCOMMENT
+    commented.extend_from_slice(b"-----BEGIN PRIVATE KEY-----MIIC-----END PRIVATE KEY-----\0");
+    commented.extend_from_slice(&tq8[10..]);
+    let sent = check_signed_log(&commented).expect("the log itself is a signed log");
+    assert_eq!(sent, tq8);
+    assert!(!sent.windows(11).any(|w| w == b"PRIVATE KEY"));
+    // And data after the gzip stream.
+    let mut trailing = tq8.clone();
+    trailing.extend_from_slice(b"-----BEGIN PRIVATE KEY-----");
+    if let Ok(sent) = check_signed_log(&trailing) {
+        assert_eq!(sent, tq8);
+    }
     // A TQSL backup is gzip too, and holds private keys.
     assert_eq!(
         check_signed_log(&corpus("standard.tbk")),
@@ -138,5 +154,5 @@ fn only_a_signed_log_is_one_to_upload() {
         big.push_str(contact);
         big.push('\n');
     }
-    assert_eq!(planted(big), Ok(()));
+    assert!(planted(big).is_ok());
 }

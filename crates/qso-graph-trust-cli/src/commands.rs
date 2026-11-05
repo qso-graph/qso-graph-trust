@@ -997,14 +997,15 @@ fn upload_file(path: &Path, env: &mut Env<'_>) -> Done {
 
 /// Uploads a signed log, named `what` in messages, after checking it is one.
 pub(crate) fn upload_bytes(bytes: &[u8], what: &str, env: &mut Env<'_>) -> Done {
-    if qso_graph_trust::upload::check_signed_log(bytes).is_err() {
+    // What is sent is what was checked, gzipped afresh: never the bytes as given.
+    let Ok(bytes) = qso_graph_trust::upload::check_signed_log(bytes) else {
         env.message(
             Tone::Error,
             format_args!("{what} is not a signed log (.tq8); qg-trust sign makes one"),
         );
         return Err(Exit::InputError);
-    }
-    let request = match UploadRequest::try_new(bytes) {
+    };
+    let request = match UploadRequest::try_new(&bytes) {
         Ok(r) => r,
         Err(_) => {
             env.message(

@@ -53,9 +53,11 @@ pub const MAX_SIGNED_LOG_BYTES: usize = 64 * 1024 * 1024;
 /// only, each of only the fields its kind has, with nothing between them but white space; at least
 /// one QSO; every certificate an X.509 certificate; every other value printable text within its
 /// bound and every signature the size a LoTW key makes. A TQSL backup (gzip too, holding private
-/// keys) or any other file is refused. [`UploadRequest`] does not check its input; call this first.
+/// keys) or any other file is refused. [`UploadRequest`] does not check its input; call this first,
+/// and upload what it returns: the checked log, gzipped afresh, so nothing the check did not read
+/// (gzip's name, comment and extra fields, or data after the stream) can be sent with it.
 /// Bounded by [`MAX_SIGNED_LOG_BYTES`] only, so whatever QG Trust signs passes.
-pub fn check_signed_log(tq8: &[u8]) -> Result<(), NotASignedLog> {
+pub fn check_signed_log(tq8: &[u8]) -> Result<Vec<u8>, NotASignedLog> {
     let tq7 = crate::gzip::decompress(tq8, MAX_SIGNED_LOG_BYTES).map_err(|_| NotASignedLog)?;
     let mut fields = Fields { text: &tq7, at: 0 };
     match fields.next()? {
@@ -129,7 +131,7 @@ pub fn check_signed_log(tq8: &[u8]) -> Result<(), NotASignedLog> {
     if record.is_some() || contacts == 0 {
         return Err(NotASignedLog);
     }
-    Ok(())
+    Ok(crate::signed_log::tq8(&tq7))
 }
 
 /// One record's fields, by name, in the order given.
