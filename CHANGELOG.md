@@ -5,26 +5,56 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Signing and publication require KI7MT's manually started Release workflow on main and its exact
+  commit. PR and ordinary binary builds stay unsigned. Release defaults to a dry run that verifies
+  signing and notarization without publishing. Signing inputs are passed explicitly to the binary
+  workflow; both publication stages use the main-only crates-io environment.
+
 ## [0.1.0] - 2026-11-05
 
 ### Added
 
+- `qg-trust` works from QG Trust's own store, with keys in the OS credential store:
+  `qg-trust import` brings certificates, keys, station locations and TQSL's record of signed QSOs
+  from a TQSL backup (`.tbk`), and certificates from ARRL's `.tq6` or a `.p12`; `qg-trust sign`
+  signs from the store, leaving out QSOs signed before unless `--again` is given; `qg-trust send`
+  signs and uploads; `qg-trust upload` uploads a `.tq8`; `qg-trust cert list|request|renew|delete|abandon`
+  and `qg-trust location list|show|add|edit|delete|fields` manage them. `--json` on the lists, an
+  example in every command's help, nothing replaced without `--force`. TQSL's signing settings are
+  options of `sign` and `send`, and `import` names those a backup used.
+- Uploads to LoTW over HTTPS, the certificate and host name always verified against Mozilla's roots
+  built in (webpki-roots), with rustls on AWS-LC; no redirect followed, a time limit, LoTW's answer
+  read within the library's bound and reported with TQSL's codes (2, 3, 11).
+- For loggers: without `-i`, the TQSL-style options sign from the store; `-u` uploads, `-a`
+  (`abort`, `compliant`, `all`, `ask`) handles QSOs signed before as TQSL does in batch, and `-f`
+  (`ignore`, `report`, `update`) the log's own location details. With no `-a`, QSOs signed before
+  stop the run with TQSL's code 14, since `qg-trust` cannot ask. Exit codes 0 to 4, 6 to 11, 14 and 15.
+- The library names DXCC entities and the location fields each takes (`station::dxcc_name`,
+  `station::fields_for`).
+- The library checks a file is a signed log before it is uploaded (`upload::check_signed_log`):
+  a TQSL backup, which is gzip too and holds private keys, is refused.
+- A new-only signed log is refused at writing if another signing recorded one of its QSOs after
+  the plan was made (`StoreError::SignedMeanwhile`), so two runs never both sign a QSO as new.
+- A key imported for a certificate already in the store without one (from a `.tq6` alone) is
+  attached to it, from a `.tbk` or a `.p12`, instead of being refused as already there.
+- Upload sends the checked signed log, gzipped afresh: nothing the check did not read goes with it.
 - Versioned library store with keys in the OS credential store, file locking, atomic metadata
   updates and recovery reporting; credential-store round trips are tested on Windows, Linux and
   macOS with a test-only service name.
-- CLI argument parsing with clap, shell completions and styled output. The command still signs
-  from a supplied backup; the library's store and new workflows need CLI and Desktop integration.
+- CLI argument parsing with clap, shell completions and styled output.
 - Release packaging for Windows x86_64, Linux x86_64 and arm64, and macOS Apple silicon. PR CI builds
   all four unsigned archives; the release workflow signs Windows and macOS programs, notarizes
   macOS programs and attests the archives before publishing.
 
 - Library upload request construction and bounded LoTW response parsing, with TQSL's multipart
   field, filename format and result codes. The endpoint is fixed; callers supply verified TLS.
-  The library opens no connection. CLI and Desktop integration remains.
+  The library opens no connection; `qg-trust` makes the connection.
 - Library signed-QSO records with exact TQSL keys, backup merging, duplicate inspection and the
   new-only/sign-again/cancel choices. Selected QSOs are recorded after their `.tq8` is written;
   encrypted store exports carry the record. Store XML version 2 reads version 1 and keeps up to
-  100,000 records within the 32 MiB file limit. CLI and Desktop integration remains.
+  100,000 records within the 32 MiB file limit.
 - Library `.tq6` import with chain validation and atomic pending-request attachment or keyless
   storage; MAC-authenticated `.p12` import with PBES2/AES and PKCS#12 SHA-1/3DES, bounded parsing and
   derivation work, and private credential handoff. RC2-40 is explicitly refused, including TQSL's
@@ -36,7 +66,6 @@ versions follow [Semantic Versioning](https://semver.org/).
   CSR subject, attributes, signatures and field order; DXCC, date and bounded text validation.
   New RSA-1024 keys pass through an opaque request into the library-owned store, with pending
   metadata in store.xml, response matching and abandonment. Requests identify QG Trust.
-  Desktop and CLI integration remains.
 - Library-side encrypted LoTW store exports: a generated 20-character password, AES-256-GCM and
   PBKDF2-HMAC-SHA-256 at 600,000 iterations. Restore authenticates and checks every certificate, key
   and station location before replacing the store; private key bytes stay inside the library.

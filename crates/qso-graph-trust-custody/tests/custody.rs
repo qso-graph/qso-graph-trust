@@ -34,6 +34,15 @@ use pkcs8::der::Decode;
 use rsa::traits::{PrivateKeyParts, PublicKeyParts};
 use rsa::{BigUint, RsaPrivateKey, pkcs8::DecodePrivateKey};
 
+/// The test set's `.p12` password, from `tests/corpus/pki/p12-password`.
+fn p12_password() -> Vec<u8> {
+    std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/corpus/pki/p12-password"),
+    )
+    .expect("the test .p12 password")
+}
+
 fn corpus(case: &str, file: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/corpus/tqsl")
@@ -228,7 +237,7 @@ fn import_needles(case: &str, secrets_file: &Path) -> Vec<(String, Vec<u8>)> {
             // Search that recoverable representation too, including the last key bytes and pad.
             let info = pkcs8::EncryptedPrivateKeyInfo::from_der(&bytes).expect("key envelope");
             let plain = info
-                .decrypt(b"qgt-test")
+                .decrypt(p12_password())
                 .expect("independent test decryption");
             let cipher = info.encrypted_data;
             let padding = 16 - plain.as_bytes().len() % 16;
@@ -260,7 +269,7 @@ fn found_with_cpu(program: &str, case: &str, mode: &str, disable_aesni: bool) ->
     let folder = SecretsFolder::new();
     let secrets_file = folder.0.join("export-secrets");
     let import_password_file = folder.0.join("import-password");
-    std::fs::write(&import_password_file, b"qgt-test").expect("test import password");
+    std::fs::write(&import_password_file, p12_password()).expect("test import password");
     let mut command = Command::new(program);
     // aws-lc-sys 0.45.0: cpucap/internal.h CRYPTO_is_AESNI_capable tests word 1 bit 25.
     // cpu_intel.c interprets '~' as AND-NOT on the first 64-bit pair: bit 32+25 = 57.
@@ -327,7 +336,7 @@ fn found_with_cpu(program: &str, case: &str, mode: &str, disable_aesni: bool) ->
     assert!(child.wait().expect("exits").success());
 
     let mut needles = needles(case);
-    needles.push(("PKCS#12 password".into(), b"qgt-test".to_vec()));
+    needles.push(("PKCS#12 password".into(), p12_password()));
     needles.extend(export_needles);
     needles.extend(import_needles);
     if std::env::var_os("QGT_CUSTODY_WHERE").is_some() {

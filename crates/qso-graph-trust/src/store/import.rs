@@ -3,7 +3,10 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{MAX_KEY_LEN, Store, StoreError, StoredCertificate, check_certificate, format, keys};
+use super::{
+    MAX_KEY_LEN, Store, StoreError, StoredCertificate, check_certificate, format, keyless_twin,
+    keys,
+};
 use crate::certificate::Trust;
 use crate::import::{self, ImportError, ImportedCertificate};
 use crate::pkcs12;
@@ -50,9 +53,35 @@ impl Store {
         let certificates = import::tq6(bytes, trust)?;
         let _lock = self.lock()?;
         let mut data = self.read()?;
-        let mut report = Vec::new();
+        let mut report: Vec<ImportedCertificate> = Vec::new();
         for certificate in certificates {
-            check_certificate(&data, &certificate)?;
+            // One already here is reported and the rest of the file still imported, unless it has
+            // no key and its pending request is here: then it takes the request's key below.
+            let pending_for = |data: &super::Data| {
+                data.pending_requests.iter().any(|r| {
+                    r.public_key_der == certificate.public_key_der()
+                        && r.callsign == certificate.callsign()
+                        && r.dxcc == certificate.dxcc()
+                })
+            };
+            if let Some(existing) = data
+                .certificates
+                .iter()
+                .find(|c| c.certificate.der() == certificate.der())
+                && (existing.key_name.is_some() || !pending_for(&data))
+            {
+                report.push(ImportedCertificate {
+                    id: existing.id.clone(),
+                    has_key: existing.key_name.is_some(),
+                    attached_request: false,
+                    already_here: true,
+                });
+                continue;
+            }
+            let keyless = keyless_twin(&data, &certificate);
+            if keyless.is_none() {
+                check_certificate(&data, &certificate)?;
+            }
             let pending = data.pending_requests.iter().position(|r| {
                 r.public_key_der == certificate.public_key_der()
                     && r.callsign == certificate.callsign()
@@ -74,6 +103,17 @@ impl Store {
             } else {
                 None
             };
+            if let Some(i) = keyless {
+                // Here already without a key, and its request's key is here: attach it.
+                data.certificates[i].key_name = key_name;
+                report.push(ImportedCertificate {
+                    id: data.certificates[i].id.clone(),
+                    has_key: true,
+                    attached_request: true,
+                    already_here: false,
+                });
+                continue;
+            }
             let id = keys::new_name("cert:")?;
             if data.certificates.iter().any(|c| c.id == id) {
                 return Err(StoreError::AlreadyExists.into());
@@ -82,6 +122,7 @@ impl Store {
                 id: id.clone(),
                 has_key: key_name.is_some(),
                 attached_request: pending.is_some(),
+                already_here: false,
             });
             data.certificates.push(StoredCertificate {
                 id,
@@ -108,6 +149,23 @@ impl Store {
         let loaded = pkcs12::read(bytes, password, trust)?;
         let _lock = self.lock()?;
         let mut data = self.read()?;
+        // The same certificate already here without its key takes this one.
+        if let Some(i) = keyless_twin(&data, &loaded.certificate) {
+            let name = keys::new_name("key:")?;
+            if self.keys.exists(&name).map_err(StoreError::from)? {
+                return Err(StoreError::AlreadyExists.into());
+            }
+            data.certificates[i].key_name = Some(name.clone());
+            let id = data.certificates[i].id.clone();
+            let xml = format::write(&data)?;
+            self.put_and_replace(&name, &loaded.key, &xml)?;
+            return Ok(ImportedCertificate {
+                id,
+                has_key: true,
+                attached_request: false,
+                already_here: false,
+            });
+        }
         check_certificate(&data, &loaded.certificate)?;
         let name = keys::new_name("key:")?;
         let id = keys::new_name("cert:")?;
@@ -127,6 +185,7 @@ impl Store {
             id,
             has_key: true,
             attached_request: false,
+            already_here: false,
         })
     }
 

@@ -30,6 +30,11 @@ on:
         description: 'The version to publish, such as 0.1.0-beta.1 or 0.1.0: main must already say it'
         required: true
         type: string
+      dry_run:
+        description: 'Build, sign and verify only; uncheck to publish the release'
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -65,12 +70,17 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           fail() { echo "::error::$1"; exit 1; }
-          [ "$REF" = refs/heads/main ] || fail "Release runs from main, not ${REF}."
+          python3 -I scripts/release_check.py source "$REF" "$EVENT" "$(git rev-parse HEAD)" "$WORKFLOW_SHA" "$WORKFLOW_REF" "$ACTOR" "$TRIGGERING_ACTOR"
           python3 -I scripts/release_check.py version "$VERSION"
           said=$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[] | select(.name == "qso-graph-trust") | .version')
           [ "$said" = "$VERSION" ] || fail "main says ${said}, not ${VERSION}."
@@ -103,9 +113,21 @@ jobs:
     with:
       sha: ${{ needs.check.outputs.sha }}
       sign: true
+    # Pass only signing inputs; publication credentials do not reach the binary builds.
+    secrets:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
   publish:
     name: publish
+    if: ${{ !inputs.dry_run }}
     needs: [check, binaries]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -182,6 +204,7 @@ jobs:
   # The GitHub Release, on the tag just cut: each platform's program, and SHA256SUMS.txt.
   github-release:
     name: GitHub Release
+    environment: crates-io
     needs: [check, publish]
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -5,7 +5,8 @@
 #
 # release.yml calls it with sign: true, from main, before anything is published, so a release whose
 # binaries do not build or sign publishes nothing. Run by hand (Actions -> Binaries -> Run workflow)
-# on any branch, it builds the same programs unsigned and publishes nothing, to try a change.
+# on any branch, it builds unsigned. Signing is exclusive to KI7MT's main Release workflow,
+# including its dry-run mode, which validates signing without publication.
 #
 # Signed in KI7MT's name, as QSO Graph Desktop's installers are: macOS with his Apple Developer ID
 # (Greg Beam) and notarized by Apple, Windows as Gregory Beam through Azure Artifact Signing. The
@@ -25,6 +26,25 @@ on:
         description: 'Sign, notarize and attest (a release); otherwise an unsigned trial build'
         required: true
         type: boolean
+    secrets:
+      CSC_LINK:
+        required: false
+      CSC_KEY_PASSWORD:
+        required: false
+      APPLE_API_KEY_P8:
+        required: false
+      APPLE_API_KEY_ID:
+        required: false
+      APPLE_API_ISSUER:
+        required: false
+      APPLE_TEAM_ID:
+        required: false
+      AZURE_CLIENT_ID:
+        required: false
+      AZURE_TENANT_ID:
+        required: false
+      AZURE_SUBSCRIPTION_ID:
+        required: false
   workflow_dispatch:
 
 permissions:
@@ -34,8 +54,31 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  source:
+    name: signing source
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Validate with the workflow run's code, before any signing environment is entered.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Signing requires KI7MT's main Release and its exact commit
+        if: inputs.sign
+        env:
+          REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+          BUILD_SHA: ${{ inputs.sha || github.sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: python3 -I scripts/release_check.py source "$REF" "$EVENT" "$BUILD_SHA" "$WORKFLOW_SHA" "$WORKFLOW_REF" "$ACTOR" "$TRIGGERING_ACTOR"
+
   build:
     name: qg-trust (${{ matrix.name }})
+    needs: [source]
     strategy:
       fail-fast: false
       matrix:

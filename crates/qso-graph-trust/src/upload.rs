@@ -20,6 +20,8 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use qso_graph_trust_awslc::{Error, random};
+
+use crate::lotw;
 use x509_cert::der::DateTime;
 
 /// LoTW's HTTPS upload endpoint, TQSL 2.8.7's `DEFAULT_UPL_URL` (`apps/tqsl_prefs.h:68`).
@@ -30,6 +32,234 @@ pub const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
 /// Maximum returned LoTW message size in UTF-8 bytes, after removing control characters.
 pub const MAX_MESSAGE_BYTES: usize = 4096;
+
+/// Why bytes are not a signed log to upload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NotASignedLog;
+
+impl std::fmt::Display for NotASignedLog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("not a signed log (.tq8)")
+    }
+}
+
+impl std::error::Error for NotASignedLog {}
+
+/// The largest signed log, decompressed, that [`check_signed_log`] reads.
+pub const MAX_SIGNED_LOG_BYTES: usize = 64 * 1024 * 1024;
+
+/// Check, before anything is sent, that `tq8` is a signed log and nothing else, as QG Trust and
+/// TQSL write one: gzip of a `TQSL_IDENT` line, then `tCERT`, `tSTATION` and `tCONTACT` records
+/// only, each of only the fields its kind has, with nothing between them but white space; at least
+/// one QSO; every certificate an X.509 certificate; every other value printable text within its
+/// bound and every signature the size a LoTW key makes. A TQSL backup (gzip too, holding private
+/// keys) or any other file is refused. [`UploadRequest`] does not check its input; call this first,
+/// and upload what it returns: the checked log, gzipped afresh, so nothing the check did not read
+/// (gzip's name, comment and extra fields, or data after the stream) can be sent with it.
+/// Bounded by [`MAX_SIGNED_LOG_BYTES`] only, so whatever QG Trust signs passes.
+pub fn check_signed_log(tq8: &[u8]) -> Result<Vec<u8>, NotASignedLog> {
+    let tq7 = crate::gzip::decompress(tq8, MAX_SIGNED_LOG_BYTES).map_err(|_| NotASignedLog)?;
+    let mut fields = Fields { text: &tq7, at: 0 };
+    match fields.next()? {
+        Some(Token::Field("TQSL_IDENT", v)) if printable(v, 256) => {}
+        _ => return Err(NotASignedLog),
+    }
+    let (mut certs, mut contacts) = (0usize, 0usize);
+    let mut stations: std::collections::HashMap<&[u8], Record<'_>> = Default::default();
+    let mut record: Option<(Kind, Record<'_>)> = None;
+    while let Some(token) = fields.next()? {
+        match (&mut record, token) {
+            (None, Token::Field(name, value)) if name.eq_ignore_ascii_case("Rec_Type") => {
+                let kind = match value {
+                    b"tCERT" => Kind::Cert,
+                    b"tSTATION" => Kind::Station,
+                    b"tCONTACT" => Kind::Contact,
+                    _ => return Err(NotASignedLog),
+                };
+                record = Some((kind, Vec::new()));
+            }
+            (Some((kind, got)), Token::Field(name, value)) => {
+                if !allowed(*kind, name, value) || got.iter().any(|(n, _)| *n == name) {
+                    return Err(NotASignedLog);
+                }
+                got.push((name, value));
+            }
+            (Some(_), Token::End) => {
+                let Some((kind, got)) = record.take() else {
+                    return Err(NotASignedLog);
+                };
+                let get = |n: &str| got.iter().find(|(f, _)| *f == n).map(|(_, v)| *v);
+                match kind {
+                    Kind::Cert => {
+                        get("CERTIFICATE").ok_or(NotASignedLog)?;
+                        certs += 1;
+                    }
+                    Kind::Station => {
+                        let uid = get("STATION_UID").ok_or(NotASignedLog)?;
+                        stations.insert(uid, got);
+                    }
+                    Kind::Contact => {
+                        // Before any QSO, a certificate that signs it.
+                        if certs == 0 || get(lotw::SIGNATURE_FIELD).is_none() {
+                            return Err(NotASignedLog);
+                        }
+                        let station = get("STATION_UID")
+                            .and_then(|uid| stations.get(uid))
+                            .ok_or(NotASignedLog)?;
+                        // What was signed is exactly this QSO's and its station's fields, in
+                        // ARRL's order, as the signer builds it: nothing else can be carried here.
+                        let mut expected = Vec::new();
+                        for name in lotw::SIGN_STATION {
+                            if let Some((_, v)) = station.iter().find(|(f, _)| f == name) {
+                                expected.extend_from_slice(v);
+                            }
+                        }
+                        for (name, _) in lotw::SIGN_CONTACT {
+                            expected.extend_from_slice(get(name).unwrap_or_default());
+                        }
+                        expected.make_ascii_uppercase();
+                        if get("SIGNDATA") != Some(expected.as_slice()) {
+                            return Err(NotASignedLog);
+                        }
+                        contacts += 1;
+                    }
+                }
+            }
+            _ => return Err(NotASignedLog),
+        }
+    }
+    if record.is_some() || contacts == 0 {
+        return Err(NotASignedLog);
+    }
+    Ok(crate::signed_log::tq8(&tq7))
+}
+
+/// One record's fields, by name, in the order given.
+type Record<'a> = Vec<(&'a str, &'a [u8])>;
+
+#[derive(Clone, Copy)]
+enum Kind {
+    Cert,
+    Station,
+    Contact,
+}
+
+enum Token<'a> {
+    /// A field's name (with any data type after a second colon dropped) and value.
+    Field(&'a str, &'a [u8]),
+    /// `<eor>`.
+    End,
+}
+
+/// The fields of a `.tq7`, strictly: `<NAME:LEN>` or `<NAME:LEN:TYPE>` and exactly LEN bytes, or
+/// `<eor>`, with only white space between. Anything else is an error.
+struct Fields<'a> {
+    text: &'a [u8],
+    at: usize,
+}
+
+impl<'a> Fields<'a> {
+    fn next(&mut self) -> Result<Option<Token<'a>>, NotASignedLog> {
+        while self.text.get(self.at).is_some_and(u8::is_ascii_whitespace) {
+            self.at += 1;
+        }
+        if self.at == self.text.len() {
+            return Ok(None);
+        }
+        if self.text[self.at] != b'<' {
+            return Err(NotASignedLog);
+        }
+        let close = self.text[self.at..]
+            .iter()
+            .take(80)
+            .position(|&b| b == b'>')
+            .ok_or(NotASignedLog)?;
+        let tag = std::str::from_utf8(&self.text[self.at + 1..self.at + close])
+            .map_err(|_| NotASignedLog)?;
+        self.at += close + 1;
+        if tag.eq_ignore_ascii_case("eor") {
+            return Ok(Some(Token::End));
+        }
+        let mut parts = tag.split(':');
+        let name = parts.next().filter(|n| {
+            !n.is_empty()
+                && n.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'.')
+        });
+        let len = parts.next().and_then(|l| l.parse::<usize>().ok());
+        let typed = parts.next();
+        let (Some(name), Some(len), None) = (name, len, parts.next()) else {
+            return Err(NotASignedLog);
+        };
+        if typed.is_some_and(|t| t.is_empty() || !t.bytes().all(|b| b.is_ascii_alphanumeric())) {
+            return Err(NotASignedLog);
+        }
+        let end = self
+            .at
+            .checked_add(len)
+            .filter(|&e| e <= self.text.len())
+            .ok_or(NotASignedLog)?;
+        let value = &self.text[self.at..end];
+        self.at = end;
+        Ok(Some(Token::Field(name, value)))
+    }
+}
+
+/// Text with no control characters but the line breaks base64 holds, at most `max` bytes. UTF-8,
+/// not only ASCII: a call need not be ASCII when bad calls are allowed.
+fn printable(value: &[u8], max: usize) -> bool {
+    value.len() <= max
+        && std::str::from_utf8(value)
+            .is_ok_and(|t| t.chars().all(|c| !c.is_control() || c == '\n' || c == '\r'))
+}
+
+const CONTACT_FIELDS: &[&str] = &[
+    "STATION_UID",
+    "CALL",
+    "BAND",
+    "MODE",
+    "FREQ",
+    "FREQ_RX",
+    "PROP_MODE",
+    "SAT_NAME",
+    "BAND_RX",
+    "QSO_DATE",
+    "QSO_TIME",
+    "SIGNDATA",
+];
+
+fn allowed(kind: Kind, name: &str, value: &[u8]) -> bool {
+    match kind {
+        Kind::Cert => match name {
+            "CERT_UID" => value.len() <= 10 && value.iter().all(u8::is_ascii_digit),
+            "CERTIFICATE" => {
+                printable(value, 8 * 1024)
+                    && std::str::from_utf8(value).is_ok_and(|b64| {
+                        let pem = format!(
+                            "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n",
+                            b64.trim()
+                        );
+                        crate::certificate::Certificate::from_pem_or_der(pem.as_bytes()).is_ok()
+                    })
+            }
+            _ => false,
+        },
+        Kind::Station => match name {
+            "STATION_UID" | "CERT_UID" => value.len() <= 10 && value.iter().all(u8::is_ascii_digit),
+            _ => lotw::loc_field(name).is_some() && printable(value, crate::station::MAX_LEN),
+        },
+        Kind::Contact => {
+            if name == lotw::SIGNATURE_FIELD {
+                // An RSA-1024 signature in TQSL's base64: 172 characters and its line break.
+                value.len() <= 180 && printable(value, 180)
+            } else if name == "SIGNDATA" {
+                printable(value, 1024)
+            } else {
+                CONTACT_FIELDS.contains(&name) && printable(value, 128)
+            }
+        }
+    }
+}
 
 /// An immutable multipart POST of already-signed `.tq8` bytes. No transport or I/O methods.
 /// Constructing this neither validates nor changes the signed log.

@@ -26,6 +26,52 @@ def run(**over):
     return base
 
 
+class Source(unittest.TestCase):
+    SHA = "a" * 40
+
+    def args(self, **changes):
+        values = dict(ref="refs/heads/main", event="workflow_dispatch", build_sha=self.SHA,
+                      workflow_sha=self.SHA,
+                      workflow_ref="qso-graph/qso-graph-trust/.github/workflows/release.yml@refs/heads/main",
+                      actor="KI7MT", triggering_actor="KI7MT")
+        values.update(changes)
+        return list(values.values())
+
+    def test_manual_main_release_at_exact_commit(self):
+        self.assertTrue(rc.source_allowed(*self.args()))
+        rc.main(["source", *self.args()])
+
+    def test_other_branches_tags_and_pr_refs_are_refused(self):
+        for ref in ["refs/heads/feature/0.1.0", "refs/heads/0.1.x", "refs/tags/v0.1.0",
+                    "refs/pull/18/merge", "refs/pull/18/head", "main", "refs/heads/main\n", ""]:
+            with self.subTest(ref=ref), self.assertRaises(SystemExit):
+                rc.main(["source", *self.args(ref=ref)])
+
+    def test_automatic_events_are_refused(self):
+        for event in ["push", "pull_request", "pull_request_target", "schedule", "repository_dispatch", ""]:
+            with self.subTest(event=event):
+                self.assertFalse(rc.source_allowed(*self.args(event=event)))
+
+    def test_other_main_workflows_and_other_operators_are_refused(self):
+        for workflow in ["binaries.yml", "ci.yml"]:
+            with self.subTest(workflow=workflow):
+                ref=f"qso-graph/qso-graph-trust/.github/workflows/{workflow}@refs/heads/main"
+                self.assertFalse(rc.source_allowed(*self.args(workflow_ref=ref)))
+        self.assertFalse(rc.source_allowed(*self.args(workflow_ref="")))
+        for actor in ["turing-qg[bot]", "someone", "KI7MT-other", ""]:
+            with self.subTest(actor=actor):
+                self.assertFalse(rc.source_allowed(*self.args(actor=actor)))
+                self.assertFalse(rc.source_allowed(*self.args(triggering_actor=actor)))
+        self.assertTrue(rc.source_allowed(*self.args(actor="ki7mt", triggering_actor="ki7mt")))
+
+    def test_main_cannot_sign_a_different_or_ambiguous_commit(self):
+        for build_sha, workflow_sha in [("b" * 40, self.SHA), ("main", self.SHA),
+                                        ("", self.SHA), ("", ""), ("a" * 7, "a" * 7),
+                                        (self.SHA + "\n", self.SHA + "\n")]:
+            with self.subTest(build_sha=build_sha):
+                self.assertFalse(rc.source_allowed(*self.args(build_sha=build_sha, workflow_sha=workflow_sha)))
+
+
 class Version(unittest.TestCase):
     def test_releases_and_betas(self):
         for v in ["0.1.0", "0.1.0-beta.1", "1.2.3-beta.12", "10.0.0"]:

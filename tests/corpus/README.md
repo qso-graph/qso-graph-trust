@@ -24,7 +24,8 @@ script is run again only to change them.
 The `.p12` files are for testing a `.p12` reader, which is still to come: they hold the encryptions
 TQSL uses. They are not TQSL's own exports: TQSL also adds bag attributes (callsign, QSO dates, DXCC).
 
-The `.p12` password is `qgt-test`: a test password for test keys. The key and `.p12` files are
+The `.p12` password is `qgt-test`, in `pki/p12-password`, which the tests read: a test password for
+test keys. The key and `.p12` files are
 named one by one in `.github/secret_scanning.yml`, so GitHub's secret scanning passes over these
 and still catches a real key committed anywhere else.
 

@@ -26,6 +26,15 @@ fn key() -> (Zeroizing<Vec<u8>>, Vec<u8>) {
 }
 use zeroize::Zeroizing;
 
+/// The test set's `.p12` password, from `tests/corpus/pki/p12-password`.
+fn p12_password() -> Vec<u8> {
+    std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/corpus/pki/p12-password"),
+    )
+    .expect("the test .p12 password")
+}
+
 #[test]
 fn tq6_attaches_a_matching_pending_request_and_otherwise_loads_keyless() {
     for pending in [false, true] {
@@ -109,7 +118,11 @@ fn default_pkcs12_imports_for_both_corpus_key_password_cases_and_signs() {
         let folder = Folder::new();
         let (store, _) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
         let imported = store
-            .import_pkcs12(&file(&format!("{case}/QG0TEST.p12")), b"qgt-test", &trust())
+            .import_pkcs12(
+                &file(&format!("{case}/QG0TEST.p12")),
+                &p12_password(),
+                &trust(),
+            )
             .expect("import");
         assert!(imported.has_key);
         assert!(!imported.attached_request);
@@ -142,11 +155,11 @@ fn wrong_password_tampering_and_rc2_are_refused_without_storage() {
     let mut flipped = bytes;
     flipped[500] ^= 1;
     assert!(matches!(
-        store.import_pkcs12(&flipped, b"qgt-test", &trust()),
+        store.import_pkcs12(&flipped, &p12_password(), &trust()),
         Err(ImportError::Authentication)
     ));
     assert!(matches!(
-        store.import_pkcs12(&file("1024/QG0TEST-weak.p12"), b"qgt-test", &trust()),
+        store.import_pkcs12(&file("1024/QG0TEST-weak.p12"), &p12_password(), &trust()),
         Err(ImportError::UnsupportedProtection)
     ));
     assert!(matches!(
@@ -306,4 +319,33 @@ fn an_unused_untrusted_tq6_root_is_rejected_and_a_bounded_bundle_loads_whole() {
         .import_tq6(at_limit.as_bytes(), &trust())
         .expect("at limit");
     assert_eq!(store.certificates().expect("list").len(), 1);
+}
+
+#[test]
+fn a_key_imported_after_its_certificate_alone_is_attached_to_it() {
+    let folder = Folder::new();
+    let (store, _) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
+    // ARRL's answer first, with no request here: the certificate alone, which cannot sign.
+    let first = store
+        .import_tq6(&file("1024/QG0TEST.tq6"), &trust())
+        .expect("tq6");
+    assert!(!first[0].has_key);
+    // Then the same certificate with its key: the key goes to the certificate already here.
+    let imported = store
+        .import_pkcs12(&file("1024/QG0TEST.p12"), &p12_password(), &trust())
+        .expect("p12");
+    assert!(imported.has_key);
+    assert_eq!(imported.id, first[0].id);
+    let certs = store.certificates().expect("list");
+    assert_eq!(certs.len(), 1);
+    assert!(certs[0].key_name.is_some());
+    store
+        .with_key(&imported.id, |key| key.sign(b"test"))
+        .expect("signer")
+        .expect("it signs");
+    // With its key, the same certificate is already here.
+    assert!(matches!(
+        store.import_pkcs12(&file("1024/QG0TEST.p12"), &p12_password(), &trust()),
+        Err(ImportError::Store(StoreError::AlreadyExists))
+    ));
 }

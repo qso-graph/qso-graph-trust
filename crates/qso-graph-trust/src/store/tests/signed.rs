@@ -707,3 +707,67 @@ fn output_case_varied_parent_is_refused_on_case_insensitive_filesystems() {
         before
     );
 }
+
+#[test]
+fn two_new_only_runs_never_both_record_the_same_qso() {
+    let folder = Folder::new();
+    let store = store(&folder);
+    let qsos = qsos();
+    // Both planned from the same snapshot, before either is written.
+    let first = signed(&store, &qsos, DuplicateChoice::NewOnly);
+    let selection = store
+        .prepare_signing(&qsos, &home())
+        .expect("plan")
+        .choose(DuplicateChoice::NewOnly)
+        .expect("selection");
+    let id = &store.certificates().expect("certs")[0].id;
+    let cert = store.certificates().expect("certs")[0].certificate.clone();
+    let at = cert.validity().0 + Duration::from_secs(3600);
+    let second = store
+        .with_key(id, |key| selection.sign(&cert, key, at))
+        .expect("key")
+        .expect("sign");
+    let out = Folder::new();
+    first
+        .write_to(&store, &out.0.join("first.tq8"))
+        .expect("the first is written");
+    let recorded = store.signed_qsos().expect("record");
+    assert!(matches!(
+        second.write_to(&store, &out.0.join("second.tq8")),
+        Err(StoreError::SignedMeanwhile)
+    ));
+    assert!(!out.0.join("second.tq8").exists());
+    assert_eq!(store.signed_qsos().expect("unchanged"), recorded);
+    // Signing again on purpose is not refused.
+    let selection = store
+        .prepare_signing(&qsos, &home())
+        .expect("plan")
+        .choose(DuplicateChoice::SignAgain)
+        .expect("selection");
+    store
+        .with_key(id, |key| selection.sign(&cert, key, at))
+        .expect("key")
+        .expect("sign")
+        .write_to(&store, &out.0.join("again.tq8"))
+        .expect("sign again is written");
+}
+
+#[test]
+fn an_update_adding_station_details_is_written_not_refused_as_signed_meanwhile() {
+    let folder = Folder::new();
+    let store = store(&folder);
+    let qsos = qsos();
+    let minimal = StationLocation::new(&[("CALL", "KC4QPQ"), ("DXCC", "291")]).expect("minimal");
+    store
+        .add_signed_qsos(&[SignedQso {
+            key: duplicate_key(&qsos[0], &minimal),
+            station: String::new(),
+            signed_at: None,
+        }])
+        .expect("old minimal");
+    // Selected as new (it adds station details), and nothing has changed since the plan.
+    let log = signed(&store, &qsos[..1], DuplicateChoice::NewOnly);
+    let out = Folder::new();
+    log.write_to(&store, &out.0.join("enriched.tq8"))
+        .expect("an update is written");
+}

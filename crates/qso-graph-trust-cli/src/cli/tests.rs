@@ -23,7 +23,7 @@ fn set(file: &str) -> PathBuf {
 }
 
 fn read(file: &str) -> Vec<u8> {
-    std::fs::read(set(file)).unwrap_or_else(|e| panic!("{file}: {e}"))
+    std::fs::read(set(file)).expect("a file of the standard test set")
 }
 
 /// A folder of its own for each test's output.
@@ -92,6 +92,14 @@ fn run_os_with_colors(
             .ok_or_else(|| io::Error::other("no password was expected"))
     };
     let (mut out, mut err) = (Vec::new(), Vec::new());
+    let no_store =
+        || -> Result<&qso_graph_trust::store::Store, qso_graph_trust::store::StoreError> {
+            panic!("the TQSL-style command line does not open the store")
+        };
+    let mut no_upload =
+        |_: &qso_graph_trust::upload::UploadRequest| -> Result<(u16, Vec<u8>), super::UploadFailure> {
+            panic!("the TQSL-style command line does not upload")
+        };
     let code = run(
         args,
         &mut Env {
@@ -102,6 +110,8 @@ fn run_os_with_colors(
             ask_password: &mut ask,
             out: &mut out,
             err: &mut err,
+            store: &no_store,
+            upload: &mut no_upload,
         },
     );
     Ran {
@@ -383,7 +393,6 @@ fn the_command_line_is_refused_with_tqsls_syntax_code() {
         vec![],
         vec![log.as_str()],
         vec!["-i", &tbk, log.as_str()],
-        vec!["-l", "KN4YU-CLUB", log.as_str()],
         vec!["-i", &tbk, "-l", "KN4YU-CLUB"],
         vec!["-i", &tbk, "-l", "KN4YU-CLUB", log.as_str(), log.as_str()],
         vec![
@@ -406,7 +415,7 @@ fn the_command_line_is_refused_with_tqsls_syntax_code() {
             "2026-11-01",
             log.as_str(),
         ],
-        vec!["-i", &tbk, "-l", "KN4YU-CLUB", "-u", log.as_str()],
+        vec!["-i", &tbk, "-l", "KN4YU-CLUB", "-a", "maybe", log.as_str()],
         vec!["-i", &tbk, "-l", "KN4YU-CLUB", "--bogus", log.as_str()],
         vec!["-i", &tbk, "-l"],
     ] {
@@ -539,7 +548,7 @@ fn help_version_and_parse_errors_follow_the_color_choice() {
                     assert!(ran.out.contains("Signing:"));
                     assert!(ran.out.contains("Accepted for loggers that pass them:"));
                     assert!(ran.out.contains("--completions <SHELL>"));
-                    assert!(ran.out.contains("The key's password is asked for"));
+                    assert!(ran.out.contains("the key's password is asked for"));
                 }
             }
             if !color {
@@ -630,20 +639,14 @@ fn signing_messages_follow_the_color_choice_and_leave_the_status_plain() {
 #[test]
 fn unsupported_tqsl_options_are_refused_on_sight() {
     for flag in [
-        "-a",
-        "--action",
         "-c",
         "--callsign",
-        "-f",
-        "--verify",
         "-n",
         "--updates",
         "-s",
         "--editlocation",
         "-t",
         "--diagnose",
-        "-u",
-        "--upload",
         "-w",
         "--wipe",
         "-z",
@@ -729,7 +732,7 @@ fn round_two_parse_errors_never_echo_arguments() {
 #[test]
 fn help_does_not_bypass_clap_parse_errors_or_an_earlier_refusal() {
     for args in [
-        vec!["--upload", "--help"],
+        vec!["--wipe", "--help"],
         vec!["--SECRET", "--help"],
         vec!["-pSECRET", "--help"],
         vec!["--completions", "SECRET", "-h"],
@@ -880,20 +883,14 @@ fn round_two_hidden_options_are_refused_after_a_successful_parse() {
     for flag in [
         "-p",
         "--password",
-        "-a",
-        "--action",
         "-c",
         "--callsign",
-        "-f",
-        "--verify",
         "-n",
         "--updates",
         "-s",
         "--editlocation",
         "-t",
         "--diagnose",
-        "-u",
-        "--upload",
         "-w",
         "--wipe",
         "-z",
@@ -926,7 +923,7 @@ fn round_two_hidden_options_are_refused_after_a_successful_parse() {
         }
     }
     let help = run_with_color(&["--help"], None, &trust, SystemTime::now(), false);
-    for flag in ["--password", "--action", "--upload", "--test-sign"] {
+    for flag in ["--password", "--test-sign"] {
         assert!(!help.out.contains(flag));
     }
 }
@@ -986,16 +983,8 @@ fn round_three_control_options_follow_parser_order() {
             10,
             "a password is never given",
         ),
-        (
-            vec!["--help", "--upload"],
-            10,
-            "--upload is not supported yet",
-        ),
-        (
-            vec!["--upload", "--help"],
-            10,
-            "--upload is not supported yet",
-        ),
+        (vec!["--help", "--wipe"], 10, "--wipe is not supported yet"),
+        (vec!["--wipe", "--help"], 10, "--wipe is not supported yet"),
         (vec!["-b", "--help"], 10, "--begindate needs a date"),
         (
             vec!["-i", "--help", "-l", "home", "log.adi"],
@@ -1006,9 +995,9 @@ fn round_three_control_options_follow_parser_order() {
         (vec!["--version", "--help"], 0, "qg-trust "),
         (vec!["--help", "--version"], 0, "Usage: qg-trust"),
         (
-            vec!["--upload", "unused", "-p", "SECRET"],
+            vec!["--wipe", "unused", "-p", "SECRET"],
             10,
-            "--upload is not supported yet",
+            "--wipe is not supported yet",
         ),
         (
             vec!["-w", "unused", "--action", "unused"],
@@ -1150,4 +1139,15 @@ fn round_three_signing_messages_use_only_file_roles_and_certificate_calls() {
     );
     assert!(ran.err.contains("the log: no QSOs to sign"));
     assert!(!ran.err.contains("SECRET"));
+}
+
+#[test]
+fn a_temporary_name_already_taken_is_never_removed() {
+    let dir = scratch();
+    let out = dir.join("log.tq8");
+    let taken = dir.join(".log.tq8.taken.partial");
+    std::fs::write(&taken, b"not ours").expect("write");
+    assert!(super::write_whole_via(&out, b"signed", &taken).is_err());
+    assert_eq!(std::fs::read(&taken).expect("kept"), b"not ours");
+    assert!(!out.exists());
 }

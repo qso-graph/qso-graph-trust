@@ -151,6 +151,9 @@ pub enum StoreError {
     Invalid(&'static str),
     /// A certificate or location already exists.
     AlreadyExists,
+    /// A new-only signed log holds a QSO another signing recorded after the plan was made.
+    /// Nothing was written; prepare and sign again.
+    SignedMeanwhile,
     /// The requested certificate, location or key is absent.
     NotFound,
     /// Secure randomness was unavailable.
@@ -183,6 +186,9 @@ impl fmt::Display for StoreError {
             Self::Limit(what) => write!(f, "the store exceeds its limit for {what}"),
             Self::Invalid(what) => write!(f, "invalid store: {what}"),
             Self::AlreadyExists => f.write_str("the store entry already exists"),
+            Self::SignedMeanwhile => f.write_str(
+                "a QSO in this log was signed by another run meanwhile; nothing was written",
+            ),
             Self::NotFound => f.write_str("the store entry or its key is missing"),
             Self::Random => f.write_str("secure randomness is unavailable"),
             Self::Rollback { write, cleanup } => write!(
@@ -347,7 +353,12 @@ impl Store {
             .certificate
             .as_ref()
             .ok_or(StoreError::Invalid("certificate is required"))?;
-        check_certificate(&data, cert)?;
+        // The same certificate already here without its key takes this one; with a key, it is
+        // already here.
+        let keyless = keyless_twin(&data, cert);
+        if keyless.is_none() {
+            check_certificate(&data, cert)?;
+        }
         let key = entry.key.as_ref().ok_or(StoreError::NotFound)?;
         if key.callsign() != cert.callsign() || key.request_dxcc().is_some_and(|d| d != cert.dxcc())
         {
@@ -362,6 +373,16 @@ impl Store {
         // Validate the private key against the actual certificate, not just the backup's metadata.
         TqslKey::from_pkcs8_der(&der, cert.public_key_der())?;
         let name = keys::new_name("key:")?;
+        if let Some(i) = keyless {
+            if self.keys.exists(&name)? {
+                return Err(StoreError::AlreadyExists);
+            }
+            data.certificates[i].key_name = Some(name.clone());
+            let id = data.certificates[i].id.clone();
+            let xml = format::write(&data)?;
+            self.put_and_replace(&name, &der, &xml)?;
+            return Ok(id);
+        }
         let id = keys::new_name("cert:")?;
         if self.keys.exists(&name)? || data.certificates.iter().any(|c| c.id == id) {
             return Err(StoreError::AlreadyExists);
@@ -771,6 +792,13 @@ fn create_directory(dir: &Path, sync: impl Fn(&Path) -> io::Result<()>) -> io::R
         sync(&dir)?;
     }
     Ok(())
+}
+
+/// The same certificate, already in the store with no key.
+fn keyless_twin(data: &Data, cert: &Certificate) -> Option<usize> {
+    data.certificates
+        .iter()
+        .position(|c| c.key_name.is_none() && c.certificate.der() == cert.der())
 }
 
 fn check_certificate(data: &Data, cert: &Certificate) -> Result<(), StoreError> {
