@@ -28,53 +28,86 @@ its own.
 
 ## Who it's for
 
-- **Hams** using [QSO Graph Desktop](https://github.com/qso-graph/qso-graph-desktop), who want to sign
-  and upload their QSOs to LoTW without leaving it.
+- **Hams** who want to sign and upload their QSOs to LoTW from the command line or their logger,
+  with their key in their computer's credential store.
 - **Authors of loggers and tools**, who want LoTW signing inside their own program, through the
   library or the `qg-trust` command line.
 
 ## What it does
 
-It takes your ADIF log and your LoTW callsign certificate, signs each QSO the way LoTW requires, and
-writes the `.tq8` file LoTW accepts. Uploading it, and looking after your certificates, come next.
+`qg-trust` signs your ADIF log with your LoTW callsign certificate and uploads it to LoTW, in one
+command. It brings over everything you have in TQSL from a TQSL backup: certificates, keys, station
+locations and the record of what you have already signed. It also requests and renews certificates and
+manages station locations. Loggers that run `tqsl` can run `qg-trust` with the same options, exit
+codes and final status line.
 
 ## How it's different
 
-- **Your key stays locked away.** It will live in your computer's own password safe (the macOS
-  Keychain, Windows Credential Manager, or the Linux keyring), never as a file someone could copy.
-  *(Coming soon.)*
-- **It works inside the program you already use.** QSO Graph Desktop, another logger or a script can
-  sign for LoTW directly, with no separate program to switch to.
-- **It's built to be safe.** Your key is only ever used to sign: it is never shown, saved to a log or
-  sent anywhere, and the program clears it from memory when it's done. Every part is tested. More, and
-  how to report a security problem: [SECURITY.md](SECURITY.md).
-- **It's part of QSO Graph Desktop.** Your certificates, station locations, signing and upload sit
-  alongside the rest of your station. *(Coming soon.)*
+- **Your key stays locked away.** It lives in your computer's own credential store (the macOS
+  Keychain, Windows Credential Manager, or the Secret Service on Linux), never as a file someone could
+  copy, and leaves it only to sign.
+- **Every QSO is checked by ARRL's own rules** before it's signed. A QSO LoTW would refuse is named,
+  with the reason, and the rest are signed. Signatures are byte for byte what TQSL makes.
+- **It works inside the program you already use.** Another logger or a script can sign and upload for
+  LoTW directly, and the library puts signing inside your own program.
+- **It's built to be safe.** A password is never taken from the command line; the upload is HTTPS to
+  LoTW only, its certificate always checked; and everything the program frees is wiped from memory.
+  More, and how to report a security problem: [SECURITY.md](SECURITY.md).
+- **It's signed.** The macOS program is signed by QSO Graph and notarized by Apple, the Windows
+  program is signed by QSO Graph, and the Linux packages and their repositories are signed with QSO
+  Graph's release key.
 
-> **This is a beta.** Signing works today.
+## Install
 
-## Sign a log
+**macOS (Apple silicon) and Linux, with [Homebrew](https://brew.sh):**
 
-1. **Install `qg-trust`** (it needs [Rust](https://rustup.rs)):
+```sh
+brew install qso-graph/tap/qso-graph-trust
+```
 
-   ```sh
-   cargo install qso-graph-trust-cli
-   ```
+**Debian, Ubuntu:**
 
-2. **Sign** your log with your certificate (`-i`, the `.tbk` file TQSL saves) for your station
-   location (`-l`):
+```sh
+sudo curl -fsSL -o /usr/share/keyrings/qso-graph.gpg https://packages.qso-graph.net/qso-graph.gpg
+echo "deb [signed-by=/usr/share/keyrings/qso-graph.gpg] https://packages.qso-graph.net/apt stable main" | sudo tee /etc/apt/sources.list.d/qso-graph.list
+sudo apt update && sudo apt install qso-graph-trust
+```
 
-   ```sh
-   qg-trust -i tqslconfig.tbk -l "Home" mylog.adi
-   ```
+**Fedora, RHEL, Rocky:**
 
-   If your key has a password, `qg-trust` asks for it, with what you type hidden. It writes
-   `mylog.tq8` and tells you how many QSOs it signed. A QSO LoTW would refuse is left out and named,
-   with the reason.
-3. **Upload `mylog.tq8`** on LoTW's website.
+```sh
+sudo curl -fsSL -o /etc/yum.repos.d/qso-graph.repo https://packages.qso-graph.net/qso-graph.repo
+sudo dnf install qso-graph-trust
+```
 
-To sign only some dates, add `-b 2026-01-01` and `-e 2026-06-30`. `qg-trust --help` lists everything,
-and the [command line's page](crates/qso-graph-trust-cli/README.md) has every option and exit code.
+**Windows:** download `qg-trust-<version>-windows-x86_64.zip` from the
+[latest release](https://github.com/qso-graph/qso-graph-trust/releases/latest) and put `qg-trust.exe`
+on your `PATH`. Every release also has the macOS and Linux programs, and `SHA256SUMS.txt` to check
+them against.
+
+**With Rust:** `cargo install qso-graph-trust-cli`.
+
+## Sign and upload a log
+
+```sh
+qg-trust import ~/tqsl-backup.tbk     # certificates, keys, locations and your signing record
+qg-trust cert list                    # what you have, and when each certificate expires
+qg-trust send mylog.adi -l Home       # sign mylog.adi for station location Home and upload it
+```
+
+A key that TQSL protected with a password is asked for once, when you import it, with what you type
+hidden. `send` leaves out QSOs you signed before unless you ask, and keeps `mylog.tq8` beside the log.
+`qg-trust sign mylog.adi -l Home` signs without uploading; `qg-trust upload mylog.tq8` uploads it
+later. To sign only some dates, add `-b 2026-01-01` and `-e 2026-06-30`.
+
+From a logger, the `tqsl` options work as they are:
+
+```sh
+qg-trust -x -d -l "Home" -a compliant -u mylog.adi
+```
+
+`qg-trust --help` lists everything, and the [command line's page](crates/qso-graph-trust-cli/README.md)
+has every command, option and exit code.
 
 ## For developers
 
