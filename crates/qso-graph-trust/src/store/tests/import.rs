@@ -307,3 +307,32 @@ fn an_unused_untrusted_tq6_root_is_rejected_and_a_bounded_bundle_loads_whole() {
         .expect("at limit");
     assert_eq!(store.certificates().expect("list").len(), 1);
 }
+
+#[test]
+fn a_key_imported_after_its_certificate_alone_is_attached_to_it() {
+    let folder = Folder::new();
+    let (store, _) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
+    // ARRL's answer first, with no request here: the certificate alone, which cannot sign.
+    let first = store
+        .import_tq6(&file("1024/QG0TEST.tq6"), &trust())
+        .expect("tq6");
+    assert!(!first[0].has_key);
+    // Then the same certificate with its key: the key goes to the certificate already here.
+    let imported = store
+        .import_pkcs12(&file("1024/QG0TEST.p12"), b"qgt-test", &trust())
+        .expect("p12");
+    assert!(imported.has_key);
+    assert_eq!(imported.id, first[0].id);
+    let certs = store.certificates().expect("list");
+    assert_eq!(certs.len(), 1);
+    assert!(certs[0].key_name.is_some());
+    store
+        .with_key(&imported.id, |key| key.sign(b"test"))
+        .expect("signer")
+        .expect("it signs");
+    // With its key, the same certificate is already here.
+    assert!(matches!(
+        store.import_pkcs12(&file("1024/QG0TEST.p12"), b"qgt-test", &trust()),
+        Err(ImportError::Store(StoreError::AlreadyExists))
+    ));
+}

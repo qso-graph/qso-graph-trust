@@ -37,6 +37,9 @@ versions follow [Semantic Versioning](https://semver.org/).
   a TQSL backup, which is gzip too and holds private keys, is refused.
 - A new-only signed log is refused at writing if another signing recorded one of its QSOs after
   the plan was made (`StoreError::SignedMeanwhile`), so two runs never both sign a QSO as new.
+- A key imported for a certificate already in the store without one (from a `.tq6` alone) is
+  attached to it, from a `.tbk` or a `.p12`, instead of being refused as already there.
+- Upload sends the checked signed log, gzipped afresh: nothing the check did not read goes with it.
 - Versioned library store with keys in the OS credential store, file locking, atomic metadata
   updates and recovery reporting; credential-store round trips are tested on Windows, Linux and
   macOS with a test-only service name.

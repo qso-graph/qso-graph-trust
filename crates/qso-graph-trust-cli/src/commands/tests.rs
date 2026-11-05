@@ -1138,3 +1138,27 @@ fn a_call_that_is_not_ascii_signs_and_uploads_with_allow_bad_calls() {
     assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
     assert_eq!(ham.sent.borrow().len(), 1);
 }
+
+#[test]
+fn a_backup_gives_its_key_to_a_certificate_imported_alone_before() {
+    let ham = Ham::new();
+    let ran = ham.run(&["import", path(&set("certs/W4W.tq6"))]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let ran = ham.run(&["import", path(&set("standard.tbk"))]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let certs = ham.store.certificates().expect("certificates");
+    assert_eq!(certs.len(), 3);
+    assert!(certs.iter().all(|c| c.key_name.is_some()), "{certs:?}");
+    let dir = scratch();
+    let out = dir.join("event.tq8");
+    let ran = ham.run(&[
+        "sign",
+        path(&set("adif/W4W-EVENT.adi")),
+        "-l",
+        "W4W-EVENT",
+        "--again",
+        "-o",
+        path(&out),
+    ]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+}

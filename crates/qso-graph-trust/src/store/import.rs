@@ -3,7 +3,10 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{MAX_KEY_LEN, Store, StoreError, StoredCertificate, check_certificate, format, keys};
+use super::{
+    MAX_KEY_LEN, Store, StoreError, StoredCertificate, check_certificate, format, keyless_twin,
+    keys,
+};
 use crate::certificate::Trust;
 use crate::import::{self, ImportError, ImportedCertificate};
 use crate::pkcs12;
@@ -108,6 +111,22 @@ impl Store {
         let loaded = pkcs12::read(bytes, password, trust)?;
         let _lock = self.lock()?;
         let mut data = self.read()?;
+        // The same certificate already here without its key takes this one.
+        if let Some(i) = keyless_twin(&data, &loaded.certificate) {
+            let name = keys::new_name("key:")?;
+            if self.keys.exists(&name).map_err(StoreError::from)? {
+                return Err(StoreError::AlreadyExists.into());
+            }
+            data.certificates[i].key_name = Some(name.clone());
+            let id = data.certificates[i].id.clone();
+            let xml = format::write(&data)?;
+            self.put_and_replace(&name, &loaded.key, &xml)?;
+            return Ok(ImportedCertificate {
+                id,
+                has_key: true,
+                attached_request: false,
+            });
+        }
         check_certificate(&data, &loaded.certificate)?;
         let name = keys::new_name("key:")?;
         let id = keys::new_name("cert:")?;
