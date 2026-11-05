@@ -111,6 +111,10 @@ struct SignArgs {
     /// Sign QSOs signed before as well.
     #[arg(long)]
     again: bool,
+    /// The certificate to sign with, by ID (qg-trust cert list), when you have more than one in
+    /// force for the call; otherwise the one covering most of the log's QSOs.
+    #[arg(long, value_name = "ID")]
+    cert: Option<String>,
     /// Replace the signed log if it is there already.
     #[arg(long)]
     force: bool,
@@ -432,7 +436,13 @@ pub(crate) fn run(args: &[&str], env: &mut Env<'_>) -> u8 {
         Err(_) => return Exit::CommandError as u8,
     };
     let code = match people.command {
-        Command::Sign(a) => sign(&a, env).map(|_| Exit::Success),
+        Command::Sign(a) => sign(&a, env).map(|s| {
+            if s.suppressed {
+                Exit::QsosSuppressed
+            } else {
+                Exit::Success
+            }
+        }),
         Command::Send(a) => send(&a, env),
         Command::Upload(a) => upload_file(&a.signed, env),
         Command::Import(a) => import(&a, env),
@@ -519,22 +529,10 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         return Err(Exit::CommandError);
     };
     let station = &location.station;
-    let certs = store
-        .certificates()
-        .map_err(|e| store_error(env, "the certificates", &e))?;
-    let Some(cert) = signer(&certs, station.call(), station.dxcc(), env.now) else {
-        env.message(
-            Tone::Error,
-            format_args!(
-                "you have no certificate for {} ({}) in force now, with its key; qg-trust cert list \
-                 shows what you have",
-                station.call(),
-                entity(station.dxcc())
-            ),
-        );
-        return Err(Exit::TqslError);
-    };
-
+    if let Err(e) = check_output(a.output.as_deref().unwrap_or(&a.log.with_extension("tq8"))) {
+        env.message(Tone::Error, format_args!("{e}"));
+        return Err(Exit::OutputError);
+    }
     let options = signing_options(&a.options);
     let records = match read_file(&a.log, MAX_LOG_LEN)
         .map_err(|e| e.to_string())
@@ -564,8 +562,8 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
                 qsos.push(qso);
             }
             Err(e) => {
-                if a.action == Some(Action::Abort) {
-                    return Err(abort(env, i + 1, &e.to_string()));
+                if stops_on_refusal(a) {
+                    return Err(abort(env, a, i + 1, &e.to_string()));
                 }
                 env.message(
                     Tone::Warning,
@@ -580,6 +578,31 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         .output
         .clone()
         .unwrap_or_else(|| a.log.with_extension("tq8"));
+    let certs = store
+        .certificates()
+        .map_err(|e| store_error(env, "the certificates", &e))?;
+    let candidates = signers(&certs, station.call(), station.dxcc(), env.now);
+    let chosen = match &a.cert {
+        Some(id) => by_id(&candidates, id, |c| &c.id).copied(),
+        None => best_signer(&candidates, &qsos),
+    };
+    let Some(cert) = chosen else {
+        env.message(
+            Tone::Error,
+            format_args!(
+                "you have no certificate for {} ({}) in force now, with its key{}; qg-trust cert \
+                 list shows what you have",
+                station.call(),
+                entity(station.dxcc()),
+                if a.cert.is_some() {
+                    ", with that ID"
+                } else {
+                    ""
+                }
+            ),
+        );
+        return Err(Exit::TqslError);
+    };
     let again = a.again || a.action == Some(Action::All);
     let choice = if again {
         DuplicateChoice::SignAgain
@@ -595,8 +618,8 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
             Ok(p) => p,
             Err(StoreError::Log(e)) => match refusal(&e) {
                 Some((index, reason)) => {
-                    if a.action == Some(Action::Abort) {
-                        return Err(abort(env, numbers[index], &reason));
+                    if stops_on_refusal(a) {
+                        return Err(abort(env, a, numbers[index], &reason));
                     }
                     env.message(
                         Tone::Warning,
@@ -625,7 +648,7 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
                             qsos.len()
                         ),
                     );
-                    return Err(Exit::NoQsos);
+                    return Err(Exit::UploadedAlready);
                 }
                 Some(Action::Ask) | None if a.action.is_some() || is_logger(a) => {
                     env.message(
@@ -666,6 +689,7 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         let result = store
             .with_key(&cert.id, |key| selection.sign(&cert.certificate, key, now))
             .map_err(|e| store_error(env, &format!("{}'s key", cert.certificate.callsign()), &e))?;
+        let outside = matches!(result, Err(LogError::QsoOutsideCertificate { .. }));
         let (index, reason) = match result {
             Ok(signed) => break (signed, before, selection.qsos().len()),
             Err(e) => match refusal(&e) {
@@ -677,8 +701,19 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
             },
         };
         let at = picked[index];
-        if a.action == Some(Action::Abort) {
-            return Err(abort(env, numbers[at], &reason));
+        // Another certificate in force may cover this QSO's date: say which.
+        let reason = match candidates
+            .iter()
+            .find(|c| c.id != cert.id && covers(&c.certificate, &qsos[at]))
+        {
+            Some(other) if outside => {
+                let id = short(&other.id);
+                format!("{reason}; certificate {id} covers it: sign it with --cert {id}")
+            }
+            _ => reason,
+        };
+        if stops_on_refusal(a) {
+            return Err(abort(env, a, numbers[at], &reason));
         }
         env.message(
             Tone::Warning,
@@ -772,29 +807,85 @@ fn refusal(e: &LogError) -> Option<(usize, String)> {
     }
 }
 
-/// `-a abort`: TQSL's batch mode stops at the first QSO it cannot sign and signs nothing.
-fn abort(env: &mut Env<'_>, number: usize, reason: &str) -> Exit {
-    env.message(
-        Tone::Error,
-        format_args!("QSO {number} in the log cannot be signed: {reason}; aborted, nothing signed"),
-    );
+/// Whether a QSO that cannot be signed stops the run: `-a abort`, as TQSL's batch mode does, and
+/// `-a ask` (a logger's default), since TQSL would ask whether to sign the rest and qg-trust
+/// cannot.
+fn stops_on_refusal(a: &SignArgs) -> bool {
+    matches!(a.action, Some(Action::Abort | Action::Ask))
+}
+
+/// Stop at a QSO that cannot be signed: nothing is signed, written or recorded.
+fn abort(env: &mut Env<'_>, a: &SignArgs, number: usize, reason: &str) -> Exit {
+    if a.action == Some(Action::Abort) {
+        env.message(
+            Tone::Error,
+            format_args!(
+                "QSO {number} in the log cannot be signed: {reason}; aborted, nothing signed"
+            ),
+        );
+    } else {
+        env.message(
+            Tone::Error,
+            format_args!(
+                "QSO {number} in the log cannot be signed: {reason}; qg-trust cannot ask whether to \
+                 sign the rest, so nothing is signed: -a compliant signs the rest"
+            ),
+        );
+    }
     Exit::NoQsos
 }
 
-/// The certificate that signs for this call and entity: in force now, with its key; of several,
-/// the one in force longest, as a renewed certificate is.
-fn signer<'a>(
+/// The certificates that can sign for this call and entity now: in force, with their keys.
+fn signers<'a>(
     certs: &'a [StoredCertificate],
     call: &str,
     dxcc: u32,
     now: SystemTime,
-) -> Option<&'a StoredCertificate> {
+) -> Vec<&'a StoredCertificate> {
     certs
         .iter()
         .filter(|c| c.key_name.is_some())
         .filter(|c| c.certificate.callsign() == call && c.certificate.dxcc() == dxcc)
         .filter(|c| c.certificate.is_valid_at(now))
-        .max_by_key(|c| c.certificate.validity().1)
+        .collect()
+}
+
+/// Whether a certificate's QSO dates cover this QSO.
+fn covers(cert: &Certificate, qso: &Qso) -> bool {
+    let (from, to) = cert.qso_dates();
+    (from..=to).contains(&qso.date())
+}
+
+/// The certificate covering most of the log's QSOs; of those, the one in force longest, as a
+/// renewed certificate is.
+fn best_signer<'a>(
+    candidates: &[&'a StoredCertificate],
+    qsos: &[Qso],
+) -> Option<&'a StoredCertificate> {
+    candidates.iter().copied().max_by_key(|c| {
+        (
+            qsos.iter().filter(|q| covers(&c.certificate, q)).count(),
+            c.certificate.validity().1,
+        )
+    })
+}
+
+/// Refuse an output named as one of the store's own files (`store.xml`, `store.xml.partial`,
+/// `store.lock`, in any case), in any folder: the store holds nothing else, its keys being in the
+/// credential store, so no output can replace any part of a store.
+pub(crate) fn check_output(path: &Path) -> Result<(), String> {
+    let reserved = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+        ["store.xml", "store.xml.partial", "store.lock"]
+            .iter()
+            .any(|r| n.eq_ignore_ascii_case(r))
+    });
+    if reserved {
+        return Err(format!(
+            "{}: that name is QG Trust's store's own; give the output another",
+            path.display()
+        ));
+    }
+    Ok(())
 }
 
 fn send(a: &SignArgs, env: &mut Env<'_>) -> Done {
@@ -841,6 +932,7 @@ pub(crate) fn sign_for_logger(call: &LoggerCall<'_>, env: &mut Env<'_>) -> Exit 
         end,
         output: output.map(Path::to_path_buf),
         again: false,
+        cert: None,
         force: true,
         options: OptionArgs {
             ignore_seconds: false,
@@ -887,7 +979,7 @@ pub(crate) fn upload_file(path: &Path, env: &mut Env<'_>) -> Done {
             return Err(Exit::InputError);
         }
     };
-    if !bytes.starts_with(&[0x1f, 0x8b]) {
+    if qso_graph_trust::upload::check_signed_log(&bytes).is_err() {
         env.message(
             Tone::Error,
             format_args!(
@@ -1498,6 +1590,10 @@ fn request_from(
 }
 
 fn cert_request(store: &Store, a: &RequestArgs, env: &mut Env<'_>) -> Done {
+    if let Err(e) = check_output(&a.output) {
+        env.message(Tone::Error, format_args!("{e}"));
+        return Err(Exit::OutputError);
+    }
     if !a.force && a.output.exists() {
         env.message(
             Tone::Error,
@@ -1533,6 +1629,10 @@ fn cert_request(store: &Store, a: &RequestArgs, env: &mut Env<'_>) -> Done {
 }
 
 fn cert_renew(store: &Store, a: &RenewArgs, env: &mut Env<'_>) -> Done {
+    if let Err(e) = check_output(&a.output) {
+        env.message(Tone::Error, format_args!("{e}"));
+        return Err(Exit::OutputError);
+    }
     if !a.force && a.output.exists() {
         env.message(
             Tone::Error,

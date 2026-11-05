@@ -39,3 +39,39 @@ fn filename_uses_tqsls_utc_format() {
         filename(UNIX_EPOCH)
     );
 }
+
+#[test]
+fn only_a_signed_log_is_one_to_upload() {
+    use super::{NotASignedLog, check_signed_log};
+    let corpus = |f: &str| {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/corpus/standard")
+                .join(f),
+        )
+        .expect(f)
+    };
+    let tq7 = corpus("signed/W4W-EVENT.tq7");
+    assert_eq!(check_signed_log(&crate::signed_log::tq8(&tq7)), Ok(()));
+    // A TQSL backup is gzip too, and holds private keys.
+    assert_eq!(
+        check_signed_log(&corpus("standard.tbk")),
+        Err(NotASignedLog)
+    );
+    // Not gzip, gzip of something else, and a signed log with no QSO.
+    assert_eq!(check_signed_log(&tq7), Err(NotASignedLog));
+    assert_eq!(
+        check_signed_log(&crate::signed_log::tq8(&corpus("adif/W4W-EVENT.adi"))),
+        Err(NotASignedLog)
+    );
+    let text = String::from_utf8(tq7.clone()).expect("text");
+    let header: String = text
+        .split("<Rec_Type:8>tCONTACT")
+        .next()
+        .expect("head")
+        .into();
+    assert_eq!(
+        check_signed_log(&crate::signed_log::tq8(header.as_bytes())),
+        Err(NotASignedLog)
+    );
+}

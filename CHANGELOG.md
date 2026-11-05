@@ -33,6 +33,10 @@ versions follow [Semantic Versioning](https://semver.org/).
   stop the run with TQSL's code 14, since `qg-trust` cannot ask. Exit codes 0 to 4, 6 to 11, 14 and 15.
 - The library names DXCC entities and the location fields each takes (`station::dxcc_name`,
   `station::fields_for`).
+- The library checks a file is a signed log before it is uploaded (`upload::check_signed_log`):
+  a TQSL backup, which is gzip too and holds private keys, is refused.
+- A new-only signed log is refused at writing if another signing recorded one of its QSOs after
+  the plan was made (`StoreError::SignedMeanwhile`), so two runs never both sign a QSO as new.
 - Versioned library store with keys in the OS credential store, file locking, atomic metadata
   updates and recovery reporting; credential-store round trips are tested on Windows, Linux and
   macOS with a test-only service name.

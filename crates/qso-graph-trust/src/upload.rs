@@ -31,6 +31,42 @@ pub const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 /// Maximum returned LoTW message size in UTF-8 bytes, after removing control characters.
 pub const MAX_MESSAGE_BYTES: usize = 4096;
 
+/// Why bytes are not a signed log to upload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NotASignedLog;
+
+impl std::fmt::Display for NotASignedLog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("not a signed log (.tq8)")
+    }
+}
+
+impl std::error::Error for NotASignedLog {}
+
+/// The largest signed log, decompressed, that [`check_signed_log`] reads.
+pub const MAX_SIGNED_LOG_BYTES: usize = 64 * 1024 * 1024;
+
+/// Check, before anything is sent, that `tq8` is a signed log and nothing else: gzip holding only
+/// TQSL's signed-log records (`tCERT`, `tSTATION`, `tCONTACT`), with at least one QSO. A TQSL
+/// backup, which is gzip too and holds private keys, or any other file is refused.
+/// [`UploadRequest`] does not check its input; call this first.
+pub fn check_signed_log(tq8: &[u8]) -> Result<(), NotASignedLog> {
+    let tq7 = crate::gzip::decompress(tq8, MAX_SIGNED_LOG_BYTES).map_err(|_| NotASignedLog)?;
+    let records = crate::records::parse(&tq7).map_err(|_| NotASignedLog)?;
+    let mut contacts = 0usize;
+    for record in &records {
+        match record.get("REC_TYPE") {
+            Some(b"tCONTACT") => contacts += 1,
+            Some(b"tCERT" | b"tSTATION") => {}
+            _ => return Err(NotASignedLog),
+        }
+    }
+    if contacts == 0 {
+        return Err(NotASignedLog);
+    }
+    Ok(())
+}
+
 /// An immutable multipart POST of already-signed `.tq8` bytes. No transport or I/O methods.
 /// Constructing this neither validates nor changes the signed log.
 pub struct UploadRequest {

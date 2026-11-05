@@ -34,7 +34,7 @@ uploads one later. A key that TQSL protected with a password is asked for once, 
 
 | Command | |
 |---|---|
-| `qg-trust sign LOG -l NAME` | sign a log; `-b`/`-e` choose dates, `--again` signs QSOs signed before |
+| `qg-trust sign LOG -l NAME` | sign a log; `-b`/`-e` choose dates, `--again` signs QSOs signed before, `--cert ID` picks the certificate when you have more than one for the call |
 | `qg-trust send LOG -l NAME` | sign and upload, keeping the `.tq8` beside the log |
 | `qg-trust upload LOG.tq8` | upload a signed log |
 | `qg-trust import FILE` | a TQSL backup (`.tbk`), ARRL's answer to a request (`.tq6`) or a `.p12` |
@@ -78,8 +78,11 @@ signs with the keys in the store and uploads. `-i FILE` instead reads a TQSL bac
 | `-h`, `-v` | help, version |
 | `--completions SHELL` | write shell completions (bash, zsh, fish, powershell, elvish) |
 
-`qg-trust` cannot ask what to do with QSOs signed before, so without `-a` (or with `-a ask`) it stops
-with code 14 when there are any, and says which `-a` to give. If the key read with `-i` has a
+`qg-trust` cannot ask, so without `-a` (or with `-a ask`) it stops where TQSL would ask: at QSOs
+signed before, with code 14, and at a QSO it cannot sign, with code 8, signing nothing either
+time and saying which `-a` to give. `-a abort` stops at either, as TQSL's batch mode does;
+`-a compliant` and `-a all` sign the rest. `-a` other than `all` needs the store's record of signed
+QSOs, so it is refused with `-i`. If the key read with `-i` has a
 password, `qg-trust` asks for it at the terminal, with what you type hidden; when a logger runs it,
 it reads the password as one line from standard input.
 
@@ -103,7 +106,7 @@ commands above use the same codes without that line:
 | 9 | Some QSOs not signed, each named with the reason; the rest are |
 | 10 | Command syntax: a missing or unknown option, an invalid date, a password given on the command line |
 | 11 | LoTW could not be reached: the signed log is kept for another try |
-| 14 | QSOs signed before, and no `-a` saying what to do |
+| 14 | QSOs signed before, with `-a abort`, or no `-a` saying what to do |
 | 15 | The password does not unlock the key: nothing is written |
 
 GPL-3.0-only. QSO Graph Trust is not made, affiliated with or endorsed by ARRL; "Logbook of The World",

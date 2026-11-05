@@ -21,8 +21,9 @@ use anstyle::{AnsiColor, Style};
 use clap::{CommandFactory, FromArgMatches, Parser, error::ErrorKind};
 use clap_complete::Shell;
 use qso_graph_trust::certificate::Trust;
+use qso_graph_trust::options::{QthHandling, SigningOptions};
 use qso_graph_trust::qso::{Date, Qso};
-use qso_graph_trust::signed_log::{LogError, sign_log, tq8};
+use qso_graph_trust::signed_log::{LogError, sign_log_with_options, tq8};
 use qso_graph_trust::signing::KeyError;
 use qso_graph_trust::store::{Store, StoreError};
 use qso_graph_trust::tbk::{self, BackedUpCertificate};
@@ -473,11 +474,6 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
             "-a abort, compliant and ask need the record of QSOs signed before, which is in the \
              store: qg-trust import the backup, then leave out -i",
         ))
-    } else if options.verify.is_some_and(|v| v != Verify::Report) {
-        Some(syntax_error(
-            env,
-            "-f ignore and -f update sign from the store: qg-trust import the backup, then leave out -i",
-        ))
     } else {
         let code = sign(&options, env);
         if options.upload && matches!(code, Exit::Success | Exit::QsosSuppressed) {
@@ -602,6 +598,25 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
     else {
         return Exit::CommandError;
     };
+    if let Err(e) = crate::commands::check_output(
+        &options
+            .output
+            .clone()
+            .unwrap_or_else(|| input.with_extension("tq8")),
+    ) {
+        env.message(Tone::Error, format_args!("{e}"));
+        return Exit::OutputError;
+    }
+    // TQSL's -f, on TQSL's options-aware path: report (the default) lets a log fill a field the
+    // location leaves empty, as tqslconvert.cpp does.
+    let signing = SigningOptions {
+        qth: match options.verify {
+            Some(Verify::Ignore) => QthHandling::Ignore,
+            Some(Verify::Update) => QthHandling::FromLog,
+            Some(Verify::Report) | None => QthHandling::Refuse,
+        },
+        ..SigningOptions::default()
+    };
     let backup = match read_file(backup_path, tbk::MAX_TBK_LEN) {
         Ok(bytes) => match tbk::read(&bytes, env.trust) {
             Ok(backup) => backup,
@@ -698,7 +713,7 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
     let mut qsos = Vec::new();
     let (mut refused, mut out_of_range) = (0usize, 0usize);
     for (i, record) in records.iter().enumerate() {
-        match Qso::from_adif(record) {
+        match Qso::from_adif_with_options(record, &signing) {
             Ok(qso) => {
                 let date = qso.date();
                 if options.begin.is_some_and(|b| date < b) || options.end.is_some_and(|e| date > e)
@@ -731,7 +746,7 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
             env.message(Tone::Error, format_args!("the log: no QSOs to sign"));
             return Exit::NoQsos;
         }
-        match sign_log(certificate, &key, station, &qsos, env.now) {
+        match sign_log_with_options(certificate, &key, station, &qsos, env.now, &signing) {
             Ok(signed) => break signed,
             Err(LogError::QsoOutsideCertificate { index }) => {
                 env.message(
@@ -829,19 +844,21 @@ pub(crate) fn read_file(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
 /// The temporary file is new, made with a name of its own (never an existing file or a link
 /// followed), so nothing but `path` is ever replaced.
 pub(crate) fn write_whole(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let partial = new_partial(path)?;
-    let written = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&partial)?;
-        file.write_all(bytes)?;
-        file.sync_all()
-    })();
-    match written.and_then(|()| std::fs::rename(&partial, path)) {
+    write_whole_via(path, bytes, &new_partial(path)?)
+}
+
+fn write_whole_via(path: &Path, bytes: &[u8], partial: &Path) -> io::Result<()> {
+    // Only a file this call made is removed on failure: if the name is taken, nothing is.
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(partial)?;
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    match written.and_then(|()| std::fs::rename(partial, path)) {
         Ok(()) => Ok(()),
         Err(e) => {
-            let _ = std::fs::remove_file(&partial);
+            let _ = std::fs::remove_file(partial);
             Err(e)
         }
     }

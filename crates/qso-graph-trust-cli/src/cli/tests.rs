@@ -1140,3 +1140,14 @@ fn round_three_signing_messages_use_only_file_roles_and_certificate_calls() {
     assert!(ran.err.contains("the log: no QSOs to sign"));
     assert!(!ran.err.contains("SECRET"));
 }
+
+#[test]
+fn a_temporary_name_already_taken_is_never_removed() {
+    let dir = scratch();
+    let out = dir.join("log.tq8");
+    let taken = dir.join(".log.tq8.taken.partial");
+    std::fs::write(&taken, b"not ours").expect("write");
+    assert!(super::write_whole_via(&out, b"signed", &taken).is_err());
+    assert_eq!(std::fs::read(&taken).expect("kept"), b"not ours");
+    assert!(!out.exists());
+}

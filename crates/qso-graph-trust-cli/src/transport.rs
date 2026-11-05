@@ -62,7 +62,6 @@ fn maybe_sent(error: &ureq::Error) -> bool {
     match error {
         ureq::Error::HostNotFound
         | ureq::Error::ConnectionFailed
-        | ureq::Error::Rustls(_)
         | ureq::Error::Tls(_)
         | ureq::Error::TlsRequired
         | ureq::Error::RequireHttpsOnly(_)
@@ -70,12 +69,24 @@ fn maybe_sent(error: &ureq::Error) -> bool {
         | ureq::Error::InvalidProxyUrl
         | ureq::Error::ConnectProxyFailed(_)
         | ureq::Error::Timeout(Timeout::Resolve | Timeout::Connect) => false,
+        ureq::Error::Rustls(e) => !refused_certificate(e),
         ureq::Error::Io(e) => {
             !(matches!(e.kind(), std::io::ErrorKind::ConnectionRefused)
-                || e.get_ref().is_some_and(|e| e.is::<rustls::Error>()))
+                || e.get_ref()
+                    .and_then(|e| e.downcast_ref::<rustls::Error>())
+                    .is_some_and(refused_certificate))
         }
         _ => true,
     }
+}
+
+/// A TLS error that can only come before the request: LoTW's certificate was not accepted.
+/// Other TLS errors (an alert, a bad record) can come after the log was sent.
+fn refused_certificate(e: &rustls::Error) -> bool {
+    matches!(
+        e,
+        rustls::Error::InvalidCertificate(_) | rustls::Error::NoCertificatesPresented
+    )
 }
 
 /// What went wrong, in words, without the request: no header or body is quoted.
@@ -147,6 +158,20 @@ mod tests {
     #[test]
     fn a_failure_after_connecting_may_have_sent_the_log() {
         use ureq::Timeout;
+        let alert = || {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                rustls::Error::AlertReceived(rustls::AlertDescription::InternalError),
+            )
+        };
+        let refused = || {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                rustls::Error::InvalidCertificate(rustls::CertificateError::Expired),
+            )
+        };
+        assert!(super::maybe_sent(&ureq::Error::Io(alert())));
+        assert!(!super::maybe_sent(&ureq::Error::Io(refused())));
         for e in [
             ureq::Error::Timeout(Timeout::RecvResponse),
             ureq::Error::Timeout(Timeout::Global),

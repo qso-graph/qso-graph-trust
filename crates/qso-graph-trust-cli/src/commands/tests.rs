@@ -661,7 +661,12 @@ fn a_logger_signs_from_the_store_with_tqsls_options_and_codes() {
     assert!(ran.err.contains("-a compliant"), "{}", ran.err);
 
     for (action, code, status) in [
-        ("abort", 8, "Final Status: No QSOs to upload(8)"),
+        // TQSL's batch mode aborts at the first QSO signed before (apps/tqsl.cpp, SignLogFile).
+        (
+            "abort",
+            14,
+            "Final Status: Previously signed QSOs were detected(14)",
+        ),
         ("compliant", 8, "Final Status: No QSOs to upload(8)"),
         ("ALL", 0, "Final Status: Success(0)"),
     ] {
@@ -962,4 +967,136 @@ fn a_request_never_writes_through_another_file() {
             b"someone else's file"
         );
     }
+}
+
+#[test]
+fn a_tqsl_backup_is_never_uploaded() {
+    let ham = Ham::new();
+    let ran = ham.run(&["upload", path(&set("standard.tbk"))]);
+    assert_eq!(ran.code, 6, "{}", ran.err);
+    assert!(
+        ran.err.contains("is not a signed log (.tq8)"),
+        "{}",
+        ran.err
+    );
+    assert!(ham.sent.borrow().is_empty());
+}
+
+#[test]
+fn no_output_may_take_a_store_files_name_in_any_folder() {
+    let ham = Ham::imported();
+    let other = scratch();
+    let elsewhere = other.join("STORE.XML");
+    std::fs::write(&elsewhere, b"another store's index").expect("write");
+    let mut request = REQUEST.to_vec();
+    let own = ham.dir.join("store.xml");
+    for out in [&own, &elsewhere] {
+        let before = std::fs::read(out).expect("there");
+        for args in [
+            vec![
+                "sign",
+                path(&set("adif/W4W-EVENT.adi")),
+                "-l",
+                "W4W-EVENT",
+                "--again",
+                "--force",
+                "-o",
+                path(out),
+            ],
+            vec![
+                "-x",
+                "-a",
+                "all",
+                "-l",
+                "W4W-EVENT",
+                "-o",
+                path(out),
+                path(&set("adif/W4W-EVENT.adi")),
+            ],
+            vec![
+                "-x",
+                "-i",
+                path(&set("standard.tbk")),
+                "-l",
+                "W4W-EVENT",
+                "-o",
+                path(out),
+                path(&set("adif/W4W-EVENT.adi")),
+            ],
+            {
+                request.truncate(REQUEST.len());
+                request.push(path(out));
+                request.push("--force");
+                request.clone()
+            },
+        ] {
+            let ran = ham.run(&args);
+            assert_eq!(ran.code, 7, "{args:?}: {}", ran.err);
+            assert_eq!(std::fs::read(out).expect("still there"), before, "{args:?}");
+        }
+    }
+    assert!(ham.store.pending_requests().expect("pending").is_empty());
+}
+
+#[test]
+fn a_logger_that_cannot_be_asked_signs_nothing_when_a_qso_cannot_be_signed() {
+    let ham = Ham::unsigned();
+    let dir = scratch();
+    let adi = dir.join("bad.adi");
+    let log = String::from_utf8(read("adif/W4W-EVENT.adi")).expect("text");
+    std::fs::write(&adi, log.replacen("<MODE:2>CW ", "", 1)).expect("write");
+    for args in [
+        vec!["-x", "-u", "-l", "W4W-EVENT", path(&adi)],
+        vec!["-x", "-u", "-a", "ask", "-l", "W4W-EVENT", path(&adi)],
+    ] {
+        let ran = ham.run(&args);
+        assert_eq!(ran.code, 8, "{args:?}: {}", ran.err);
+        assert!(
+            ran.err.contains("-a compliant signs the rest"),
+            "{}",
+            ran.err
+        );
+    }
+    assert!(ham.sent.borrow().is_empty());
+    assert!(!dir.join("bad.tq8").exists());
+}
+
+#[test]
+fn sign_says_when_some_qsos_were_left_out() {
+    let ham = Ham::unsigned();
+    let dir = scratch();
+    let adi = dir.join("bad.adi");
+    let log = String::from_utf8(read("adif/W4W-EVENT.adi")).expect("text");
+    std::fs::write(&adi, log.replacen("<MODE:2>CW ", "", 1)).expect("write");
+    let ran = ham.run(&["sign", path(&adi), "-l", "W4W-EVENT"]);
+    assert_eq!(ran.code, 9, "{}", ran.err);
+    assert!(ran.out.contains("1 not signed, named above"), "{}", ran.out);
+}
+
+#[test]
+fn f_works_with_i_on_the_same_path_as_the_store() {
+    let ham = Ham::new();
+    let dir = scratch();
+    let adi = dir.join("moved.adi");
+    let log = String::from_utf8(read("adif/W4W-EVENT.adi")).expect("text");
+    std::fs::write(
+        &adi,
+        log.replacen("<EOR>", "<MY_GRIDSQUARE:4>AA00 <EOR>", 1),
+    )
+    .expect("write");
+    let i = path(&set("standard.tbk")).to_string();
+    let report = ham.run(&["-x", "-i", &i, "-l", "W4W-EVENT", path(&adi)]);
+    assert_eq!(report.code, 9, "{}", report.err);
+    let _ = std::fs::remove_file(dir.join("moved.tq8"));
+    let ignore = ham.run(&[
+        "-x",
+        "-f",
+        "ignore",
+        "-i",
+        &i,
+        "-l",
+        "W4W-EVENT",
+        path(&adi),
+    ]);
+    assert_eq!(ignore.code, 0, "{}", ignore.err);
 }

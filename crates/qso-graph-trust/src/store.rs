@@ -151,6 +151,9 @@ pub enum StoreError {
     Invalid(&'static str),
     /// A certificate or location already exists.
     AlreadyExists,
+    /// A new-only signed log holds a QSO another signing recorded after the plan was made.
+    /// Nothing was written; prepare and sign again.
+    SignedMeanwhile,
     /// The requested certificate, location or key is absent.
     NotFound,
     /// Secure randomness was unavailable.
@@ -183,6 +186,9 @@ impl fmt::Display for StoreError {
             Self::Limit(what) => write!(f, "the store exceeds its limit for {what}"),
             Self::Invalid(what) => write!(f, "invalid store: {what}"),
             Self::AlreadyExists => f.write_str("the store entry already exists"),
+            Self::SignedMeanwhile => f.write_str(
+                "a QSO in this log was signed by another run meanwhile; nothing was written",
+            ),
             Self::NotFound => f.write_str("the store entry or its key is missing"),
             Self::Random => f.write_str("secure randomness is unavailable"),
             Self::Rollback { write, cleanup } => write!(

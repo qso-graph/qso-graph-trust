@@ -90,6 +90,7 @@ impl SigningPlan {
         };
         Some(SigningSelection {
             qsos,
+            new_only: choice == DuplicateChoice::NewOnly,
             station: self.station.clone(),
             locations: self.locations.as_ref().map(|locations| match choice {
                 DuplicateChoice::SignAgain => locations.clone(),
@@ -105,6 +106,7 @@ impl SigningPlan {
 /// A selected log; its QSOs and station cannot change between signing and recording.
 pub struct SigningSelection {
     qsos: Vec<Qso>,
+    new_only: bool,
     station: StationLocation,
     locations: Option<Vec<StationLocation>>,
 }
@@ -140,7 +142,11 @@ impl SigningSelection {
                 }
             })
             .collect();
-        Ok(SignedLog { bytes, records })
+        Ok(SignedLog {
+            bytes,
+            records,
+            new_only: self.new_only,
+        })
     }
 }
 
@@ -148,6 +154,7 @@ impl SigningSelection {
 pub struct SignedLog {
     bytes: Vec<u8>,
     records: Vec<SignedQso>,
+    new_only: bool,
 }
 impl SignedLog {
     /// The signed `.tq8` bytes. Inspecting them does not record anything.
@@ -200,6 +207,16 @@ impl SignedLog {
         }
         let _lock = store.lock()?;
         let mut data = store.read()?;
+        // A new-only selection was made from a snapshot; another signing may have recorded one of
+        // its QSOs since. Checked under the lock, so two runs never both sign a QSO as new.
+        if self.new_only
+            && self
+                .records
+                .iter()
+                .any(|r| data.signed_qsos.contains_key(&r.key))
+        {
+            return Err(StoreError::SignedMeanwhile);
+        }
         merge(&mut data.signed_qsos, &self.records, true)?;
         let xml = format::write(&data)?;
         let mut output = owner_file().create_new(true).open(path)?;
