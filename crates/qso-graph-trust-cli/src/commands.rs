@@ -278,6 +278,12 @@ struct RenewArgs {
     /// The certificate to renew, by ID or call.
     #[arg(value_name = "CERT")]
     cert: String,
+    /// The last QSO date the new certificate covers (default: the one this certificate has).
+    #[arg(long = "to", value_name = "DATE", value_parser = date, conflicts_with = "no_end_date")]
+    end: Option<Date>,
+    /// No last QSO date: a call you still hold.
+    #[arg(long)]
+    no_end_date: bool,
     /// Where to write the request.
     #[arg(short = 'o', long, value_name = "FILE.tq5")]
     output: PathBuf,
@@ -1272,7 +1278,9 @@ fn import_tq6(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit>
                     env.out,
                     "  {}: {}",
                     short(&c.id),
-                    if c.attached_request {
+                    if c.already_here {
+                        "already here"
+                    } else if c.attached_request {
                         "the certificate for your request, with its key: ready to sign"
                     } else if c.has_key {
                         "certificate, with its key"
@@ -1281,11 +1289,11 @@ fn import_tq6(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit>
                     }
                 );
             }
+            let new = imported.iter().filter(|c| !c.already_here).count();
             let _ = writeln!(
                 env.out,
-                "Imported {} certificate{} from {}.",
-                imported.len(),
-                plural(imported.len()),
+                "Imported {new} certificate{} from {}.",
+                plural(new),
                 path.display()
             );
             Ok(())
@@ -1679,14 +1687,19 @@ fn cert_renew(store: &Store, a: &RenewArgs, env: &mut Env<'_>) -> Done {
         return Err(Exit::CommandError);
     };
     let cert: &Certificate = &found.certificate;
-    // Renewal keeps the call's first QSO date, for a call still held: no end date.
-    let (from, _) = cert.qso_dates();
+    // Renewal asks for the QSO dates this certificate has, unless told otherwise.
+    let (from, to) = cert.qso_dates();
+    let end = if a.no_end_date {
+        None
+    } else {
+        Some(a.end.unwrap_or(to))
+    };
     let request = request_from(
         &a.person,
         cert.callsign(),
         cert.dxcc(),
         from,
-        None,
+        end,
         Kind::Personal,
     );
     let generated = store

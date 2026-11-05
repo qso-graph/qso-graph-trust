@@ -1162,3 +1162,82 @@ fn a_backup_gives_its_key_to_a_certificate_imported_alone_before() {
     ]);
     assert_eq!(ran.code, 0, "{}", ran.err);
 }
+
+#[test]
+fn a_tq6_with_one_certificate_here_already_imports_the_others() {
+    let ham = Ham::new();
+    let ran = ham.run(&["import", path(&set("certs/W4W.tq6"))]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let text = |f: &str| {
+        String::from_utf8(
+            gzip::decompress(&read(f), 1024 * 1024)
+                .expect("gzip")
+                .to_vec(),
+        )
+        .expect("text")
+    };
+    let usercert = |t: &str| {
+        let start = t.find("<usercert>").expect("usercert");
+        let end = t.find("</usercert>").expect("end") + "</usercert>".len();
+        t[start..end].to_string()
+    };
+    let kn4yu = text("certs/KN4YU.tq6");
+    let both = kn4yu.replacen(
+        "</tqslcerts>",
+        &format!("{}\n</tqslcerts>", usercert(&text("certs/W4W.tq6"))),
+        1,
+    );
+    let dir = scratch();
+    let tq6 = dir.join("both.tq6");
+    std::fs::write(&tq6, both).expect("write");
+    let ran = ham.run(&["import", path(&tq6)]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("already here"), "{}", ran.out);
+    assert!(
+        ran.out.contains("Imported 1 certificate from"),
+        "{}",
+        ran.out
+    );
+    assert_eq!(ham.store.certificates().expect("certificates").len(), 2);
+}
+
+#[test]
+fn a_renewal_asks_for_the_qso_dates_the_certificate_has() {
+    let ham = Ham::imported();
+    let dir = scratch();
+    let w4w = ham
+        .store
+        .certificates()
+        .expect("certificates")
+        .into_iter()
+        .find(|c| c.certificate.callsign() == "W4W")
+        .expect("W4W");
+    let (_, to) = w4w.certificate.qso_dates();
+    let renew = |extra: &[&str], out: &Path| {
+        let mut args = vec![
+            "cert",
+            "renew",
+            "W4W",
+            "--name",
+            "Test Operator",
+            "--address",
+            "1 Main St",
+            "--city",
+            "Boise",
+            "--country",
+            "USA",
+            "--email",
+            "test@example.org",
+        ];
+        args.extend_from_slice(extra);
+        args.extend_from_slice(&["-o", path(out)]);
+        let ran = ham.run(&args);
+        assert_eq!(ran.code, 0, "{extra:?}: {}", ran.err);
+        std::fs::read_to_string(out).expect("the .tq5")
+    };
+    let kept = renew(&[], &dir.join("kept.tq5"));
+    assert!(kept.contains("TQSL_CRQ_QSO_NOT_AFTER"), "{kept}");
+    assert!(kept.contains(&to.to_string()), "{kept}");
+    let open = renew(&["--no-end-date"], &dir.join("open.tq5"));
+    assert!(!open.contains("TQSL_CRQ_QSO_NOT_AFTER"), "{open}");
+}

@@ -40,7 +40,7 @@ uploads one later. A key that TQSL protected with a password is asked for once, 
 | `qg-trust import FILE` | a TQSL backup (`.tbk`), ARRL's answer to a request (`.tq6`) or a `.p12` |
 | `qg-trust cert list` | your certificates and requests (`--json` for scripts) |
 | `qg-trust cert request` | ask ARRL for a certificate: writes the `.tq5` to upload at LoTW |
-| `qg-trust cert renew CALL` | renew one, with a new key |
+| `qg-trust cert renew CALL` | renew one, with a new key, for the QSO dates it has (`--to DATE` or `--no-end-date` to change the last) |
 | `qg-trust cert delete ID --force` | delete a certificate and its key |
 | `qg-trust location list` / `show NAME` | your station locations |
 | `qg-trust location add NAME --call CALL --dxcc N --grid GRID FIELD=VALUE…` | add one |

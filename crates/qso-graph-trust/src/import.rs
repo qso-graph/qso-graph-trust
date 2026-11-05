@@ -86,6 +86,8 @@ pub struct ImportedCertificate {
     pub has_key: bool,
     /// Whether import attached an existing pending request and removed that pending record.
     pub attached_request: bool,
+    /// Whether the certificate was in the store already; nothing was added for it.
+    pub already_here: bool,
 }
 
 pub(crate) fn check_certificates(
