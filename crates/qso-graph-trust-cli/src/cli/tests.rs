@@ -23,7 +23,7 @@ fn set(file: &str) -> PathBuf {
 }
 
 fn read(file: &str) -> Vec<u8> {
-    std::fs::read(set(file)).unwrap_or_else(|e| panic!("{file}: {e}"))
+    std::fs::read(set(file)).expect("a file of the standard test set")
 }
 
 /// A folder of its own for each test's output.

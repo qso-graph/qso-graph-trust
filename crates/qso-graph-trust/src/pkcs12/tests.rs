@@ -5,6 +5,15 @@ use super::*;
 use crate::signing::{KeyEntry, KeyError};
 use x509_cert::der::{DecodePem, Encode};
 
+/// The test set's `.p12` password, from `tests/corpus/pki/p12-password`.
+fn p12_password() -> Vec<u8> {
+    std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/corpus/pki/p12-password"),
+    )
+    .expect("the test .p12 password")
+}
+
 fn file(name: &str) -> Vec<u8> {
     std::fs::read(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -67,7 +76,7 @@ fn authority_bag() -> Zeroizing<Vec<u8>> {
     )
 }
 fn pfx(auth: &[u8]) -> Zeroizing<Vec<u8>> {
-    let password = bmp(b"qgt-test").expect("password");
+    let password = bmp(&p12_password()).expect("password");
     let key = kdf(ImportDigest::Sha256, &password, b"test-salt", 2048, 3, 32);
     let digest = qso_graph_trust_awslc::import_hmac(ImportDigest::Sha256, &key, auth);
     let info = seq(&[&seq(&[&tlv(6, SHA256), &tlv(5, &[])]), &tlv(4, &digest)]);
@@ -94,7 +103,7 @@ fn pkcs12_sha1_3des_pbe_loads_and_matches_the_corpus_key() {
     let key_content = auth.0;
     let public = seq(&[&cert_bag(), &authority_bag()]);
     let auth = seq(&[&data(&public), key_content]);
-    let imported = read(&pfx(&auth), b"qgt-test", &trust()).expect("3DES import");
+    let imported = read(&pfx(&auth), &p12_password(), &trust()).expect("3DES import");
     let expected = KeyEntry::read_key_file(&file("tqsl/1024/tqsl/keys/QG0TEST"))
         .expect("key")
         .remove(0)
@@ -123,7 +132,7 @@ fn authenticated_key_certificate_mismatch_is_refused() {
     ]);
     let auth = seq(&[&data(&safe)]);
     assert!(matches!(
-        read(&pfx(&auth), b"qgt-test", &trust()),
+        read(&pfx(&auth), &p12_password(), &trust()),
         Err(ImportError::Key(KeyError::PublicKeyMismatch))
     ));
 }
@@ -140,10 +149,10 @@ fn nested_bags_counts_and_der_sizes_are_bounded() {
         safe = seq(&[&bag(SAFE_BAG, &safe)]);
     }
     let accepted = pfx(&seq(&[&data(&safe)]));
-    assert!(read(&accepted, b"qgt-test", &trust()).is_ok());
+    assert!(read(&accepted, &p12_password(), &trust()).is_ok());
     safe = seq(&[&bag(SAFE_BAG, &safe)]);
     assert!(matches!(
-        read(&pfx(&seq(&[&data(&safe)])), b"qgt-test", &trust()),
+        read(&pfx(&seq(&[&data(&safe)])), &p12_password(), &trust()),
         Err(ImportError::Limit)
     ));
     let certs = concat(
@@ -157,7 +166,7 @@ fn nested_bags_counts_and_der_sizes_are_bounded() {
     assert!(matches!(
         read(
             &pfx(&seq(&[&data(&tlv(0x30, &certs))])),
-            b"qgt-test",
+            &p12_password(),
             &trust()
         ),
         Err(ImportError::Limit)

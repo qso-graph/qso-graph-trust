@@ -166,6 +166,8 @@ case "$(cd "$dest" && pwd -P)" in
   "$root/tests/corpus/pki") ;;
   *) echo "tests/corpus/pki resolves outside the repository: refusing to write" >&2; exit 1 ;;
 esac
+# The .p12 password, for the tests to read, so no test spells it out as a password literal.
+printf '%s' "$P12_PASSWORD" > "$out/p12-password"
 for f in "$out"/*; do
   mv -f -- "$f" "$dest/"
 done

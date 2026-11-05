@@ -27,7 +27,7 @@ fn set(file: &str) -> PathBuf {
 }
 
 fn read(file: &str) -> Vec<u8> {
-    std::fs::read(set(file)).unwrap_or_else(|e| panic!("{file}: {e}"))
+    std::fs::read(set(file)).expect("a file of the standard test set")
 }
 
 fn scratch() -> PathBuf {
@@ -1148,7 +1148,7 @@ fn a_backup_gives_its_key_to_a_certificate_imported_alone_before() {
     assert_eq!(ran.code, 0, "{}", ran.err);
     let certs = ham.store.certificates().expect("certificates");
     assert_eq!(certs.len(), 3);
-    assert!(certs.iter().all(|c| c.key_name.is_some()), "{certs:?}");
+    assert!(certs.iter().all(|c| c.key_name.is_some()));
     let dir = scratch();
     let out = dir.join("event.tq8");
     let ran = ham.run(&[
