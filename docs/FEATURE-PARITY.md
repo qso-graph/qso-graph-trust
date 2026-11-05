@@ -11,6 +11,7 @@ has, so every feature is placed in one of three lists, in priority order:
 
 **Published:** `0.1.0-beta.4` on crates.io: the library (`qso-graph-trust`), its binding
 (`qso-graph-trust-awslc`) and the command line (`qso-graph-trust-cli`, the `qg-trust` command).
+**0.1.0** adds the store-backed `qg-trust` commands and the upload.
 
 This is the library's list. The command line (`qg-trust`) and QSO Graph Desktop are built on the
 library, so their lists follow from it: the command line is at the end, and Desktop's screens are
@@ -29,7 +30,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | List | Features | Done | Part done | To do |
 |---|---|---|---|---|
-| Needed for 0.7.0 | 43 | 35 | 7 | 1 |
+| Needed for 0.7.0 | 43 | 39 | 3 | 1 |
 | Nice to have | 15 |  |  | 15 |
 | Won't add | 15 | | | |
 
@@ -52,7 +53,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| Keys kept in the OS credential store | a file | The store keeps keys behind an interface no caller can read through; the macOS, Windows and Linux stores plug into it once their crates are decided | Part done | #172 |
+| Keys kept in the OS credential store | a file | macOS Keychain, Windows Credential Manager or the Secret Service, behind an interface no caller can read through; `qg-trust` uses it | Done | #172, #173 |
 | Certificates and locations saved, in one format the command line and Desktop share | files | One versioned `store.xml`, replaced whole under a lock; a newer version is refused, never rewritten | Done | #172 |
 | Record of QSOs already signed (the duplicate check) | `uploaded.db` | TQSL's own duplicate key, checked against TQSL's record of the standard set | Done | #172 |
 
@@ -61,8 +62,8 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
 | Export certificates, keys and the signed-QSO record to one file | File menu | A part of QSO Graph Desktop's one export file, beside Callsigns and Locations and Settings; all ticked exports everything. This part alone is encrypted (AES-256-GCM), under a 20-character password QG Trust makes up. To move only some calls, delete the others first | Done | #172, #174 |
-| Import it on any computer (macOS, Windows, Linux), keys into that computer's credential store | File: Restore | Part by part, onto a clean slate: everything is checked first, then what this computer holds is replaced, nothing merged; the OS stores wait on 1.2 | Part done | #172, #174 |
-| Read TQSL's `.tbk` file: certificates, keys, locations | File menu | Reads, checks and saves what it holds; keys at rest wait on 1.2 | Part done | #172 |
+| Import it on any computer (macOS, Windows, Linux), keys into that computer's credential store | File: Restore | Part by part, onto a clean slate: everything is checked first, then what this computer holds is replaced, nothing merged; Desktop's export file carries it | Part done: Desktop's screen | #172, #174 |
+| Read TQSL's `.tbk` file: certificates, keys, locations | File menu | `qg-trust import`: reads, checks and saves what it holds, keys into the OS credential store | Done | #172, #173 |
 | Restore TQSL's record of QSOs already signed | File: Restore | Merged into the record, never overwriting what is there | Done | #172 |
 | Use TQSL's settings that change what's signed: custom mode mappings, ignore seconds, ignore callsigns in the log, non-amateur calls, location details in the log | Preferences | [Signing options](SIGNING-OPTIONS.md), by hand or from a `.tbk`'s preferences; checked against tqsllib | Done | #172 |
 | Say which of TQSL's settings were not taken | | Listed | Done | #172 |
@@ -115,8 +116,8 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 
 | Feature | TQSL | QG Trust today | Status | Issue |
 |---|---|---|---|---|
-| Upload a signed log and report LoTW's answer | Sign and upload | The request and LoTW's answer, as TQSL makes and reads them; the connection is the caller's (the command line's or Desktop's). Never in tests: nothing is uploaded to ARRL | Part done | #172 |
-| Always check LoTW's server certificate | a setting | A requirement on the connection's owner; never turned off | Part done | #172 |
+| Upload a signed log and report LoTW's answer | Sign and upload | `qg-trust upload` and `send`: the request and LoTW's answer as TQSL makes and reads them, over HTTPS. Tests use a stand-in: nothing is uploaded to ARRL | Done | #172, #173 |
+| Always check LoTW's server certificate | a setting | `qg-trust` checks it against Mozilla's roots, built in; never turned off, and proved refusing self-signed, expired, wrong-host and untrusted certificates | Done | #173 |
 
 ## 2. Nice to have
 
@@ -134,7 +135,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Rebuild the record of signed QSOs from LoTW | Help: Synchronize | Needs upload first | Later |
 | Ask LoTW whether a certificate is still good (by serial) | | Calls ARRL; needs a decision first | Later |
 | Take a new ARRL configuration (`config.xml`) without a new release | automatic | A release with new tables works meanwhile | Later |
-| Wipe the record of signed QSOs | `-w` | Library: `Store::wipe_signed_qsos`; CLI integration remains | Part done |
+| Wipe the record of signed QSOs | `-w` | Library: `Store::wipe_signed_qsos`; no command yet | Later |
 | Create a new ADIF file (QSO entry) | Create New ADIF file | A logger's job | Later |
 | Edit an ADIF file | Edit existing ADIF file | A logger's job | Later |
 
@@ -167,16 +168,16 @@ calls TQSL's command line today should get the same meaning, including exit code
 |---|---|---|---|---|
 | `-h`, `-v` | help, version | | Done | #173 |
 | `FILE`, `-o` | the log to sign; the `.tq8` to write | 1.1 | Done | #173 |
-| `-l` | station location | 1.5 | Part done: by name | #173 |
+| `-l` | station location | 1.5 | Done: by name, from the store or `-i` | #173 |
 | `-b`, `-e` | first and last QSO date | 1.6 | Done | #173 |
-| `-a` | QSOs signed before: abort, all, compliant, ask | 1.6 | 0.7.0 | #173 |
-| `-f` | location details in the log: ignore, report, update | 1.3 | 0.7.0 | #173 |
-| `-i` | import `.tq6`, `.p12` or `.tbk` | 1.3, 1.4 | Part done: a `.tbk` is read for the run, not imported | #173 |
-| `-s` | add, or with `-l` edit, a location | 1.5 | 0.7.0 | #173 |
-| `-u` | upload after signing | 1.8 | 0.7.0 | #173 |
+| `-a` | QSOs signed before: abort, all, compliant, ask | 1.6 | Done: `ask` stops with code 14, as `qg-trust` cannot ask | #173 |
+| `-f` | location details in the log: ignore, report, update | 1.3 | Done | #173 |
+| `-i` | import `.tq6`, `.p12` or `.tbk` | 1.3, 1.4 | Part done: `-i` reads a `.tbk` for the run; `qg-trust import` imports all three | #173 |
+| `-s` | add, or with `-l` edit, a location | 1.5 | Part done: `qg-trust location add` and `edit`; `-s` opens TQSL's window, which has no counterpart | #173 |
+| `-u` | upload after signing | 1.8 | Done | #173 |
 | `-c` | default call | 1.4 | 0.7.0 | #173 |
 | `-t` | diagnostic log, with no key or password in it | | 0.7.0 | #173 |
-| Exit codes 0 to 15 | the same numbers TQSL uses, and its `Final Status` line | | Part done: 0, 4, 6 to 10 and 15 | #173 |
+| Exit codes 0 to 15 | the same numbers TQSL uses, and its `Final Status` line | | Done: 0 to 4, 6 to 11, 14 and 15; 5, 12 and 13 have no cause in `qg-trust` | #173 |
 | `-z` | test signing | 2 | Later | |
 | `-n` | check for updates | 3 | Won't | |
 | `-p` | a password on the command line: refused; the password is asked for at the terminal, hidden, or read from standard input | 3 | Won't | |

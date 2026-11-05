@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 [package]
 name = "qso-graph-trust-cli"
-description = "qg-trust: sign ADIF logs for ARRL's Logbook of The World (LoTW) from the command line"
+description = "qg-trust: sign and upload your logs for ARRL's Logbook of The World (LoTW), with your key in your computer's credential store"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -37,6 +37,12 @@ clap_complete = { version = "=4.6.11", default-features = false }
 # qg-trust's own messages, styled as clap's are, and plain when they go to a file, a logger or NO_COLOR.
 anstream = { version = "=1.0.0", default-features = false, features = ["auto", "wincon"] }
 anstyle = { version = "=1.0.14", default-features = false, features = ["std"] }
+# The upload to LoTW: HTTPS only, the certificate and host name always verified against Mozilla's
+# roots (webpki-roots, built in, so it is the same on every computer), with AWS-LC, the provider
+# the library already uses, as rustls's cryptography. The library opens no connection; this is the
+# command line's one (docs/decisions/0002: the command line carries the TLS stack).
+ureq = { version = "=3.5.1", default-features = false, features = ["rustls-no-provider", "rustls-webpki-roots"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["std", "tls12", "aws_lc_rs"] }
 
 [lints]
 workspace = true

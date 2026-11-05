@@ -7,8 +7,9 @@
 //!
 //! The options are TQSL 2.8.7's where they mean the same (`apps/tqsl.cpp`, `cmdLineDesc`), and so
 //! are the exit codes (`apps/tqslapp.h`) and the last line, `Final Status: <name>(<code>)`, which
-//! TQSL writes to standard error and loggers read. `-i` differs: TQSL imports a file into its own
-//! store, and `qg-trust`, which has no store yet, reads the TQSL backup it names for this run.
+//! TQSL writes to standard error and loggers read. Without `-i`, keys and locations come from QG
+//! Trust's store ([`crate::commands`]), as TQSL's come from its own. `-i` differs: TQSL imports a
+//! file into its store, and `qg-trust` reads the TQSL backup it names for this run only.
 
 use std::ffi::OsString;
 use std::fmt;
@@ -23,22 +24,29 @@ use qso_graph_trust::certificate::Trust;
 use qso_graph_trust::qso::{Date, Qso};
 use qso_graph_trust::signed_log::{LogError, sign_log, tq8};
 use qso_graph_trust::signing::KeyError;
+use qso_graph_trust::store::{Store, StoreError};
 use qso_graph_trust::tbk::{self, BackedUpCertificate};
+use qso_graph_trust::upload::UploadRequest;
 use qso_graph_trust::{VERSION, records};
 use zeroize::Zeroizing;
 
-/// TQSL's exit codes, by the names TQSL gives them (`apps/tqslapp.h`). Those `qg-trust` cannot yet
-/// return (cancel, upload and the uploads database) are listed so the names stay in step.
+/// TQSL's exit codes, by the names TQSL gives them (`apps/tqslapp.h`, `apps/tqsl.cpp` `exitNow`).
+/// TQSL's library error (5), unknown (12) and busy (13) are not used.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub(crate) enum Exit {
     Success = 0,
+    Cancel = 1,
+    Rejected = 2,
+    UnexpectedResponse = 3,
     TqslError = 4,
     InputError = 6,
     OutputError = 7,
     NoQsos = 8,
     QsosSuppressed = 9,
     CommandError = 10,
+    ConnectionFailed = 11,
+    UploadedAlready = 14,
     BadPassphrase = 15,
 }
 
@@ -47,16 +55,24 @@ impl Exit {
     fn name(self) -> &'static str {
         match self {
             Exit::Success => "Success",
+            Exit::Cancel => "User Cancelled",
+            Exit::Rejected => "Upload Rejected",
+            Exit::UnexpectedResponse => "Unexpected LoTW Response",
             Exit::TqslError => "TQSL Error",
             Exit::InputError => "Error opening input file",
             Exit::OutputError => "Error opening output file",
             Exit::NoQsos => "No QSOs to upload",
             Exit::QsosSuppressed => "Some QSOs not processed",
             Exit::CommandError => "Command Syntax Error",
+            Exit::ConnectionFailed => "LoTW Connection Failed",
+            Exit::UploadedAlready => "Previously signed QSOs were detected",
             Exit::BadPassphrase => "Incorrect passphrase when importing P12 file",
         }
     }
 }
+
+/// Sends an upload and returns LoTW's HTTP status and answer, or why none came.
+pub(crate) type Upload<'a> = dyn FnMut(&UploadRequest) -> Result<(u16, Vec<u8>), String> + 'a;
 
 /// What the program gives `run`.
 pub(crate) struct Env<'a> {
@@ -74,10 +90,24 @@ pub(crate) struct Env<'a> {
     pub out: &'a mut dyn Write,
     /// Standard error: every message, and the final status line.
     pub err: &'a mut dyn Write,
+    /// QG Trust's store, opened the first time a command needs it.
+    pub store: &'a dyn Fn() -> Result<&'a Store, StoreError>,
+    /// Sends an upload to LoTW over verified TLS: the HTTP status and the body, bounded to
+    /// `upload::MAX_RESPONSE_BYTES`, or why no answer came.
+    pub upload: &'a mut Upload<'a>,
 }
 
 const AFTER_HELP: &str = "\
-The key's password is asked for when it is needed, with what you type hidden, or read as one line
+Commands:
+  qg-trust import FILE      certificates, keys and locations from TQSL (.tbk), ARRL (.tq6) or a .p12
+  qg-trust cert list        your certificates; cert request, renew, delete
+  qg-trust location list    your station locations; location add, edit, delete
+  qg-trust sign LOG -l NAME sign a log;  qg-trust send LOG -l NAME  signs and uploads it
+  qg-trust upload LOG.tq8   upload a signed log
+qg-trust <command> --help says more, with an example.
+
+The options above are TQSL's, for loggers: without -i, keys and locations come from the store.
+With -i, the key's password is asked for when it is needed, with what you type hidden, or read as one line
 from standard input when a logger runs qg-trust. The last line on standard error is
 \"Final Status: <name>(<code>)\", as loggers expect.";
 
@@ -86,9 +116,12 @@ from standard input when a logger runs qg-trust. The last line on standard error
 #[command(
     name = "qg-trust",
     version = VERSION,
-    about = "Sign your ADIF log with your LoTW certificate for ARRL's Logbook of The World (LoTW).",
+    about = "Sign your log for ARRL's Logbook of The World (LoTW) and upload it, with your key kept in \
+             your computer's credential store.",
     after_help = AFTER_HELP,
-    override_usage = "qg-trust -i <FILE> -l <NAME> [OPTIONS] <LOG.adi>\n       qg-trust --completions <SHELL>",
+    override_usage = "qg-trust <COMMAND> [ARGS]     (import, cert, location, sign, send, upload: below)\n       \
+                      qg-trust -l <NAME> [OPTIONS] <LOG.adi>     (as loggers call tqsl)\n       \
+                      qg-trust --completions <SHELL>",
     disable_version_flag = true,
     disable_help_flag = true,
     args_override_self = true
@@ -133,6 +166,31 @@ struct Options {
     /// The ADIF log to sign.
     #[arg(value_name = "LOG.adi")]
     input: Option<PathBuf>,
+    /// Upload the signed log to LoTW.
+    #[arg(short = 'u', long, help_heading = "Signing")]
+    upload: bool,
+    /// What to do with QSOs signed before: abort, compliant (sign only new ones), all, or ask
+    /// (refused with code 14, as qg-trust cannot ask).
+    #[arg(
+        short = 'a',
+        long,
+        value_name = "ACTION",
+        value_enum,
+        ignore_case = true,
+        help_heading = "Signing"
+    )]
+    action: Option<Action>,
+    /// The log's own location details (its MY_ fields): ignore them, report a QSO that disagrees
+    /// (TQSL's default) or update the location from them. With keys in the store (no -i).
+    #[arg(
+        short = 'f',
+        long,
+        value_name = "HOW",
+        value_enum,
+        ignore_case = true,
+        help_heading = "Signing"
+    )]
+    verify: Option<Verify>,
     /// qg-trust always exits when done.
     #[arg(
         short = 'x',
@@ -167,6 +225,30 @@ struct Options {
     rejected: Rejected,
 }
 
+/// TQSL's `-a`: what to do with QSOs signed before (`apps/tqsl.cpp`, `TQSL_ACTION_*`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Action {
+    /// Sign nothing if any QSO was signed before.
+    Abort,
+    /// Sign only the new QSOs.
+    Compliant,
+    /// Sign every QSO, again if need be.
+    All,
+    /// Ask: qg-trust cannot, so it stops with TQSL's code 14.
+    Ask,
+}
+
+/// TQSL's `-f`: what the log's own location details do (`TQSL_LOC_*`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Verify {
+    /// Not looked at.
+    Ignore,
+    /// A QSO that disagrees with the location is refused.
+    Report,
+    /// The log's details take the place of the location's.
+    Update,
+}
+
 /// These options are recognized only to explain why qg-trust refuses them. Their values are
 /// never used in a diagnostic, even when another argument prevents a successful parse.
 /// An omitted value gets an empty default so clap records its index for ordering refusals.
@@ -174,20 +256,14 @@ struct Options {
 struct Rejected {
     #[arg(short = 'p', long = "password", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     password: Option<Option<String>>,
-    #[arg(short = 'a', long = "action", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
-    action: Option<Option<String>>,
     #[arg(short = 'c', long = "callsign", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     callsign: Option<Option<String>>,
-    #[arg(short = 'f', long = "verify", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
-    verify: Option<Option<String>>,
     #[arg(short = 'n', long = "updates", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     updates: Option<Option<String>>,
     #[arg(short = 's', long = "editlocation", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     editlocation: Option<Option<String>>,
     #[arg(short = 't', long = "diagnose", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     diagnose: Option<Option<String>>,
-    #[arg(short = 'u', long = "upload", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
-    upload: Option<Option<String>>,
     #[arg(short = 'w', long = "wipe", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     wipe: Option<Option<String>>,
     #[arg(short = 'z', long = "test-sign", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
@@ -201,22 +277,10 @@ const PASSWORD_MESSAGE: &str = "a password is never given on the command line: q
 const REJECTED_MESSAGES: &[(char, &str, &str, &str)] = &[
     ('p', "--password", PASSWORD_MESSAGE, PASSWORD_MESSAGE),
     (
-        'a',
-        "--action",
-        "-a is not supported yet",
-        "--action is not supported yet",
-    ),
-    (
         'c',
         "--callsign",
         "-c is not supported yet",
         "--callsign is not supported yet",
-    ),
-    (
-        'f',
-        "--verify",
-        "-f is not supported yet",
-        "--verify is not supported yet",
     ),
     (
         'n',
@@ -237,12 +301,6 @@ const REJECTED_MESSAGES: &[(char, &str, &str, &str)] = &[
         "--diagnose is not supported yet",
     ),
     (
-        'u',
-        "--upload",
-        "-u is not supported yet",
-        "--upload is not supported yet",
-    ),
-    (
         'w',
         "--wipe",
         "-w is not supported yet",
@@ -258,6 +316,17 @@ const REJECTED_MESSAGES: &[(char, &str, &str, &str)] = &[
 
 /// Runs `qg-trust` with OS arguments so invalid text cannot panic before the final status line.
 pub(crate) fn run(args: &[OsString], env: &mut Env<'_>) -> u8 {
+    if let Some(first) = args.first().and_then(|a| a.to_str())
+        && crate::commands::COMMANDS.contains(&first)
+    {
+        return match args.iter().map(|a| a.to_str()).collect::<Option<Vec<_>>>() {
+            Some(args) => crate::commands::run(&args, env),
+            None => {
+                env.message(Tone::Error, format_args!("an argument is not valid text"));
+                Exit::CommandError as u8
+            }
+        };
+    }
     let code = match args
         .iter()
         .map(|arg| arg.to_str())
@@ -362,8 +431,6 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
     }
     let missing = if options.input.is_none() {
         Some("give the log to sign")
-    } else if options.backup.is_none() {
-        Some("-i names the file with your certificate")
     } else if options.location.is_none() {
         Some("-l names the station location to sign for")
     } else {
@@ -376,8 +443,42 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
         && begin > end
     {
         Some(syntax_error(env, "the start date is after the end date"))
+    } else if options.backup.is_none() {
+        Some(crate::commands::sign_for_logger(
+            &crate::commands::LoggerCall {
+                log: options.input.as_deref().unwrap_or(Path::new("")),
+                location: options.location.as_deref().unwrap_or(""),
+                begin: options.begin,
+                end: options.end,
+                output: options.output.as_deref(),
+                action: options.action,
+                verify: options.verify,
+                upload: options.upload,
+            },
+            env,
+        ))
+    } else if options.verify.is_some_and(|v| v != Verify::Report) {
+        Some(syntax_error(
+            env,
+            "-f ignore and -f update sign from the store: qg-trust import the backup, then leave out -i",
+        ))
     } else {
-        Some(sign(&options, env))
+        let code = sign(&options, env);
+        if options.upload && matches!(code, Exit::Success | Exit::QsosSuppressed) {
+            let output = options.output.clone().unwrap_or_else(|| {
+                options
+                    .input
+                    .as_deref()
+                    .unwrap_or(Path::new(""))
+                    .with_extension("tq8")
+            });
+            match crate::commands::upload_file(&output, env) {
+                Ok(_) => Some(code),
+                Err(e) => Some(e),
+            }
+        } else {
+            Some(code)
+        }
     }
 }
 
@@ -430,6 +531,8 @@ fn parse_error_message(error: &clap::Error) -> &'static str {
                 "--import <FILE>" => "-i names the file with your certificate",
                 "--location <NAME>" => "-l names the station location to sign for",
                 "--output <FILE>" => "-o names the file for the signed log",
+                "--action <ACTION>" => "-a takes abort, compliant, all or ask",
+                "--verify <HOW>" => "-f takes ignore, report or update",
                 "--completions <SHELL>" => {
                     "--completions takes bash, zsh, fish, powershell or elvish"
                 }
@@ -437,14 +540,14 @@ fn parse_error_message(error: &clap::Error) -> &'static str {
             }
         }
         ErrorKind::MissingRequiredArgument => {
-            "give the log to sign, -i with your certificate file and -l with your station location"
+            "give the log to sign and -l with your station location"
         }
         _ => "the command line is not valid",
     }
 }
 
 #[derive(Clone, Copy)]
-enum Tone {
+pub(crate) enum Tone {
     Error,
     Warning,
     Success,
@@ -452,7 +555,7 @@ enum Tone {
 
 impl Env<'_> {
     /// Keep the words identical for loggers, and reset styling before the final status line.
-    fn message(&mut self, tone: Tone, message: fmt::Arguments<'_>) {
+    pub(crate) fn message(&mut self, tone: Tone, message: fmt::Arguments<'_>) {
         if !self.color_err {
             let _ = writeln!(self.err, "qg-trust: {message}");
             return;
@@ -698,7 +801,7 @@ fn certificate_for<'a>(
 }
 
 /// A file read whole, refused past `limit` before it is read.
-fn read_file(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
+pub(crate) fn read_file(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
     let len = std::fs::metadata(path)?.len();
     if usize::try_from(len).map_or(true, |l| l > limit) {
         return Err(io::Error::other("larger than any file qg-trust reads"));
@@ -707,7 +810,7 @@ fn read_file(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
 }
 
 /// `bytes` written to `path` whole or not at all: to a file beside it, then renamed over it.
-fn write_whole(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn write_whole(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let name = path
         .file_name()
         .ok_or_else(|| io::Error::other("not a file name"))?;

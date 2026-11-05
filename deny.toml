@@ -45,3 +45,10 @@ allow = [
     "Unicode-3.0",
     "Zlib",
 ]
+
+# Mozilla's root certificates, which qg-trust checks LoTW's certificate against, are data under
+# CDLA-Permissive-2.0, a permissive licence that places no terms on software using the data. It
+# is allowed for this one crate, by name, not for any other.
+[[licenses.exceptions]]
+crate = "webpki-roots"
+allow = ["CDLA-Permissive-2.0"]

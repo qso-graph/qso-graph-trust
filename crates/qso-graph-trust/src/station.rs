@@ -286,6 +286,22 @@ impl StationLocation {
     }
 }
 
+/// The DXCC entity's name in ARRL's configuration, or `None` for a number it does not list.
+pub fn dxcc_name(dxcc: u32) -> Option<&'static str> {
+    lotw::dxcc(dxcc).map(|e| e.name)
+}
+
+/// The fields a station location for this DXCC entity may give, in the order a location lists
+/// them, as [`StationLocation::new`] accepts them. Empty for a number ARRL does not list.
+pub fn fields_for(dxcc: u32) -> Vec<&'static str> {
+    if dxcc == 0 || lotw::dxcc(dxcc).is_none() {
+        return Vec::new();
+    }
+    lotw::loc_fields_for(dxcc)
+        .filter(|f| lotw::loc_field(f).is_some_and(|f| f.shown))
+        .collect()
+}
+
 /// The error for a value, shown cut to [`MAX_LEN`] characters, so an error is never large.
 fn invalid(field: &'static str, value: &str) -> StationError {
     StationError::Invalid {

@@ -93,6 +93,11 @@ version = "0.1.92"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
+[[exemptions.base64]]
+version = "0.23.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Base64 used by ureq (proxy credentials) and ureq-proto."
+
 [[exemptions.bitflags]]
 version = "2.13.2"
 criteria = "safe-to-deploy"
@@ -117,6 +122,11 @@ notes = "Not audited yet (decision 0004): JavaScript/WebAssembly support in the 
 version = "1.5.0"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.bytes]]
+version = "1.12.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Byte buffers used by the http crate."
 
 [[exemptions.cbc]]
 version = "0.2.1"
@@ -278,6 +288,16 @@ version = "0.13.0"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
+[[exemptions.http]]
+version = "1.5.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): HTTP request and response types used by ureq."
+
+[[exemptions.httparse]]
+version = "1.10.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): HTTP/1.1 response parser used by ureq-proto."
+
 [[exemptions.hybrid-array]]
 version = "0.4.15"
 criteria = "safe-to-deploy"
@@ -368,6 +388,11 @@ version = "2.2.1"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
+[[exemptions.percent-encoding]]
+version = "2.3.2"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): URL percent-encoding used by ureq."
+
 [[exemptions.pin-project-lite]]
 version = "0.2.17"
 criteria = "safe-to-deploy"
@@ -408,10 +433,30 @@ version = "0.8.11"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): pattern matching in the credential backend dependency tree. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
+[[exemptions.ring]]
+version = "0.17.14"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Not built: an optional rustls/rustls-webpki provider whose feature is off (rustls uses aws-lc-rs); it appears only in cargo-vet's all-features graph."
+
 [[exemptions.rustix]]
 version = "1.1.6"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): OS interfaces used by the credential backend runtime (including unshipped target bindings). Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.rustls]]
+version = "0.23.46"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): TLS for the LoTW upload, with AWS-LC (aws-lc-rs, already trusted) as its cryptography; certificate verification is never turned off."
+
+[[exemptions.rustls-pki-types]]
+version = "1.15.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Shared certificate and key types for rustls, ureq and webpki-roots."
+
+[[exemptions.rustls-webpki]]
+version = "0.103.16"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): rustls's certificate and host-name verification, for the LoTW upload."
 
 [[exemptions.rustversion]]
 version = "1.0.23"
@@ -525,6 +570,26 @@ version = "1.2.1"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): Secret Service D-Bus transport, serialization and supporting types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
+[[exemptions.untrusted]]
+version = "0.9.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Bounds-checked input reading used by rustls-webpki's certificate parser."
+
+[[exemptions.ureq]]
+version = "3.5.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): qg-trust's HTTPS client for the one LoTW upload (transport.rs): HTTPS only, no redirects, a time limit, Mozilla's roots."
+
+[[exemptions.ureq-proto]]
+version = "0.7.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): ureq's HTTP/1.1 protocol state machine, for the LoTW upload."
+
+[[exemptions.utf8-zero]]
+version = "0.8.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): UTF-8 decoding used by ureq."
+
 [[exemptions.uuid]]
 version = "1.29.0"
 criteria = "safe-to-deploy"
@@ -555,10 +620,65 @@ version = "0.2.130"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): JavaScript/WebAssembly support in the credential tree, not built for QGT shipping targets. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
+[[exemptions.webpki-roots]]
+version = "1.0.11"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Mozilla's root certificates, built in, so LoTW's certificate is checked the same way on every computer."
+
 [[exemptions.windows-native-keyring-store]]
 version = "1.1.0"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): the default OS credential backends shared with Desktop. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.windows-sys]]
+version = "0.52.0"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Not built: Microsoft's Windows bindings at the version only ring's (unbuilt) dependency names; appears only in cargo-vet's all-features graph."
+
+[[exemptions.windows-targets]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Not built: Microsoft's Windows bindings at the version only ring's (unbuilt) dependency names; appears only in cargo-vet's all-features graph."
+
+[[exemptions.windows_aarch64_gnullvm]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Not built: Microsoft's Windows bindings at the version only ring's (unbuilt) dependency names; appears only in cargo-vet's all-features graph."
+
+[[exemptions.windows_aarch64_msvc]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Not built: Microsoft's Windows bindings at the version only ring's (unbuilt) dependency names; appears only in cargo-vet's all-features graph."
+
+[[exemptions.windows_i686_gnu]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Not built: Microsoft's Windows bindings at the version only ring's (unbuilt) dependency names; appears only in cargo-vet's all-features graph."
+
+[[exemptions.windows_i686_gnullvm]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Not built: Microsoft's Windows bindings at the version only ring's (unbuilt) dependency names; appears only in cargo-vet's all-features graph."
+
+[[exemptions.windows_i686_msvc]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Not built: Microsoft's Windows bindings at the version only ring's (unbuilt) dependency names; appears only in cargo-vet's all-features graph."
+
+[[exemptions.windows_x86_64_gnu]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Not built: Microsoft's Windows bindings at the version only ring's (unbuilt) dependency names; appears only in cargo-vet's all-features graph."
+
+[[exemptions.windows_x86_64_gnullvm]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Not built: Microsoft's Windows bindings at the version only ring's (unbuilt) dependency names; appears only in cargo-vet's all-features graph."
+
+[[exemptions.windows_x86_64_msvc]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): Not built: Microsoft's Windows bindings at the version only ring's (unbuilt) dependency names; appears only in cargo-vet's all-features graph."
 
 [[exemptions.winnow]]
 version = "1.0.4"

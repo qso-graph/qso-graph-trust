@@ -51,8 +51,7 @@ removed (ARRL's [certificate security](https://lotw.arrl.org/lotw-help/certifica
   program without it, and the custody test (`crates/qso-graph-trust-custody`, Linux, debug and
   release) reads a signing program's whole memory, as a crash dump holds it, and finds no key data
   or password.*
-- **The OS credential store holds the key at rest,** once QGT keeps keys (the store is still to
-  come; until then the library holds no key at rest), and it leaves the store only to sign, as a
+- **The OS credential store holds the key at rest,** and it leaves the store only to sign, as a
   signature, or in an export QGT encrypts itself. While it signs, it is in memory, as in every signer,
   so a crash dump taken then can hold it; freed memory never does. No API returns it, and nothing QGT
   writes, logs, traces, reports in an error or sends over IPC holds it.
