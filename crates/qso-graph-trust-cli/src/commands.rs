@@ -611,6 +611,36 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         );
         return Err(Exit::TqslError);
     };
+    // QSOs the certificate does not cover go first, before the log's location details are
+    // carried from one QSO to the next, so one of them cannot make a later QSO fail.
+    let mut i = 0;
+    while i < qsos.len() {
+        if covers(&cert.certificate, &qsos[i]) {
+            i += 1;
+            continue;
+        }
+        let mut reason = "outside the QSO dates the certificate covers".to_string();
+        if let Some(other) = candidates
+            .iter()
+            .find(|c| c.id != cert.id && covers(&c.certificate, &qsos[i]))
+        {
+            let id = short(&other.id);
+            let _ = write!(
+                reason,
+                "; certificate {id} covers it: sign it with --cert {id}"
+            );
+        }
+        if stops_on_refusal(a) {
+            return Err(abort(env, a, numbers[i], &reason));
+        }
+        env.message(
+            Tone::Warning,
+            format_args!("QSO {} in the log: not signed: {reason}", numbers[i]),
+        );
+        numbers.remove(i);
+        qsos.remove(i);
+        refused += 1;
+    }
     let again = a.again || a.action == Some(Action::All);
     let choice = if again {
         DuplicateChoice::SignAgain

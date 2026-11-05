@@ -736,6 +736,26 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
         );
     }
 
+    // QSOs the certificate does not cover go first, before the log's location details are carried
+    // from one QSO to the next, so one of them cannot make a later QSO fail.
+    let (first, last) = certificate.qso_dates();
+    let mut i = 0;
+    while i < qsos.len() {
+        if (first..=last).contains(&qsos[i].date()) {
+            i += 1;
+            continue;
+        }
+        env.message(
+            Tone::Warning,
+            format_args!(
+                "the log's QSO {}: not signed: outside the QSO dates {}'s certificate covers",
+                numbers[i], entry.callsign
+            ),
+        );
+        numbers.remove(i);
+        qsos.remove(i);
+        refused += 1;
+    }
     // A QSO the certificate or station cannot sign is left out, said so, and the rest are signed.
     let signed = loop {
         if qsos.is_empty() {

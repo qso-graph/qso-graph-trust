@@ -1241,3 +1241,49 @@ fn a_renewal_asks_for_the_qso_dates_the_certificate_has() {
     let open = renew(&["--no-end-date"], &dir.join("open.tq5"));
     assert!(!open.contains("TQSL_CRQ_QSO_NOT_AFTER"), "{open}");
 }
+
+#[test]
+fn a_qso_outside_the_certificate_cannot_make_a_later_one_fail() {
+    let ham = Ham::unsigned();
+    let event = ham
+        .store
+        .locations()
+        .expect("locations")
+        .into_iter()
+        .find(|l| l.name == "W4W-EVENT")
+        .expect("W4W-EVENT");
+    let fields: Vec<(&str, &str)> = event
+        .station
+        .fields()
+        .filter(|(k, _)| *k != "GRIDSQUARE")
+        .collect();
+    let without = qso_graph_trust::station::StationLocation::new(&fields).expect("a location");
+    ham.store.add_location("NO-GRID", &without).expect("added");
+    let w4w = ham
+        .store
+        .certificates()
+        .expect("certificates")
+        .into_iter()
+        .find(|c| c.certificate.callsign() == "W4W")
+        .expect("W4W");
+    let (_, last) = w4w.certificate.qso_dates();
+    let after = format!("{:04}{:02}{:02}", last.year() + 1, last.month(), last.day());
+    // The first QSO is after the certificate's last date and fills the grid the location leaves
+    // empty; the second is in range and gives another grid.
+    let log = String::from_utf8(read("adif/W4W-EVENT.adi")).expect("text");
+    let (first, rest) = log.split_once("<EOR>").expect("a record");
+    let first = first.replacen("<QSO_DATE:8>20261103", &format!("<QSO_DATE:8>{after}"), 1)
+        + "<MY_GRIDSQUARE:4>EM17 <EOR>";
+    let rest = rest.replacen("<EOR>", "<MY_GRIDSQUARE:4>FM02 <EOR>", 1);
+    let dir = scratch();
+    let adi = dir.join("grids.adi");
+    std::fs::write(&adi, first + &rest).expect("write");
+    let ran = ham.run(&["sign", path(&adi), "-l", "NO-GRID"]);
+    assert_eq!(ran.code, 9, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.out.starts_with("Signed 2 QSOs"),
+        "{}{}",
+        ran.out,
+        ran.err
+    );
+}
