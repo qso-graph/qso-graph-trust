@@ -74,4 +74,41 @@ fn only_a_signed_log_is_one_to_upload() {
         check_signed_log(&crate::signed_log::tq8(header.as_bytes())),
         Err(NotASignedLog)
     );
+    // Found in review: a field that no signed log has, and text after the last record.
+    let planted = |text: String| check_signed_log(&crate::signed_log::tq8(text.as_bytes()));
+    assert_eq!(
+        planted(text.replacen(
+            "<Rec_Type:8>tCONTACT",
+            "<Rec_Type:8>tCONTACT\n<PRIVATE_KEY:4>TEST",
+            1
+        )),
+        Err(NotASignedLog)
+    );
+    assert_eq!(
+        planted(format!(
+            "{text}\n-----BEGIN PRIVATE KEY-----\nMIIC\n-----END PRIVATE KEY-----\n"
+        )),
+        Err(NotASignedLog)
+    );
+    // A key's base64 where a certificate goes is not a certificate.
+    let start = text.find("<CERTIFICATE:").expect("certificate");
+    let end = start + text[start..].find("<eor>").expect("end");
+    assert_eq!(
+        planted(format!(
+            "{}<CERTIFICATE:8>TUlJQ2Rn{}",
+            &text[..start],
+            &text[end..]
+        )),
+        Err(NotASignedLog)
+    );
+    // Not bounded by a record count: more records than the ADIF reader takes still pass.
+    let head = &text[..text.find("<Rec_Type:8>tCONTACT").expect("contact")];
+    let contact = &text[text.find("<Rec_Type:8>tCONTACT").expect("contact")..];
+    let contact = &contact[..contact.find("<eor>").expect("end") + 5];
+    let mut big = String::from(head);
+    for _ in 0..(crate::records::MAX_RECORDS + 1) {
+        big.push_str(contact);
+        big.push('\n');
+    }
+    assert_eq!(planted(big), Ok(()));
 }

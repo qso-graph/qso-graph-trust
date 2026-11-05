@@ -64,6 +64,8 @@ pub struct PreviouslySigned {
 #[derive(Clone, Debug)]
 pub struct SigningPlan {
     qsos: Vec<Qso>,
+    /// Each QSO's record as the plan found it (none if unsigned), checked again at writing.
+    snapshot: BTreeMap<String, Option<SignedQso>>,
     station: StationLocation,
     locations: Option<Vec<StationLocation>>,
     new: Vec<usize>,
@@ -90,7 +92,7 @@ impl SigningPlan {
         };
         Some(SigningSelection {
             qsos,
-            new_only: choice == DuplicateChoice::NewOnly,
+            snapshot: (choice == DuplicateChoice::NewOnly).then(|| self.snapshot.clone()),
             station: self.station.clone(),
             locations: self.locations.as_ref().map(|locations| match choice {
                 DuplicateChoice::SignAgain => locations.clone(),
@@ -106,7 +108,7 @@ impl SigningPlan {
 /// A selected log; its QSOs and station cannot change between signing and recording.
 pub struct SigningSelection {
     qsos: Vec<Qso>,
-    new_only: bool,
+    snapshot: Option<BTreeMap<String, Option<SignedQso>>>,
     station: StationLocation,
     locations: Option<Vec<StationLocation>>,
 }
@@ -145,7 +147,7 @@ impl SigningSelection {
         Ok(SignedLog {
             bytes,
             records,
-            new_only: self.new_only,
+            snapshot: self.snapshot.clone(),
         })
     }
 }
@@ -154,7 +156,7 @@ impl SigningSelection {
 pub struct SignedLog {
     bytes: Vec<u8>,
     records: Vec<SignedQso>,
-    new_only: bool,
+    snapshot: Option<BTreeMap<String, Option<SignedQso>>>,
 }
 impl SignedLog {
     /// The signed `.tq8` bytes. Inspecting them does not record anything.
@@ -208,12 +210,12 @@ impl SignedLog {
         let _lock = store.lock()?;
         let mut data = store.read()?;
         // A new-only selection was made from a snapshot; another signing may have recorded one of
-        // its QSOs since. Checked under the lock, so two runs never both sign a QSO as new.
-        if self.new_only
-            && self
-                .records
-                .iter()
-                .any(|r| data.signed_qsos.contains_key(&r.key))
+        // its QSOs since. Checked under the lock, so two runs never both sign a QSO as new. A QSO
+        // whose record is as the plan found it (an update adding station details) is not refused.
+        if let Some(snapshot) = &self.snapshot
+            && self.records.iter().any(|r| {
+                data.signed_qsos.get(&r.key) != snapshot.get(&r.key).and_then(Option::as_ref)
+            })
         {
             return Err(StoreError::SignedMeanwhile);
         }
@@ -430,6 +432,7 @@ impl Store {
         };
         let mut plan = SigningPlan {
             qsos: qsos.to_vec(),
+            snapshot: BTreeMap::new(),
             station: station.clone(),
             locations,
             new: Vec::new(),
@@ -439,6 +442,9 @@ impl Store {
             let station = plan.locations.as_ref().map_or(station, |s| &s[index]);
             let details = station_details(station);
             let key = duplicate_key(qso, station);
+            if !plan.snapshot.contains_key(&key) {
+                plan.snapshot.insert(key.clone(), seen.get(&key).cloned());
+            }
             if let Some(previous) = seen
                 .get(&key)
                 .filter(|p| signed_before(&p.station, &details))

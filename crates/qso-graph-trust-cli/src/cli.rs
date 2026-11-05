@@ -475,21 +475,17 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
              store: qg-trust import the backup, then leave out -i",
         ))
     } else {
-        let code = sign(&options, env);
-        if options.upload && matches!(code, Exit::Success | Exit::QsosSuppressed) {
-            let output = options.output.clone().unwrap_or_else(|| {
-                options
-                    .input
-                    .as_deref()
-                    .unwrap_or(Path::new(""))
-                    .with_extension("tq8")
-            });
-            match crate::commands::upload_file(&output, env) {
-                Ok(_) => Some(code),
-                Err(e) => Some(e),
+        let mut written = None;
+        let code = sign(&options, env, &mut written);
+        match written {
+            // The bytes just signed, not the file reread: another run may have replaced it.
+            Some(tq8) if options.upload => {
+                match crate::commands::upload_bytes(&tq8, "the signed log", env) {
+                    Ok(_) => Some(code),
+                    Err(e) => Some(e),
+                }
             }
-        } else {
-            Some(code)
+            _ => Some(code),
         }
     }
 }
@@ -592,7 +588,7 @@ fn date(text: &str) -> Result<Date, &'static str> {
         .ok_or("a date must be YYYY-MM-DD or YYYYMMDD")
 }
 
-fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
+fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> Exit {
     let (Some(backup_path), Some(name), Some(input)) =
         (&options.backup, &options.location, &options.input)
     else {
@@ -778,6 +774,16 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
                 qsos.remove(index);
                 refused += 1;
             }
+            // A location the log's own details make invalid, under -f update: that QSO only.
+            Err(LogError::Location { index, error }) => {
+                env.message(
+                    Tone::Warning,
+                    format_args!("the log's QSO {}: not signed: {error}", numbers[index]),
+                );
+                numbers.remove(index);
+                qsos.remove(index);
+                refused += 1;
+            }
             Err(e) => {
                 env.message(Tone::Error, format_args!("the log: {e}"));
                 return Exit::TqslError;
@@ -789,10 +795,12 @@ fn sign(options: &Options, env: &mut Env<'_>) -> Exit {
         .output
         .clone()
         .unwrap_or_else(|| input.with_extension("tq8"));
-    if let Err(e) = write_whole(&output, &tq8(&signed)) {
+    let signed = tq8(&signed);
+    if let Err(e) = write_whole(&output, &signed) {
         env.message(Tone::Error, format_args!("the output file (-o): {e}"));
         return Exit::OutputError;
     }
+    *written = Some(signed);
     env.message(
         Tone::Success,
         format_args!(

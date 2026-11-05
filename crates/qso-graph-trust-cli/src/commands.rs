@@ -479,6 +479,8 @@ fn store_error(env: &mut Env<'_>, what: &str, e: &StoreError) -> Exit {
 /// What `sign` made: where the signed log is, how many QSOs it holds.
 struct Signed {
     path: PathBuf,
+    /// The bytes written, uploaded as they are: the file may be replaced by another run.
+    tq8: Vec<u8>,
     /// QSOs were left out: refused, outside the dates, or signed before and skipped.
     suppressed: bool,
 }
@@ -745,6 +747,7 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
     } else {
         output.clone()
     };
+    let tq8 = signed.tq8().to_vec();
     if let Err(e) = signed.write_to(store, &target) {
         env.message(Tone::Error, format_args!("{}: {e}", output.display()));
         return Err(Exit::OutputError);
@@ -783,6 +786,7 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
     let _ = writeln!(env.out, "Written to {}", output.display());
     Ok(Signed {
         path: output,
+        tq8,
         suppressed: refused > 0 || out_of_range > 0 || (before > 0 && !again),
     })
 }
@@ -890,7 +894,7 @@ pub(crate) fn check_output(path: &Path) -> Result<(), String> {
 
 fn send(a: &SignArgs, env: &mut Env<'_>) -> Done {
     let signed = sign(a, env)?;
-    let code = upload_file(&signed.path, env)?;
+    let code = upload_bytes(&signed.tq8, &signed.path.display().to_string(), env)?;
     Ok(if signed.suppressed {
         Exit::QsosSuppressed
     } else {
@@ -960,7 +964,7 @@ pub(crate) fn sign_for_logger(call: &LoggerCall<'_>, env: &mut Env<'_>) -> Exit 
     if !upload {
         return status;
     }
-    match upload_file(&signed.path, env) {
+    match upload_bytes(&signed.tq8, &signed.path.display().to_string(), env) {
         Ok(_) => status,
         Err(code) => code,
     }
@@ -971,7 +975,7 @@ fn is_logger(a: &SignArgs) -> bool {
     a.action.is_some()
 }
 
-pub(crate) fn upload_file(path: &Path, env: &mut Env<'_>) -> Done {
+fn upload_file(path: &Path, env: &mut Env<'_>) -> Done {
     let bytes = match read_file(path, MAX_LOG_LEN) {
         Ok(b) => b,
         Err(e) => {
@@ -979,17 +983,19 @@ pub(crate) fn upload_file(path: &Path, env: &mut Env<'_>) -> Done {
             return Err(Exit::InputError);
         }
     };
-    if qso_graph_trust::upload::check_signed_log(&bytes).is_err() {
+    upload_bytes(&bytes, &path.display().to_string(), env)
+}
+
+/// Uploads a signed log, named `what` in messages, after checking it is one.
+pub(crate) fn upload_bytes(bytes: &[u8], what: &str, env: &mut Env<'_>) -> Done {
+    if qso_graph_trust::upload::check_signed_log(bytes).is_err() {
         env.message(
             Tone::Error,
-            format_args!(
-                "{} is not a signed log (.tq8); qg-trust sign makes one",
-                path.display()
-            ),
+            format_args!("{what} is not a signed log (.tq8); qg-trust sign makes one"),
         );
         return Err(Exit::InputError);
     }
-    let request = match UploadRequest::try_new(&bytes) {
+    let request = match UploadRequest::try_new(bytes) {
         Ok(r) => r,
         Err(_) => {
             env.message(
@@ -999,7 +1005,7 @@ pub(crate) fn upload_file(path: &Path, env: &mut Env<'_>) -> Done {
             return Err(Exit::TqslError);
         }
     };
-    let _ = writeln!(env.out, "Uploading {} to LoTW…", path.display());
+    let _ = writeln!(env.out, "Uploading {what} to LoTW…");
     let (status, body) = match (env.upload)(&request) {
         Ok(r) => r,
         Err(UploadFailure {
@@ -1019,10 +1025,7 @@ pub(crate) fn upload_file(path: &Path, env: &mut Env<'_>) -> Done {
             env.message(Tone::Error, format_args!("LoTW could not be reached: {e}"));
             env.message(
                 Tone::Warning,
-                format_args!(
-                    "the signed log is kept; qg-trust upload {} tries again",
-                    path.display()
-                ),
+                format_args!("the signed log is kept; qg-trust upload {what} tries again"),
             );
             return Err(Exit::ConnectionFailed);
         }

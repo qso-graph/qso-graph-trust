@@ -1100,3 +1100,26 @@ fn f_works_with_i_on_the_same_path_as_the_store() {
     ]);
     assert_eq!(ignore.code, 0, "{}", ignore.err);
 }
+
+#[test]
+fn an_invalid_location_from_the_log_leaves_out_that_qso_only_with_i() {
+    let ham = Ham::new();
+    let dir = scratch();
+    let adi = dir.join("state.adi");
+    let log = String::from_utf8(read("adif/W4W-EVENT.adi")).expect("text");
+    std::fs::write(&adi, log.replacen("<EOR>", "<MY_STATE:2>XX <EOR>", 1)).expect("write");
+    let ran = ham.run(&[
+        "-x",
+        "-a",
+        "all",
+        "-f",
+        "update",
+        "-i",
+        path(&set("standard.tbk")),
+        "-l",
+        "W4W-EVENT",
+        path(&adi),
+    ]);
+    assert_eq!(ran.code, 9, "{}", ran.err);
+    assert!(dir.join("state.tq8").exists());
+}

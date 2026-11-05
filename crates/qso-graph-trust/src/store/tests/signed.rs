@@ -751,3 +751,23 @@ fn two_new_only_runs_never_both_record_the_same_qso() {
         .write_to(&store, &out.0.join("again.tq8"))
         .expect("sign again is written");
 }
+
+#[test]
+fn an_update_adding_station_details_is_written_not_refused_as_signed_meanwhile() {
+    let folder = Folder::new();
+    let store = store(&folder);
+    let qsos = qsos();
+    let minimal = StationLocation::new(&[("CALL", "KC4QPQ"), ("DXCC", "291")]).expect("minimal");
+    store
+        .add_signed_qsos(&[SignedQso {
+            key: duplicate_key(&qsos[0], &minimal),
+            station: String::new(),
+            signed_at: None,
+        }])
+        .expect("old minimal");
+    // Selected as new (it adds station details), and nothing has changed since the plan.
+    let log = signed(&store, &qsos[..1], DuplicateChoice::NewOnly);
+    let out = Folder::new();
+    log.write_to(&store, &out.0.join("enriched.tq8"))
+        .expect("an update is written");
+}
