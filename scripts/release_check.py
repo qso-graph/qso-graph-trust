@@ -4,6 +4,8 @@
 """What .github/workflows/release.yml decides before it publishes, kept here so each decision has a
 test (scripts/test_release_check.py) with the cases it must refuse.
 
+    release_check.py source REF EVENT BUILD_SHA WORKFLOW_SHA WORKFLOW_REF ACTOR TRIGGERING_ACTOR
+                                                requires a manual main run and its exact commit
     release_check.py version VERSION            VERSION is a release or a beta: X.Y.Z or X.Y.Z-beta.N
     release_check.py proving-run REPO TREE      the green pull request run of this repository's CI
                                                 whose own commit holds exactly TREE; reads the runs
@@ -31,6 +33,19 @@ import urllib.request
 # Matched whole with fullmatch: `$` would also match before a trailing newline.
 VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(-beta\.[1-9][0-9]{0,2})?")
 USER_AGENT = "qso-graph-trust release (https://github.com/qso-graph/qso-graph-trust)"
+
+
+def source_allowed(ref, event, build_sha, workflow_sha, workflow_ref, actor, triggering_actor):
+    """Only KI7MT's manual main Release can sign or publish its exact workflow commit."""
+    return (
+        ref == "refs/heads/main"
+        and event == "workflow_dispatch"
+        and workflow_ref == "qso-graph/qso-graph-trust/.github/workflows/release.yml@refs/heads/main"
+        and actor.casefold() == "ki7mt"
+        and triggering_actor.casefold() == "ki7mt"
+        and re.fullmatch(r"[0-9a-f]{40}", workflow_sha) is not None
+        and build_sha == workflow_sha
+    )
 
 
 def is_version(version):
@@ -130,6 +145,10 @@ def _checksum_of(crate, version):
 
 
 def main(argv):
+    if len(argv) == 8 and argv[0] == "source":
+        if not source_allowed(*argv[1:]):
+            sys.exit("Signing and publication require KI7MT's manual main Release and its exact commit")
+        return
     if len(argv) == 2 and argv[0] == "version":
         if not is_version(argv[1]):
             sys.exit(f"not a release or beta version: {argv[1]}")

@@ -5,6 +5,13 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Signing and publication require KI7MT's manually started Release workflow on main and its exact
+  commit. PR and ordinary binary builds stay unsigned. Release defaults to a dry run that verifies
+  signing and notarization without publishing. Signing inputs are passed explicitly to the binary
+  workflow; both publication stages use the main-only crates-io environment.
+
 ## [0.1.0] - 2026-11-05
 
 ### Added
