@@ -174,6 +174,20 @@ pub(super) fn add(
     Ok(added)
 }
 
+/// LoTW's pinned roots and CAs, then the roots `data` has accepted: what [`Store::trusted_roots`] and
+/// [`super::Listing::trusted_roots`] both give.
+pub(super) fn trusted_roots(data: &Data) -> Vec<TrustedRoot> {
+    let (roots, authorities) = Trust::lotw().certificates();
+    let built_in = roots
+        .iter()
+        .map(|d| (d, RootKind::Root))
+        .chain(authorities.iter().map(|d| (d, RootKind::Ca)))
+        .filter_map(|(d, kind)| describe(d, kind, RootSource::BuiltIn, None));
+    built_in
+        .chain(data.roots.iter().filter_map(AcceptedRoot::describe))
+        .collect()
+}
+
 impl Store {
     /// The trust to import and check certificates with: LoTW's pinned roots and CAs, and the roots
     /// this store has accepted with the CAs kept under them. [`Trust::lotw`] stays pinned only.
@@ -195,15 +209,7 @@ impl Store {
             let _lock = self.lock()?;
             self.read()?
         };
-        let (roots, authorities) = Trust::lotw().certificates();
-        let built_in = roots
-            .iter()
-            .map(|d| (d, RootKind::Root))
-            .chain(authorities.iter().map(|d| (d, RootKind::Ca)))
-            .filter_map(|(d, kind)| describe(d, kind, RootSource::BuiltIn, None));
-        Ok(built_in
-            .chain(data.roots.iter().filter_map(AcceptedRoot::describe))
-            .collect())
+        Ok(trusted_roots(&data))
     }
 
     /// Stops trusting a root or CA this store accepted, by its SHA-256 fingerprint (colons

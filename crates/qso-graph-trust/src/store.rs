@@ -14,6 +14,7 @@
 mod format;
 mod import;
 mod keys;
+mod listing;
 mod part;
 mod roots;
 mod signed;
@@ -27,6 +28,7 @@ pub use signed::{
 };
 
 pub use import::ExpiringCertificate;
+pub use listing::{ListedCertificate, Listing};
 pub use part::{PartError, RestoreReport};
 
 pub use keys::{KeyStoreError, MAX_KEYS, OrphanDetection, SERVICE, TEST_SERVICE};
@@ -660,20 +662,7 @@ impl Store {
     }
 
     fn read(&self) -> Result<Data, StoreError> {
-        let file = match File::open(self.dir.join("store.xml")) {
-            Ok(file) => file,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Data::default()),
-            Err(e) => return Err(e.into()),
-        };
-        if file.metadata()?.len() > MAX_FILE_LEN as u64 {
-            return Err(StoreError::Limit("file bytes"));
-        }
-        let mut bytes = Vec::new();
-        file.take(MAX_FILE_LEN as u64 + 1).read_to_end(&mut bytes)?;
-        if bytes.len() > MAX_FILE_LEN {
-            return Err(StoreError::Limit("file bytes"));
-        }
-        format::read(std::str::from_utf8(&bytes).map_err(|_| StoreError::Invalid("not UTF-8"))?)
+        read_file(&self.dir.join("store.xml"))
     }
 
     fn replace(&self, xml: &str) -> Result<(), StoreError> {
@@ -705,6 +694,25 @@ impl Store {
         sync_replacement(&self.dir).map_err(StoreError::Durability)?;
         Ok(())
     }
+}
+
+/// Read and check `store.xml` at `path`: the one reader, for [`Store`] and [`Listing`]. An absent
+/// file is an empty store. It opens the file read-only and creates nothing.
+fn read_file(path: &Path) -> Result<Data, StoreError> {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Data::default()),
+        Err(e) => return Err(e.into()),
+    };
+    if file.metadata()?.len() > MAX_FILE_LEN as u64 {
+        return Err(StoreError::Limit("file bytes"));
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_FILE_LEN as u64 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_FILE_LEN {
+        return Err(StoreError::Limit("file bytes"));
+    }
+    format::read(std::str::from_utf8(&bytes).map_err(|_| StoreError::Invalid("not UTF-8"))?)
 }
 
 fn sync_replacement(dir: &Path) -> io::Result<()> {

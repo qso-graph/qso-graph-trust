@@ -5,6 +5,16 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `store::Listing::read(dir)`: a read-only, public listing of a store folder, for programs that show
+  what the store holds and must not change it. It writes nothing (no folder, no `store.lock`, no
+  file), takes no lock and never calls a credential store; a missing folder or `store.xml` is an
+  empty listing, and a file the store refuses is refused with the same error. It gives the
+  certificates (`ListedCertificate`: id, certificate, and `has_key` as the file records it, not
+  checked against the credential store) and the trusted roots, as `Store::trusted_roots` does. It
+  carries no credential name.
+
 ## [0.1.3] - 2026-11-07
 
 ### Added

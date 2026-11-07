@@ -484,3 +484,34 @@ fn an_accepted_root_is_removed_with_the_cas_kept_under_it() {
         Err(ImportError::UntrustedRoot { .. })
     ));
 }
+
+#[test]
+fn a_listing_gives_the_same_trusted_roots_as_the_store() {
+    let folder = Folder::new();
+    let store = memory(&folder);
+    assert_eq!(
+        crate::store::Listing::read(&folder.0)
+            .expect("listing")
+            .trusted_roots(),
+        store.trusted_roots().expect("roots")
+    );
+    store
+        .import_tq6(
+            &new_root_tq6("user-a"),
+            &Trust::lotw(),
+            Some(&fp("new-root")),
+        )
+        .expect("accepted");
+    let listed = crate::store::Listing::read(&folder.0).expect("listing");
+    let full = store.trusted_roots().expect("roots");
+    assert_eq!(listed.trusted_roots(), full);
+    assert_eq!(
+        listed
+            .trusted_roots()
+            .iter()
+            .filter(|r| r.source == RootSource::Tq6)
+            .count(),
+        2
+    );
+    assert!(full.iter().any(|r| r.source == RootSource::BuiltIn));
+}
