@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-07
+
 ### Added
 
 - `store::Listing::read(dir)`: a read-only, public listing of a store folder, for programs that show
