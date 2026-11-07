@@ -102,6 +102,7 @@ cargo xtask policy
 python3 scripts/gen-lotw-tables.py --check
 python3 scripts/package-files.py --check
 python3 scripts/test_release_check.py
+python3 scripts/tqsllib-map.py --check
 ```
 
 **What CI checks:** formatting, clippy and the tests on Windows, macOS and Linux; the policy checks
