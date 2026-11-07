@@ -112,6 +112,7 @@ fn run_os_with_colors(
             err: &mut err,
             store: &no_store,
             upload: &mut no_upload,
+            trace: super::Trace::off(),
         },
     );
     Ran {
@@ -641,14 +642,10 @@ fn signing_messages_follow_the_color_choice_and_leave_the_status_plain() {
 #[test]
 fn unsupported_tqsl_options_are_refused_on_sight() {
     for flag in [
-        "-c",
-        "--callsign",
         "-n",
         "--updates",
         "-s",
         "--editlocation",
-        "-t",
-        "--diagnose",
         "-w",
         "--wipe",
         "-z",
@@ -885,14 +882,10 @@ fn round_two_hidden_options_are_refused_after_a_successful_parse() {
     for flag in [
         "-p",
         "--password",
-        "-c",
-        "--callsign",
         "-n",
         "--updates",
         "-s",
         "--editlocation",
-        "-t",
-        "--diagnose",
         "-w",
         "--wipe",
         "-z",
@@ -1152,4 +1145,343 @@ fn a_temporary_name_already_taken_is_never_removed() {
     assert!(super::write_whole_via(&out, b"signed", &taken).is_err());
     assert_eq!(std::fs::read(&taken).expect("kept"), b"not ours");
     assert!(!out.exists());
+}
+
+/// The lines of a signed log's tSTATION record.
+fn station_record(tq7: &[u8]) -> String {
+    let text = String::from_utf8_lossy(tq7);
+    let start = text.find("tSTATION").expect("a tSTATION record");
+    let end = text[start..]
+        .find("<eor>")
+        .map_or(text.len(), |e| start + e);
+    text[start..end].to_string()
+}
+
+#[test]
+fn c_signs_as_the_call_given_with_that_calls_certificate() {
+    let dir = scratch();
+    let out = dir.join("club-as-kc4qpq.tq8");
+    let pw = password("KC4QPQ");
+    let ran = qg_trust(
+        &[
+            "-x",
+            "-i",
+            path(&set("standard.tbk")),
+            "-l",
+            "KN4YU-CLUB",
+            "-c",
+            " kc4qpq ",
+            "-o",
+            path(&out),
+            path(&set("adif/KN4YU-CLUB.adi")),
+        ],
+        Some(&pw),
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.err.contains("signed 3 QSOs for KC4QPQ"), "{}", ran.err);
+    // KC4QPQ's key is the one unlocked, so KC4QPQ's certificate signs.
+    assert_eq!(ran.prompts, ["Password for KC4QPQ's key: "]);
+    let station = station_record(&signed(&out));
+    assert!(station.contains("<CALL:6>KC4QPQ"), "{station}");
+    assert!(!station.contains("KN4YU"), "{station}");
+    // The rest of the location is KN4YU-CLUB's.
+    assert!(station.contains("<GRIDSQUARE:4>FM02"), "{station}");
+    assert_eq!(final_status(&ran), "Final Status: Success(0)");
+}
+
+#[test]
+fn c_refuses_what_is_not_a_callsign_with_tqsls_syntax_code() {
+    for call in ["SECRET", "", "  ", "K", "KN4YU/", "KN 4YU"] {
+        let ran = qg_trust(
+            &[
+                "-i",
+                path(&set("standard.tbk")),
+                "-l",
+                "KN4YU-CLUB",
+                "-c",
+                call,
+                path(&set("adif/KN4YU-CLUB.adi")),
+            ],
+            None,
+        );
+        assert_eq!(ran.code, Exit::CommandError as u8, "{call:?}: {}", ran.err);
+        assert!(
+            ran.err.contains("-c takes a callsign, such as KN4YU"),
+            "{call:?}: {}",
+            ran.err
+        );
+        assert!(!ran.err.contains("SECRET"));
+        assert_eq!(final_status(&ran), "Final Status: Command Syntax Error(10)");
+        assert!(ran.prompts.is_empty());
+    }
+}
+
+#[test]
+fn c_for_a_call_with_no_certificate_fails_as_a_locations_own_call_does() {
+    let trust = Trust::with_roots(&[&read("pki/root.pem")]).expect("the test root");
+    let backup = tbk::read(&read("standard.tbk"), &trust).expect("the backup");
+    let w4w = backup
+        .certificates
+        .iter()
+        .find(|c| c.callsign == "W4W")
+        .expect("W4W");
+    // A day after W4W's certificate ends: KN4YU's and KC4QPQ's are still in force.
+    let later = w4w.certificate.as_ref().expect("W4W's").validity().1 + Duration::from_secs(86400);
+    let dir = scratch();
+    let own = run_at(
+        &[
+            "-i",
+            path(&set("standard.tbk")),
+            "-l",
+            "W4W-EVENT",
+            "-o",
+            path(&dir.join("own.tq8")),
+            path(&set("adif/W4W-EVENT.adi")),
+        ],
+        None,
+        &trust,
+        later,
+    );
+    let given = run_at(
+        &[
+            "-i",
+            path(&set("standard.tbk")),
+            "-l",
+            "KN4YU-CLUB",
+            "-c",
+            "W4W",
+            "-o",
+            path(&dir.join("given.tq8")),
+            path(&set("adif/KN4YU-CLUB.adi")),
+        ],
+        None,
+        &trust,
+        later,
+    );
+    for ran in [&own, &given] {
+        assert_eq!(ran.code, Exit::TqslError as u8, "{}", ran.err);
+        assert_eq!(final_status(ran), "Final Status: TQSL Error(4)");
+    }
+    assert_eq!(own.err, given.err);
+    assert!(
+        own.err
+            .contains("there is no certificate for W4W (DXCC 291) in force now, with its key"),
+        "{}",
+        own.err
+    );
+    assert!(!dir.join("own.tq8").exists() && !dir.join("given.tq8").exists());
+    // A call with no certificate at all is the same error.
+    let none = qg_trust(
+        &[
+            "-i",
+            path(&set("standard.tbk")),
+            "-l",
+            "KN4YU-CLUB",
+            "-c",
+            "N0CALL",
+            path(&set("adif/KN4YU-CLUB.adi")),
+        ],
+        None,
+    );
+    assert_eq!(none.code, Exit::TqslError as u8, "{}", none.err);
+    assert!(
+        none.err
+            .contains("there is no certificate for N0CALL (DXCC 291)")
+    );
+}
+
+/// What the diagnostic log must never hold: the password, PEM armour, and every line of the
+/// backup's certificates and keys (the keys encrypted, as the backup holds them).
+fn secrets(pw: &[u8]) -> Vec<String> {
+    let backup = gzip::decompress(&read("standard.tbk"), 64 * 1024 * 1024).expect("gzip");
+    let text = String::from_utf8_lossy(&backup).into_owned();
+    let mut secrets: Vec<String> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.len() >= 40 && !l.contains(' ') && !l.starts_with('<'))
+        .map(str::to_string)
+        .collect();
+    assert!(
+        secrets.len() > 100,
+        "the backup's key and certificate lines"
+    );
+    secrets.push(String::from_utf8(pw.to_vec()).expect("a text password"));
+    secrets.extend(["-----BEGIN".into(), "PRIVATE".into()]);
+    secrets
+}
+
+#[test]
+fn t_writes_a_diagnostic_log_with_no_password_or_key_in_it() {
+    let dir = scratch();
+    let diag = dir.join("diag.txt");
+    let pw = password("KC4QPQ");
+    assert!(!pw.is_empty(), "a key with a password");
+    let ran = qg_trust(
+        &[
+            "-x",
+            "-t",
+            path(&diag),
+            "-i",
+            path(&set("standard.tbk")),
+            "-l",
+            "KC4QPQ-HOME",
+            "-o",
+            path(&dir.join("home.tq8")),
+            path(&set("adif/KC4QPQ-HOME.adi")),
+        ],
+        Some(&pw),
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let log = std::fs::read_to_string(&diag).expect("the diagnostic log");
+    for line in [
+        "QSO Graph Trust Diagnostics\n",
+        &format!("qg-trust {}\n", qso_graph_trust::VERSION),
+        "System: ",
+        "Command Line: qg-trust -x -t ",
+        "Working Directory: ",
+        "Options: location \"KC4QPQ-HOME\", keys from the certificate file (-i), -c none,",
+        "Certificate file (-i) read: 3 certificates, 7 station locations\n",
+        "Station location \"KC4QPQ-HOME\": call KC4QPQ, DXCC 291\n",
+        "Certificate: KC4QPQ (DXCC 291), serial 10001\n",
+        "Key: unlocked with the password asked for\n",
+        "QSOs: 3 records read, 3 signed; left out: 0 not valid,",
+        "Signed log written: to -o's file\n",
+        "Final Status: Success(0)\n",
+    ] {
+        assert!(log.contains(line), "{line:?} in:\n{log}");
+    }
+    let secrets = secrets(&pw);
+    let secrets: Vec<&str> = secrets.iter().map(String::as_str).collect();
+    assert!(super::trace::holds_none_of(&log, &secrets), "{log}");
+    // Planted: the check finds them where they are, so it would find them in the log.
+    let backup = gzip::decompress(&read("standard.tbk"), 64 * 1024 * 1024).expect("gzip");
+    let planted = format!(
+        "{log}{}{}",
+        String::from_utf8_lossy(&backup),
+        String::from_utf8_lossy(&pw)
+    );
+    assert!(!super::trace::holds_none_of(&planted, &secrets));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&diag)
+            .expect("metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+}
+
+#[test]
+fn t_writes_a_password_given_on_the_command_line_only_redacted() {
+    let dir = scratch();
+    let diag = dir.join("diag.txt");
+    let ran = qg_trust(
+        &[
+            "-t",
+            path(&diag),
+            "-i",
+            path(&set("standard.tbk")),
+            "-l",
+            "KC4QPQ-HOME",
+            "-p",
+            "hunter2",
+            path(&set("adif/KC4QPQ-HOME.adi")),
+        ],
+        None,
+    );
+    assert_eq!(ran.code, Exit::CommandError as u8, "{}", ran.err);
+    assert!(!ran.err.contains("hunter2"));
+    let log = std::fs::read_to_string(&diag).expect("the diagnostic log");
+    assert!(log.contains(" -p <redacted> "), "{log}");
+    assert!(log.contains("Refused: a password is never given"), "{log}");
+    assert!(
+        log.contains("Final Status: Command Syntax Error(10)\n"),
+        "{log}"
+    );
+    assert!(super::trace::holds_none_of(&log, &["hunter2"]), "{log}");
+}
+
+#[test]
+fn t_that_cannot_be_opened_warns_and_the_run_goes_on() {
+    let dir = scratch();
+    let diag = dir.join("no-such-folder").join("diag.txt");
+    let out = dir.join("club.tq8");
+    let ran = qg_trust(
+        &[
+            "-t",
+            path(&diag),
+            "-i",
+            path(&set("standard.tbk")),
+            "-l",
+            "KN4YU-CLUB",
+            "-o",
+            path(&out),
+            path(&set("adif/KN4YU-CLUB.adi")),
+        ],
+        None,
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        ran.err.starts_with(&format!(
+            "Error opening diagnostic log {}: ",
+            diag.display()
+        )),
+        "{}",
+        ran.err
+    );
+    assert!(out.is_file());
+    assert!(!diag.exists());
+    assert_eq!(final_status(&ran), "Final Status: Success(0)");
+    // A file name that could hold a password is not repeated.
+    let secret = dir.join("no-such-folder").join("--password=hunter2");
+    let ran = qg_trust(
+        &[
+            "-t",
+            path(&secret),
+            "-i",
+            path(&set("standard.tbk")),
+            "-l",
+            "KN4YU-CLUB",
+            "-o",
+            path(&out),
+            path(&set("adif/KN4YU-CLUB.adi")),
+        ],
+        None,
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        ran.err
+            .starts_with("Error opening diagnostic log <redacted>: ")
+    );
+    assert!(!ran.err.contains("hunter2"));
+}
+
+#[test]
+fn c_and_t_are_shown_in_help_and_no_longer_refused() {
+    let trust = Trust::lotw();
+    let help = run_with_color(&["--help"], None, &trust, SystemTime::now(), false);
+    for flag in ["--callsign <CALL>", "--diagnose <FILE>"] {
+        assert!(help.out.contains(flag), "{}", help.out);
+    }
+    let diag = scratch().join("diag.txt");
+    for (flag, value) in [
+        ("-c", "KN4YU"),
+        ("--callsign", "KN4YU"),
+        ("-t", path(&diag)),
+        ("--diagnose", path(&diag)),
+    ] {
+        let ran = qg_trust(&[flag, value], None);
+        assert!(
+            !ran.err.contains("not supported yet"),
+            "{flag}: {}",
+            ran.err
+        );
+        // Accepted, so what is missing is the log to sign.
+        assert!(
+            ran.err.contains("give the log to sign"),
+            "{flag}: {}",
+            ran.err
+        );
+    }
 }

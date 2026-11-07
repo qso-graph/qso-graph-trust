@@ -76,6 +76,8 @@ signs with the keys in the store and uploads. `-i FILE` instead reads a TQSL bac
 | `-a`, `--action ACTION` | QSOs signed before: `abort`, `compliant` (only new ones), `all`, or `ask` |
 | `-f`, `--verify HOW` | the log's own location details: `ignore`, `report` (the default), `update` |
 | `-i`, `--import FILE` | read the certificate, key and location from a TQSL backup for this run |
+| `-c`, `--callsign CALL` | sign as CALL in place of the location's own call, with CALL's certificate |
+| `-t`, `--diagnose FILE` | write a diagnostic log of the run for support; it never holds a key or a password |
 | `-x`, `-q`, `-d` | accepted and ignored; `qg-trust` always exits when done |
 | `-h`, `-v` | help, version |
 | `--completions SHELL` | write shell completions (bash, zsh, fish, powershell, elvish) |

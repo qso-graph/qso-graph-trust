@@ -25,11 +25,15 @@ use qso_graph_trust::options::{QthHandling, SigningOptions};
 use qso_graph_trust::qso::{Date, Qso};
 use qso_graph_trust::signed_log::{LogError, sign_log_with_options, tq8};
 use qso_graph_trust::signing::KeyError;
+use qso_graph_trust::station::{StationError, StationLocation};
 use qso_graph_trust::store::{Store, StoreError};
 use qso_graph_trust::tbk::{self, BackedUpCertificate};
 use qso_graph_trust::upload::UploadRequest;
 use qso_graph_trust::{VERSION, records};
 use zeroize::Zeroizing;
+
+pub(crate) mod trace;
+pub(crate) use trace::Trace;
 
 /// TQSL's exit codes, by the names TQSL gives them (`apps/tqslapp.h`, `apps/tqsl.cpp` `exitNow`).
 /// TQSL's library error (5), unknown (12) and busy (13) are not used.
@@ -106,6 +110,8 @@ pub(crate) struct Env<'a> {
     /// Sends an upload to LoTW over verified TLS: the HTTP status and the body, bounded to
     /// `upload::MAX_RESPONSE_BYTES`, or why no answer came.
     pub upload: &'a mut Upload<'a>,
+    /// The diagnostic log `-t` asks for, off until it is opened.
+    pub trace: Trace,
 }
 
 const AFTER_HELP: &str = "\
@@ -158,6 +164,16 @@ struct Options {
         help_heading = "Signing"
     )]
     location: Option<String>,
+    /// Sign for CALL in place of the station location's own call, with CALL's certificate.
+    #[arg(
+        short = 'c',
+        long = "callsign",
+        value_name = "CALL",
+        allow_hyphen_values = true,
+        value_parser = callsign,
+        help_heading = "Signing"
+    )]
+    callsign: Option<String>,
     /// Sign only QSOs on or after DATE (YYYY-MM-DD or YYYYMMDD).
     #[arg(short = 'b', long = "begindate", value_name = "DATE", help_heading = "Signing",
           allow_hyphen_values = true, value_parser = date)]
@@ -193,7 +209,7 @@ struct Options {
     )]
     action: Option<Action>,
     /// The log's own location details (its MY_ fields): ignore them, report a QSO that disagrees
-    /// (TQSL's default) or update the location from them. With keys in the store (no -i).
+    /// (TQSL's default) or update the location from them.
     #[arg(
         short = 'f',
         long,
@@ -224,6 +240,15 @@ struct Options {
         help_heading = "Accepted for loggers that pass them"
     )]
     nodate: bool,
+    /// Write a diagnostic log of the run to FILE, for support: never a key or a password.
+    #[arg(
+        short = 't',
+        long = "diagnose",
+        value_name = "FILE",
+        allow_hyphen_values = true,
+        help_heading = "Other"
+    )]
+    diagnose: Option<PathBuf>,
     /// Print the version.
     #[arg(short = 'v', long, action = clap::ArgAction::SetTrue, help_heading = "Other")]
     version: bool,
@@ -268,14 +293,10 @@ pub(crate) enum Verify {
 struct Rejected {
     #[arg(short = 'p', long = "password", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     password: Option<Option<String>>,
-    #[arg(short = 'c', long = "callsign", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
-    callsign: Option<Option<String>>,
     #[arg(short = 'n', long = "updates", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     updates: Option<Option<String>>,
     #[arg(short = 's', long = "editlocation", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     editlocation: Option<Option<String>>,
-    #[arg(short = 't', long = "diagnose", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
-    diagnose: Option<Option<String>>,
     #[arg(short = 'w', long = "wipe", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     wipe: Option<Option<String>>,
     #[arg(short = 'z', long = "test-sign", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
@@ -289,12 +310,6 @@ const PASSWORD_MESSAGE: &str = "a password is never given on the command line: q
 const REJECTED_MESSAGES: &[(char, &str, &str, &str)] = &[
     ('p', "--password", PASSWORD_MESSAGE, PASSWORD_MESSAGE),
     (
-        'c',
-        "--callsign",
-        "-c is not supported yet",
-        "--callsign is not supported yet",
-    ),
-    (
         'n',
         "--updates",
         "-n is not supported yet",
@@ -305,12 +320,6 @@ const REJECTED_MESSAGES: &[(char, &str, &str, &str)] = &[
         "--editlocation",
         "-s is not supported yet",
         "--editlocation is not supported yet",
-    ),
-    (
-        't',
-        "--diagnose",
-        "-t is not supported yet",
-        "--diagnose is not supported yet",
     ),
     (
         'w',
@@ -346,11 +355,19 @@ pub(crate) fn run(args: &[OsString], env: &mut Env<'_>) -> u8 {
     {
         Some(args) => match execute(&args, env) {
             Some(code) => code,
-            None => return 0,
+            None => {
+                env.trace.line(format_args!("Exit: 0, nothing signed"));
+                return 0;
+            }
         },
         None => syntax_error(env, "an argument is not valid text"),
     };
     let _ = writeln!(env.err, "Final Status: {}({})", code.name(), code as u8);
+    env.trace.line(format_args!(
+        "Final Status: {}({})",
+        code.name(),
+        code as u8
+    ));
     code as u8
 }
 
@@ -370,6 +387,11 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
             ));
         }
     };
+
+    // TQSL opens its diagnostic log as soon as its command line is read, before anything is done.
+    if let Some(file) = matches.get_one::<PathBuf>("diagnose") {
+        open_trace(file, args, env);
+    }
 
     // Clap's indices respect values consumed by an option and letters in a short-option group.
     // Defaults have indices too, so only command-line occurrences take part in the ordering.
@@ -423,6 +445,7 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
                         })
                     })
                     .expect("a hidden option has a fixed refusal");
+                env.trace.line(format_args!("Refused: {message}"));
                 return Some(syntax_error(env, message));
             }
         }
@@ -449,8 +472,10 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
         None
     };
     if let Some(message) = missing {
+        env.trace.line(format_args!("Refused: {message}"));
         return Some(syntax_error(env, message));
     }
+    trace_options(&options, env);
     if let (Some(begin), Some(end)) = (options.begin, options.end)
         && begin > end
     {
@@ -460,6 +485,7 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
             &crate::commands::LoggerCall {
                 log: options.input.as_deref().unwrap_or(Path::new("")),
                 location: options.location.as_deref().unwrap_or(""),
+                callsign: options.callsign.as_deref(),
                 begin: options.begin,
                 end: options.end,
                 output: options.output.as_deref(),
@@ -520,7 +546,7 @@ fn rejected_message(args: &[&str]) -> Option<&'static str> {
                 if let Some(option) = REJECTED_MESSAGES.iter().find(|option| option.0 == letter) {
                     return Some(option.2);
                 }
-                if matches!(letter, 'i' | 'l' | 'b' | 'e' | 'o') {
+                if matches!(letter, 'i' | 'l' | 'b' | 'e' | 'o' | 'c' | 't') {
                     break;
                 }
             }
@@ -545,6 +571,8 @@ fn parse_error_message(error: &clap::Error) -> &'static str {
                 "--enddate <DATE>" => "--enddate needs a date (YYYY-MM-DD or YYYYMMDD)",
                 "--import <FILE>" => "-i names the file with your certificate",
                 "--location <NAME>" => "-l names the station location to sign for",
+                "--callsign <CALL>" => "-c takes a callsign, such as KN4YU",
+                "--diagnose <FILE>" => "-t names the file for the diagnostic log",
                 "--output <FILE>" => "-o names the file for the signed log",
                 "--action <ACTION>" => "-a takes abort, compliant, all or ask",
                 "--verify <HOW>" => "-f takes ignore, report or update",
@@ -595,6 +623,130 @@ fn date(text: &str) -> Result<Date, &'static str> {
         .ok_or("a date must be YYYY-MM-DD or YYYYMMDD")
 }
 
+/// TQSL's `-c`: the call trimmed and in capitals (`apps/tqsl.cpp`), and one a station location
+/// could hold.
+fn callsign(text: &str) -> Result<String, &'static str> {
+    let call = text.trim().to_ascii_uppercase();
+    if qso_graph_trust::qso::is_callsign(&call) {
+        Ok(call)
+    } else {
+        Err("-c takes a callsign, such as KN4YU")
+    }
+}
+
+/// The station location with `-c`'s call in place of its own, for this run only: TQSL sets the
+/// call on its copy of the location (`tqsl_setLocationCallSign`) and never saves it. Every other
+/// field, the DXCC entity among them, is the location's, and is checked again with the new call.
+pub(crate) fn with_call(
+    station: &StationLocation,
+    call: Option<&str>,
+) -> Result<StationLocation, StationError> {
+    let Some(call) = call else {
+        return Ok(station.clone());
+    };
+    let dxcc = station.dxcc().to_string();
+    let mut fields: Vec<(&str, &str)> = station
+        .fields()
+        .filter(|(name, _)| !matches!(*name, "CALL" | "DXCC"))
+        .collect();
+    fields.push(("CALL", call));
+    fields.push(("DXCC", &dxcc));
+    StationLocation::new(&fields)
+}
+
+/// Opens `-t`'s file and writes its header; one that cannot be opened is said, in TQSL's words,
+/// and the run goes on without it, as TQSL's does.
+fn open_trace(file: &Path, args: &[&str], env: &mut Env<'_>) {
+    match Trace::create(file) {
+        Ok(trace) => {
+            env.trace = trace;
+            env.trace.header(args);
+        }
+        Err(e) => {
+            // The file is named as TQSL names it, unless it could hold a password.
+            let shown = file.to_string_lossy();
+            let shown = if trace::is_redacted(&shown) {
+                trace::REDACTED.into()
+            } else {
+                shown
+            };
+            let _ = writeln!(env.err, "Error opening diagnostic log {shown}: {e}");
+        }
+    }
+}
+
+/// What the run was asked to do, as the diagnostic log records it.
+fn trace_options(options: &Options, env: &mut Env<'_>) {
+    let from = if options.backup.is_some() {
+        "the certificate file (-i)"
+    } else {
+        "the store"
+    };
+    let date = |d: Option<Date>| d.map_or_else(|| "none".to_string(), |d| d.to_string());
+    env.trace.line(format_args!(
+        "Options: location {:?}, keys from {from}, -c {}, -f {}, -a {}, -b {}, -e {}, -u {}, -o {}",
+        options.location.as_deref().unwrap_or_default(),
+        options.callsign.as_deref().unwrap_or("none"),
+        options.verify.map_or("report (default)", |v| match v {
+            Verify::Ignore => "ignore",
+            Verify::Report => "report",
+            Verify::Update => "update",
+        }),
+        options.action.map_or("none (ask)", |a| match a {
+            Action::Abort => "abort",
+            Action::Compliant => "compliant",
+            Action::All => "all",
+            Action::Ask => "ask",
+        }),
+        date(options.begin),
+        date(options.end),
+        if options.upload { "yes" } else { "no" },
+        if options.output.is_some() {
+            "given"
+        } else {
+            "beside the log"
+        },
+    ));
+}
+
+/// QSOs left out of a run, by why, for the diagnostic log.
+#[derive(Default)]
+pub(crate) struct LeftOut {
+    /// Records that are not QSOs LoTW takes.
+    pub invalid: usize,
+    /// Outside `-b` and `-e`.
+    pub out_of_range: usize,
+    /// Outside the QSO dates the certificate covers.
+    pub outside_certificate: usize,
+    /// The log's own station fields disagree with the location, or make it invalid.
+    pub station: usize,
+    /// Signed before and not signed again.
+    pub signed_before: usize,
+}
+
+impl LeftOut {
+    /// Counts one QSO a signing error left out, by its kind.
+    pub(crate) fn count(&mut self, e: &LogError) {
+        match e {
+            LogError::QsoOutsideCertificate { .. } => self.outside_certificate += 1,
+            LogError::QsoFromAnotherStation { .. } | LogError::Location { .. } => self.station += 1,
+            _ => {}
+        }
+    }
+
+    pub(crate) fn trace(&self, read: usize, signed: usize, env: &mut Env<'_>) {
+        env.trace.line(format_args!(
+            "QSOs: {read} records read, {signed} signed; left out: {} not valid, {} outside -b/-e, \
+             {} outside the certificate's QSO dates, {} not this station location's, {} signed before",
+            self.invalid,
+            self.out_of_range,
+            self.outside_certificate,
+            self.station,
+            self.signed_before
+        ));
+    }
+}
+
 fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> Exit {
     let (Some(backup_path), Some(name), Some(input)) =
         (&options.backup, &options.location, &options.input)
@@ -633,6 +785,11 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
             return Exit::InputError;
         }
     };
+    env.trace.line(format_args!(
+        "Certificate file (-i) read: {} certificates, {} station locations",
+        backup.certificates.len(),
+        backup.locations.len()
+    ));
     let Some(location) = backup.locations.iter().find(|l| l.name == *name) else {
         let names: Vec<&str> = backup.locations.iter().map(|l| l.name.as_str()).collect();
         env.message(
@@ -646,9 +803,36 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
                 }
             ),
         );
+        env.trace.line(format_args!(
+            "Refused: the station location is not in the file"
+        ));
         return Exit::CommandError;
     };
-    let station = &location.station;
+    env.trace.line(format_args!(
+        "Station location {:?}: call {}, DXCC {}",
+        location.name,
+        location.station.call(),
+        location.station.dxcc()
+    ));
+    // TQSL's -c: the location's call replaced for this run, never in the file.
+    let station = match with_call(&location.station, options.callsign.as_deref()) {
+        Ok(station) => station,
+        Err(e) => {
+            env.message(
+                Tone::Error,
+                format_args!("the station location with -c: {e}"),
+            );
+            return Exit::TqslError;
+        }
+    };
+    let station = &station;
+    if options.callsign.is_some() {
+        env.trace.line(format_args!(
+            "-c: signing as {} in place of {}",
+            station.call(),
+            location.station.call()
+        ));
+    }
 
     let Some(entry) = certificate_for(
         &backup.certificates,
@@ -664,11 +848,20 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
                 station.dxcc()
             ),
         );
+        env.trace.line(format_args!(
+            "Certificate: none in force for {} (DXCC {})",
+            station.call(),
+            station.dxcc()
+        ));
         return Exit::TqslError;
     };
     let (Some(certificate), Some(entry_key)) = (&entry.certificate, &entry.key) else {
         return Exit::TqslError;
     };
+    env.trace.line(format_args!(
+        "Certificate: {} (DXCC {}), serial {}",
+        entry.callsign, entry.dxcc, entry.serial
+    ));
     let key = if entry_key.is_encrypted() {
         let prompt = format!("Password for {}'s key: ", entry.callsign);
         let password = match (env.ask_password)(&prompt) {
@@ -688,6 +881,8 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
     let key = match key {
         Ok(key) => key,
         Err(KeyError::WrongPassword | KeyError::PasswordNeeded) => {
+            env.trace
+                .line(format_args!("Key: the password given does not unlock it"));
             env.message(
                 Tone::Error,
                 format_args!("that password does not unlock {}'s key", entry.callsign),
@@ -699,6 +894,14 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
             return Exit::TqslError;
         }
     };
+    env.trace.line(format_args!(
+        "Key: unlocked{}",
+        if entry_key.is_encrypted() {
+            " with the password asked for"
+        } else {
+            ", it has no password"
+        }
+    ));
 
     let records = match read_file(input, 64 * 1024 * 1024)
         .map_err(|e| e.to_string())
@@ -715,6 +918,7 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
     let mut numbers = Vec::new();
     let mut qsos = Vec::new();
     let (mut refused, mut out_of_range) = (0usize, 0usize);
+    let mut left_out = LeftOut::default();
     for (i, record) in records.iter().enumerate() {
         match Qso::from_adif_with_options(record, &signing) {
             Ok(qso) => {
@@ -722,6 +926,7 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
                 if options.begin.is_some_and(|b| date < b) || options.end.is_some_and(|e| date > e)
                 {
                     out_of_range += 1;
+                    left_out.out_of_range += 1;
                     continue;
                 }
                 numbers.push(i + 1);
@@ -733,6 +938,7 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
                     format_args!("the log's QSO {}: not signed: {e}", i + 1),
                 );
                 refused += 1;
+                left_out.invalid += 1;
             }
         }
     }
@@ -762,14 +968,20 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
         numbers.remove(i);
         qsos.remove(i);
         refused += 1;
+        left_out.outside_certificate += 1;
     }
     // A QSO the certificate or station cannot sign is left out, said so, and the rest are signed.
     let signed = loop {
         if qsos.is_empty() {
+            left_out.trace(records.len(), 0, env);
             env.message(Tone::Error, format_args!("the log: no QSOs to sign"));
             return Exit::NoQsos;
         }
-        match sign_log_with_options(certificate, &key, station, &qsos, env.now, &signing) {
+        let result = sign_log_with_options(certificate, &key, station, &qsos, env.now, &signing);
+        if let Err(e) = &result {
+            left_out.count(e);
+        }
+        match result {
             Ok(signed) => break signed,
             Err(LogError::QsoOutsideCertificate { index }) => {
                 env.message(
@@ -834,6 +1046,15 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
         env.message(Tone::Error, format_args!("the output file (-o): {e}"));
         return Exit::OutputError;
     }
+    left_out.trace(records.len(), qsos.len(), env);
+    env.trace.line(format_args!(
+        "Signed log written: {}",
+        if options.output.is_some() {
+            "to -o's file"
+        } else {
+            "beside the log, with .tq8"
+        }
+    ));
     *written = Some(signed);
     env.message(
         Tone::Success,

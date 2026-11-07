@@ -175,8 +175,8 @@ calls TQSL's command line today should get the same meaning, including exit code
 | `-i` | import `.tq6`, `.p12` or `.tbk` | 1.3, 1.4 | Part done: `-i` reads a `.tbk` for the run; `qg-trust import` imports all three | #173 |
 | `-s` | add, or with `-l` edit, a location | 1.5 | Part done: `qg-trust location add` and `edit`; `-s` opens TQSL's window, which has no counterpart | #173 |
 | `-u` | upload after signing | 1.8 | Done | #173 |
-| `-c` | default call | 1.4 | 0.7.0 | #173 |
-| `-t` | diagnostic log, with no key or password in it | | 0.7.0 | #173 |
+| `-c` | default call | 1.4 | Done: the location's call is replaced for the run, never in the store, and the certificate is chosen for that call and the location's DXCC entity; `-f` compares the log with the location as `-c` changes it | #173 |
+| `-t` | diagnostic log, with no key or password in it | | Done: TQSL's header, then each step, counts of QSOs signed and left out by reason, the upload's answer and the exit code; any value that could be a password is written `<redacted>`; owner-only on Unix | #173 |
 | Exit codes 0 to 15 | the same numbers TQSL uses, and its `Final Status` line | | Done: 0 to 4, 6 to 11, 14 and 15; 5, 12 and 13 have no cause in `qg-trust` | #173 |
 | `-z` | test signing | 2 | Later | |
 | `-n` | check for updates | 3 | Won't | |
