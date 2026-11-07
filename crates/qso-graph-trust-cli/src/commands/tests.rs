@@ -148,6 +148,7 @@ impl Ham {
                 err: &mut err,
                 store: &store,
                 upload: &mut upload,
+                trace: crate::cli::Trace::off(),
             },
         );
         Ran {
@@ -1513,4 +1514,221 @@ fn a_new_root_in_your_own_backup_is_trusted_and_named() {
     // Imported again: nothing new to trust.
     let ran = ham.run(&["import", path(&tbk)]);
     assert!(!ran.out.contains("trusted ARRL root"), "{}", ran.out);
+}
+
+/// A copy of a log with STATION_CALLSIGN set on every QSO.
+fn log_from(dir: &Path, name: &str, station_call: &str) -> PathBuf {
+    let log = String::from_utf8(read(&format!("adif/{name}.adi"))).expect("text");
+    let field = format!(
+        "<STATION_CALLSIGN:{}>{station_call} <EOR>",
+        station_call.len()
+    );
+    let marked = log.replace("<EOR>", &field);
+    assert_ne!(marked, log, "the log has records to change");
+    let path = dir.join(format!("{name}-{station_call}.adi"));
+    std::fs::write(&path, marked).expect("write");
+    path
+}
+
+fn certificate_record(tq7: &[u8]) -> String {
+    let text = String::from_utf8_lossy(tq7);
+    let start = text.find("<CERTIFICATE:").expect("a tCERT record");
+    let end = text[start..]
+        .find("<eor>")
+        .map_or(text.len(), |e| start + e);
+    text[start..end].to_string()
+}
+
+fn station_record(tq7: &[u8]) -> String {
+    let text = String::from_utf8_lossy(tq7);
+    let start = text.find("tSTATION").expect("a tSTATION record");
+    let end = text[start..]
+        .find("<eor>")
+        .map_or(text.len(), |e| start + e);
+    text[start..end].to_string()
+}
+
+#[test]
+fn a_logger_signs_as_cs_call_with_its_certificate_and_the_location_is_kept() {
+    let ham = Ham::unsigned();
+    let dir = scratch();
+    let adi = dir.join("club.adi");
+    std::fs::copy(set("adif/KN4YU-CLUB.adi"), &adi).expect("copy");
+    let ran = ham.run(&[
+        "-x",
+        "-a",
+        "all",
+        "-l",
+        "KN4YU-CLUB",
+        "-c",
+        "kc4qpq",
+        path(&adi),
+    ]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(final_status(&ran), "Final Status: Success(0)");
+    assert!(
+        ran.out.contains("Signed 3 QSOs for KC4QPQ at KN4YU-CLUB"),
+        "{}",
+        ran.out
+    );
+    // KC4QPQ's certificate signs: the one tqsllib put in its signed log for KC4QPQ.
+    let tq7 = signed(&dir.join("club.tq8"));
+    assert_eq!(
+        certificate_record(&tq7),
+        certificate_record(&read("signed/KC4QPQ-HOME.tq7"))
+    );
+    let station = station_record(&tq7);
+    assert!(station.contains("<CALL:6>KC4QPQ"), "{station}");
+    assert!(station.contains("<GRIDSQUARE:4>FM02"), "{station}");
+    // The stored location is not changed: -c is for this run only, as in TQSL.
+    let locations = ham.store.locations().expect("locations");
+    let club = locations
+        .iter()
+        .find(|l| l.name == "KN4YU-CLUB")
+        .expect("the location");
+    assert_eq!(club.station.call(), "KN4YU");
+
+    let bad = ham.run(&["-x", "-l", "KN4YU-CLUB", "-c", "NOT-A-CALL", path(&adi)]);
+    assert_eq!(bad.code, 10, "{}", bad.err);
+    assert!(bad.err.contains("-c takes a callsign"), "{}", bad.err);
+}
+
+#[test]
+fn a_logger_c_with_no_certificate_fails_as_a_locations_own_call_does() {
+    let mut ham = Ham::unsigned();
+    let backup = tbk::read(&read("standard.tbk"), &ham.trust).expect("the backup");
+    let w4w = backup
+        .certificates
+        .iter()
+        .find(|c| c.callsign == "W4W")
+        .expect("W4W");
+    ham.now = w4w.certificate.as_ref().expect("W4W's").validity().1 + Duration::from_secs(86400);
+    let dir = scratch();
+    let own = ham.run(&[
+        "-x",
+        "-a",
+        "all",
+        "-l",
+        "W4W-EVENT",
+        "-o",
+        path(&dir.join("own.tq8")),
+        path(&set("adif/W4W-EVENT.adi")),
+    ]);
+    let given = ham.run(&[
+        "-x",
+        "-a",
+        "all",
+        "-l",
+        "KN4YU-CLUB",
+        "-c",
+        "W4W",
+        "-o",
+        path(&dir.join("given.tq8")),
+        path(&set("adif/KN4YU-CLUB.adi")),
+    ]);
+    for ran in [&own, &given] {
+        assert_eq!(ran.code, 4, "{}", ran.err);
+        assert_eq!(final_status(ran), "Final Status: TQSL Error(4)");
+        assert!(
+            ran.err.contains("you have no certificate for W4W"),
+            "{}",
+            ran.err
+        );
+    }
+    assert_eq!(own.err, given.err);
+}
+
+#[test]
+fn f_compares_the_log_with_the_location_as_c_changes_it() {
+    let ham = Ham::unsigned();
+    let dir = scratch();
+    // The log names the call -c gives: it agrees with the location as -c changes it.
+    let as_given = log_from(&dir, "KN4YU-CLUB", "KC4QPQ");
+    let ran = ham.run(&[
+        "-x",
+        "-a",
+        "all",
+        "-f",
+        "report",
+        "-l",
+        "KN4YU-CLUB",
+        "-c",
+        "KC4QPQ",
+        path(&as_given),
+    ]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    // The log names the location's own call: under report, it is another station's.
+    let own = log_from(&dir, "KN4YU-CLUB", "KN4YU");
+    let ran = ham.run(&[
+        "-x",
+        "-a",
+        "all",
+        "-f",
+        "report",
+        "-l",
+        "KN4YU-CLUB",
+        "-c",
+        "KC4QPQ",
+        path(&own),
+    ]);
+    assert_eq!(ran.code, 8, "{}", ran.err);
+    assert!(
+        ran.err
+            .contains("its STATION_CALLSIGN is \"KN4YU\", not this station location's"),
+        "{}",
+        ran.err
+    );
+    // Without -c the same log signs: the comparison is with the location after -c.
+    let ran = ham.run(&[
+        "-x",
+        "-a",
+        "all",
+        "-f",
+        "report",
+        "-l",
+        "KN4YU-CLUB",
+        path(&own),
+    ]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+}
+
+#[test]
+fn a_loggers_diagnostic_log_names_each_step_from_the_store_to_the_upload() {
+    let ham = Ham::unsigned();
+    let dir = scratch();
+    let adi = dir.join("event.adi");
+    std::fs::copy(set("adif/W4W-EVENT.adi"), &adi).expect("copy");
+    let diag = dir.join("diag.txt");
+    let ran = ham.run(&[
+        "-x",
+        "-u",
+        "-a",
+        "all",
+        "-t",
+        path(&diag),
+        "-l",
+        "W4W-EVENT",
+        path(&adi),
+    ]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let log = std::fs::read_to_string(&diag).expect("the diagnostic log");
+    for line in [
+        "QSO Graph Trust Diagnostics\n",
+        "Options: location \"W4W-EVENT\", keys from the store, -c none, -f report (default), -a all,",
+        "Store opened\n",
+        "Station location \"W4W-EVENT\": call W4W, DXCC 291\n",
+        "Certificate: W4W (DXCC 291), serial 10003, ID ",
+        "QSOs: 3 records read, 3 signed;",
+        "Signed log written: beside the log, with .tq8\n",
+        "Upload: HTTP 200, LoTW's answer: accepted\n",
+        "Final Status: Success(0)\n",
+    ] {
+        assert!(log.contains(line), "{line:?} in:\n{log}");
+    }
+    let pw = read("keys/W4W.password");
+    let pw = String::from_utf8(pw).expect("text");
+    assert!(crate::cli::trace::holds_none_of(
+        &log,
+        &[&pw, "-----BEGIN", "PRIVATE"]
+    ));
 }

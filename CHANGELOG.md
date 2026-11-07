@@ -5,6 +5,22 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `qg-trust -c CALL` (`--callsign`), as TQSL's: signs as CALL in place of the station location's
+  own call, for that run only, with a certificate for CALL and the location's DXCC entity. The call
+  is trimmed and put in capitals; one that is not a callsign is refused with code 10, and a call
+  with no certificate in force fails as a location's own call does, with code 4. `-f` compares the
+  log's own station fields with the location as `-c` changes it. With the store or with `-i`.
+- `qg-trust -t FILE` (`--diagnose`), as TQSL's: a diagnostic log of the run for support, with
+  TQSL's header (the program and version, the system, the command line, the working folder) and
+  then each step: the options, the store, the station location and certificate chosen (call, DXCC
+  entity, serial), how many QSOs were read and signed and how many left out for each reason, what
+  was written, LoTW's answer to an upload and the final status. It never holds a key, a password or
+  anything decrypted: in the command line, any value that could be a password is written
+  `<redacted>`. The file is its owner's alone on Unix. A file that cannot be opened is said on
+  standard error, in TQSL's words, and the run goes on.
+
 ## [0.1.2] - 2026-11-07
 
 ### Added

@@ -27,7 +27,7 @@ use qso_graph_trust::store::{
 use qso_graph_trust::upload::{UploadOutcome, UploadRequest};
 use qso_graph_trust::{VERSION, records, tbk};
 
-use crate::cli::{Action, Env, Exit, Tone, UploadFailure, Verify, read_file};
+use crate::cli::{Action, Env, Exit, LeftOut, Tone, UploadFailure, Verify, read_file};
 
 /// The words that start a command. Anything else is the TQSL-style command line loggers use.
 pub(crate) const COMMANDS: &[&str] = &[
@@ -155,6 +155,9 @@ struct SignArgs {
     /// What a logger asked for with -a; people use --again.
     #[arg(skip)]
     action: Option<Action>,
+    /// A logger's -c: the call to sign as, in place of the location's, for this run only.
+    #[arg(skip)]
+    callsign: Option<String>,
 }
 
 /// TQSL's settings that change what is signed, each off by default as in TQSL.
@@ -508,6 +511,7 @@ fn open<'a>(env: &mut Env<'a>) -> Result<&'a Store, Exit> {
     match (env.store)() {
         Ok(store) => Ok(store),
         Err(e) => {
+            env.trace.line(format_args!("Store: could not be opened"));
             env.message(
                 Tone::Error,
                 format_args!("QG Trust's store could not be opened: {e}"),
@@ -558,6 +562,7 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         return Err(Exit::CommandError);
     }
     let store = open(env)?;
+    env.trace.line(format_args!("Store opened"));
     let locations = store
         .locations()
         .map_err(|e| store_error(env, "the station locations", &e))?;
@@ -576,9 +581,36 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
                 }
             ),
         );
+        env.trace.line(format_args!(
+            "Refused: the station location is not in the store"
+        ));
         return Err(Exit::CommandError);
     };
-    let station = &location.station;
+    env.trace.line(format_args!(
+        "Station location {:?}: call {}, DXCC {}",
+        location.name,
+        location.station.call(),
+        location.station.dxcc()
+    ));
+    // TQSL's -c: the location's call replaced for this run; the stored location is not changed.
+    let station = match crate::cli::with_call(&location.station, a.callsign.as_deref()) {
+        Ok(station) => station,
+        Err(e) => {
+            env.message(
+                Tone::Error,
+                format_args!("the station location with -c: {e}"),
+            );
+            return Err(Exit::TqslError);
+        }
+    };
+    let station = &station;
+    if a.callsign.is_some() {
+        env.trace.line(format_args!(
+            "-c: signing as {} in place of {}",
+            station.call(),
+            location.station.call()
+        ));
+    }
     if let Err(e) = check_output(a.output.as_deref().unwrap_or(&a.log.with_extension("tq8"))) {
         env.message(Tone::Error, format_args!("{e}"));
         return Err(Exit::OutputError);
@@ -600,12 +632,14 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
     let mut numbers = Vec::new();
     let mut qsos = Vec::new();
     let (mut refused, mut out_of_range) = (0usize, 0usize);
+    let mut left_out = LeftOut::default();
     for (i, record) in records.iter().enumerate() {
         match Qso::from_adif_with_options(record, &options) {
             Ok(qso) => {
                 let d = qso.date();
                 if a.begin.is_some_and(|b| d < b) || a.end.is_some_and(|e| d > e) {
                     out_of_range += 1;
+                    left_out.out_of_range += 1;
                     continue;
                 }
                 numbers.push(i + 1);
@@ -620,6 +654,7 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
                     format_args!("QSO {} in the log: not signed: {e}", i + 1),
                 );
                 refused += 1;
+                left_out.invalid += 1;
             }
         }
     }
@@ -651,8 +686,22 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
                 }
             ),
         );
+        env.trace.line(format_args!(
+            "Certificate: none in force for {} (DXCC {})",
+            station.call(),
+            station.dxcc()
+        ));
         return Err(Exit::TqslError);
     };
+    env.trace.line(format_args!(
+        "Certificate: {} (DXCC {}), serial {}, ID {}",
+        cert.certificate.callsign(),
+        cert.certificate.dxcc(),
+        cert.certificate
+            .serial()
+            .map_or_else(|| "too large to show".to_string(), |s| s.to_string()),
+        short(&cert.id)
+    ));
     // QSOs the certificate does not cover go first, before the log's location details are
     // carried from one QSO to the next, so one of them cannot make a later QSO fail.
     let mut i = 0;
@@ -682,6 +731,7 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         numbers.remove(i);
         qsos.remove(i);
         refused += 1;
+        left_out.outside_certificate += 1;
     }
     let again = a.again || a.action == Some(Action::All);
     let choice = if again {
@@ -698,6 +748,7 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
             Ok(p) => p,
             Err(StoreError::Log(e)) => match refusal(&e) {
                 Some((index, reason)) => {
+                    left_out.count(&e);
                     if stops_on_refusal(a) {
                         return Err(abort(env, a, numbers[index], &reason));
                     }
@@ -753,6 +804,8 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
             _ => (0..qsos.len()).collect(),
         };
         if selection.qsos().is_empty() {
+            left_out.signed_before = before;
+            left_out.trace(records.len(), 0, env);
             if before > 0 {
                 env.message(
                     Tone::Error,
@@ -770,6 +823,9 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
             .with_key(&cert.id, |key| selection.sign(&cert.certificate, key, now))
             .map_err(|e| store_error(env, &format!("{}'s key", cert.certificate.callsign()), &e))?;
         let outside = matches!(result, Err(LogError::QsoOutsideCertificate { .. }));
+        if let Err(e) = &result {
+            left_out.count(e);
+        }
         let (index, reason) = match result {
             Ok(signed) => break (signed, before, selection.qsos().len()),
             Err(e) => match refusal(&e) {
@@ -847,6 +903,18 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         return Err(Exit::OutputError);
     }
     let again = a.again || a.action == Some(Action::All);
+    if !again {
+        left_out.signed_before = before;
+    }
+    left_out.trace(records.len(), count, env);
+    env.trace.line(format_args!(
+        "Signed log written: {}",
+        if a.output.is_some() {
+            "to -o's file"
+        } else {
+            "beside the log, with .tq8"
+        }
+    ));
     let mut summary = format!(
         "Signed {count} QSO{} for {} at {}",
         plural(count),
@@ -907,6 +975,9 @@ fn stops_on_refusal(a: &SignArgs) -> bool {
 
 /// Stop at a QSO that cannot be signed: nothing is signed, written or recorded.
 fn abort(env: &mut Env<'_>, a: &SignArgs, number: usize, reason: &str) -> Exit {
+    env.trace.line(format_args!(
+        "Stopped at the log's QSO {number}, which cannot be signed: nothing signed"
+    ));
     if a.action == Some(Action::Abort) {
         env.message(
             Tone::Error,
@@ -999,6 +1070,8 @@ fn send(a: &SignArgs, env: &mut Env<'_>) -> Done {
 pub(crate) struct LoggerCall<'a> {
     pub log: &'a Path,
     pub location: &'a str,
+    /// TQSL's -c, checked and in capitals.
+    pub callsign: Option<&'a str>,
     pub begin: Option<Date>,
     pub end: Option<Date>,
     pub output: Option<&'a Path>,
@@ -1014,6 +1087,7 @@ pub(crate) fn sign_for_logger(call: &LoggerCall<'_>, env: &mut Env<'_>) -> Exit 
     let LoggerCall {
         log,
         location,
+        callsign,
         begin,
         end,
         output,
@@ -1043,6 +1117,7 @@ pub(crate) fn sign_for_logger(call: &LoggerCall<'_>, env: &mut Env<'_>) -> Exit 
         },
         // No -a is TQSL's "ask", which qg-trust cannot do: refused with 14 if it matters.
         action: Some(action.unwrap_or(Action::Ask)),
+        callsign: callsign.map(str::to_string),
     };
     let signed = match sign(&args, env) {
         Ok(s) => s,
@@ -1115,6 +1190,9 @@ pub(crate) fn upload_bytes(bytes: &[u8], what: &str, name: &Path, env: &mut Env<
             message,
             maybe_sent: true,
         }) => {
+            env.trace.line(format_args!(
+                "Upload: the connection failed after the log was sent"
+            ));
             env.message(
                 Tone::Error,
                 format_args!(
@@ -1125,6 +1203,8 @@ pub(crate) fn upload_bytes(bytes: &[u8], what: &str, name: &Path, env: &mut Env<
             return Err(Exit::UnexpectedResponse);
         }
         Err(UploadFailure { message: e, .. }) => {
+            env.trace
+                .line(format_args!("Upload: LoTW could not be reached"));
             env.message(Tone::Error, format_args!("LoTW could not be reached: {e}"));
             env.message(
                 Tone::Warning,
@@ -1133,7 +1213,16 @@ pub(crate) fn upload_bytes(bytes: &[u8], what: &str, name: &Path, env: &mut Env<
             return Err(Exit::ConnectionFailed);
         }
     };
-    match qso_graph_trust::upload::parse_response(status, &body) {
+    let outcome = qso_graph_trust::upload::parse_response(status, &body);
+    env.trace.line(format_args!(
+        "Upload: HTTP {status}, LoTW's answer: {}",
+        match outcome {
+            UploadOutcome::Accepted { .. } => "accepted",
+            UploadOutcome::Rejected { .. } => "rejected",
+            UploadOutcome::Unknown => "not readable",
+        }
+    ));
+    match outcome {
         UploadOutcome::Accepted { message } => {
             let _ = writeln!(env.out, "LoTW accepted the log for processing.");
             if let Some(m) = message {

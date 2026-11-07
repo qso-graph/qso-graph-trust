@@ -52,6 +52,7 @@ fn main() -> ExitCode {
             err: &mut err,
             store: &open_store,
             upload: &mut upload,
+            trace: cli::Trace::off(),
         },
     );
     let _ = out.flush();
