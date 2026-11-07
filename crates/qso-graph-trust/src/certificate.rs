@@ -7,12 +7,22 @@
 //!
 //! [`Certificate::from_pem_or_der`] reads the certificate's fields; [`Certificate::verify`] checks
 //! that it was issued, signature by signature, under a root QG Trust trusts ([`Trust`]): LoTW's own,
-//! pinned in this library, never a root a file brings with it.
+//! pinned in this library, and the roots its store has accepted.
+//!
+//! A root a file brings with it is accepted only when all of these hold: it is in the file being
+//! imported; it is self-signed, says it is a CA, may sign certificates (key usage, where present) and
+//! has no critical extension this check does not read; and at least one callsign certificate in the
+//! same file chains to it, signature by signature, through CA certificates in that file. A root no
+//! certificate in the file uses is never added. Which of those roots are then trusted depends on the
+//! file: a TQSL backup (`.tbk`) is the operator's own and QG Trust's encrypted export part is QG
+//! Trust's own, so theirs are trusted and reported; a `.tq6` or `.p12` is refused naming the root
+//! ([`crate::import::ImportError::UntrustedRoot`]) until the operator confirms its SHA-256
+//! fingerprint. LoTW's pinned roots are always trusted.
 
 use std::fmt;
 use std::time::SystemTime;
 
-use qso_graph_trust_awslc::{Digest, verify_rsa};
+use qso_graph_trust_awslc::{Digest, ImportDigest, import_digest, verify_rsa};
 use x509_cert::Certificate as X509;
 use x509_cert::der::Tagged;
 use x509_cert::der::asn1::ObjectIdentifier;
@@ -220,6 +230,7 @@ impl Certificate {
 const MAX_CHAIN: usize = 4;
 
 /// The roots a callsign certificate must chain to, and CA certificates known to lie between.
+#[derive(Clone)]
 pub struct Trust {
     roots: Vec<X509>,
     authorities: Vec<X509>,
@@ -248,8 +259,9 @@ impl Trust {
         }
     }
 
-    /// Other roots, PEM or DER, as tests use a test CA's: never LoTW's, and never from a file the
-    /// certificate came in.
+    /// Other roots, PEM or DER, as tests use a test CA's: never LoTW's. A root a file brings is
+    /// trusted only by the rules in this module's documentation, through the store
+    /// (`Store::trust_with`), never by passing it here.
     pub fn with_roots(roots: &[&[u8]]) -> Result<Trust, CertificateError> {
         let roots = roots
             .iter()
@@ -261,6 +273,117 @@ impl Trust {
             authorities: Vec::new(),
         })
     }
+
+    /// This trust with more roots and CA certificates, DER, each already checked by the rules in
+    /// this module's documentation. Unreadable ones are left out.
+    pub(crate) fn extended<'a>(
+        &self,
+        roots: impl IntoIterator<Item = &'a [u8]>,
+        authorities: impl IntoIterator<Item = &'a [u8]>,
+    ) -> Trust {
+        let mut trust = self.clone();
+        for der in roots {
+            if let Ok(c) = X509::from_der(der)
+                && !trust.roots.contains(&c)
+            {
+                trust.roots.push(c);
+            }
+        }
+        for der in authorities {
+            if let Ok(c) = X509::from_der(der)
+                && !trust.authorities.contains(&c)
+            {
+                trust.authorities.push(c);
+            }
+        }
+        trust
+    }
+
+    /// This trust with the roots `found` names and the CA certificates on their chains.
+    pub(crate) fn with_found(&self, found: &[FoundRoot]) -> Trust {
+        self.extended(
+            found.iter().map(|f| f.root.as_slice()),
+            found
+                .iter()
+                .flat_map(|f| f.authorities.iter().map(Vec::as_slice)),
+        )
+    }
+
+    /// This trust's roots and CA certificates, DER.
+    pub(crate) fn certificates(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        let der = |c: &X509| c.to_der().ok();
+        (
+            self.roots.iter().filter_map(der).collect(),
+            self.authorities.iter().filter_map(der).collect(),
+        )
+    }
+}
+
+/// A certificate's SHA-256 fingerprint, as TQSL and browsers show one: the digest of its DER, in
+/// uppercase hexadecimal pairs separated by colons.
+pub fn fingerprint(der: &[u8]) -> String {
+    let digest = import_digest(ImportDigest::Sha256, &[der]);
+    let pairs: Vec<String> = digest.iter().map(|b| format!("{b:02X}")).collect();
+    pairs.join(":")
+}
+
+/// A SHA-256 fingerprint as typed, in the form [`fingerprint`] writes: 64 hexadecimal digits in
+/// either case, in pairs separated by colons or not separated at all. Anything else is none.
+pub fn parse_fingerprint(text: &str) -> Option<String> {
+    let text = text.trim();
+    let digits: String = if text.contains(':') {
+        let pairs: Vec<&str> = text.split(':').collect();
+        if pairs.len() != 32 || pairs.iter().any(|p| p.len() != 2) {
+            return None;
+        }
+        pairs.concat()
+    } else {
+        text.to_string()
+    };
+    if digits.len() != 64 || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let upper = digits.to_ascii_uppercase();
+    let pairs: Vec<&str> = (0..32).map(|i| &upper[2 * i..2 * i + 2]).collect();
+    Some(pairs.join(":"))
+}
+
+/// What a root or CA certificate says of itself, for a list of what is trusted.
+pub(crate) struct Described {
+    /// Its subject's common name, or the whole subject if it has none.
+    pub subject: String,
+    /// Its serial number, uppercase hexadecimal, without leading zero bytes.
+    pub serial: String,
+    pub not_before: SystemTime,
+    pub not_after: SystemTime,
+}
+
+pub(crate) fn describe(der: &[u8]) -> Option<Described> {
+    const COMMON_NAME: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.4.3");
+    let cert = X509::from_der(der).ok()?;
+    let tbs = &cert.tbs_certificate;
+    let subject = tbs
+        .subject
+        .0
+        .iter()
+        .flat_map(|rdn| rdn.0.iter())
+        .find(|atv| atv.oid == COMMON_NAME)
+        .and_then(|atv| std::str::from_utf8(atv.value.value()).ok())
+        .map(str::to_string)
+        .unwrap_or_else(|| tbs.subject.to_string());
+    let bytes = tbs.serial_number.as_bytes();
+    let bytes = &bytes[bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len())..];
+    let serial = if bytes.is_empty() {
+        "00".to_string()
+    } else {
+        bytes.iter().map(|b| format!("{b:02X}")).collect()
+    };
+    Some(Described {
+        subject,
+        serial,
+        not_before: tbs.validity.not_before.to_system_time(),
+        not_after: tbs.validity.not_after.to_system_time(),
+    })
 }
 
 /// The digest a certificate's signature algorithm names: RSA PKCS#1 v1.5 only, with its parameters
@@ -376,31 +499,38 @@ impl Certificate {
     }
 }
 
-// Importers check every supplied authority too, including unused roots. A supplied root is
-// accepted only if it is already trusted or chains to caller trust, never for being in the file.
+// Importers check every supplied authority too, including unused roots. A supplied root passes
+// only if it is in `trust` or chains to it: never for being in the file. Which of a file's roots
+// join `trust` first is `file_roots`'s decision, under this module's rules.
 pub(crate) fn verify_imported(
     der: &[u8],
     trust: &Trust,
     intermediates: &[Vec<u8>],
     authority: bool,
 ) -> Result<(), CertificateError> {
-    let cert = X509::from_der(der).map_err(|_| CertificateError::NotACertificate)?;
     let others: Vec<X509> = intermediates
         .iter()
         .filter_map(|d| X509::from_der(d).ok())
         .collect();
+    chain(der, trust, &others, authority).map(|_| ())
+}
+
+/// The CA certificates a certificate chains through to one of `trust`'s roots, nearest first,
+/// with `others` (a file's) as candidate CAs beside `trust`'s.
+fn chain(
+    der: &[u8],
+    trust: &Trust,
+    others: &[X509],
+    authority: bool,
+) -> Result<Vec<X509>, CertificateError> {
+    let cert = X509::from_der(der).map_err(|_| CertificateError::NotACertificate)?;
     // A CA here is one that says it is, may sign certificates, and has no limit this check does
     // not read (found in review: key usage and critical extensions were not read).
     let cas: Vec<&X509> = trust
         .authorities
         .iter()
         .chain(others.iter())
-        .filter(|c| {
-            extensions_well_formed(c)
-                && is_ca(c)
-                && allows(c, KeyUsages::KeyCertSign)
-                && criticals_understood(c)
-        })
+        .filter(|c| ca_shaped(c))
         .collect();
     let untrusted = |c: &X509| CertificateError::Untrusted {
         issuer: c.tbs_certificate.issuer.to_string(),
@@ -421,14 +551,15 @@ pub(crate) fn verify_imported(
         return Err(untrusted(&cert));
     }
     let mut current = cert;
+    let mut path = Vec::new();
     // The CA certificates passed so far lie below the one looked for next: a CA's path length is
     // the most it may have under it (RFC 5280 section 4.2.1.9; found in review).
     if authority && trust.roots.iter().any(|root| root == &current) {
-        return Ok(());
+        return Ok(path);
     }
     for below in usize::from(authority)..MAX_CHAIN {
         if trust.roots.iter().any(|root| signed_by(&current, root)) {
-            return Ok(());
+            return Ok(path);
         }
         let fits = |ca: &&&X509| {
             basic_constraints(ca)
@@ -439,8 +570,104 @@ pub(crate) fn verify_imported(
             return Err(untrusted(&current));
         };
         current = (*next).clone();
+        path.push(current.clone());
     }
     Err(untrusted(&current))
+}
+
+/// Whether a certificate may be a CA in a chain: it says it is one, may sign certificates, and
+/// has no limit this check does not read.
+fn ca_shaped(c: &X509) -> bool {
+    extensions_well_formed(c)
+        && is_ca(c)
+        && allows(c, KeyUsages::KeyCertSign)
+        && criticals_understood(c)
+}
+
+/// Whether a certificate may be a root: CA-shaped, and self-signed, its name its issuer's and its
+/// signature checking with its own key.
+fn is_root_shaped(c: &X509) -> bool {
+    ca_shaped(c) && c.tbs_certificate.subject == c.tbs_certificate.issuer && signed_by(c, c)
+}
+
+/// A root a file brings that QG Trust does not trust yet, and that the file's own callsign
+/// certificates chain to: one that may be accepted, by this module's rules.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FoundRoot {
+    /// The root, DER.
+    pub root: Vec<u8>,
+    /// The file's CA certificates on the chains to it that the trust it was found under does not
+    /// hold, DER.
+    pub authorities: Vec<Vec<u8>>,
+    /// Its subject's common name.
+    pub subject: String,
+    /// Its SHA-256 fingerprint, as [`fingerprint`] writes it.
+    pub fingerprint: String,
+}
+
+/// The roots among `supplied` (every root and CA certificate a file holds, DER) that may be
+/// accepted for `users` (the file's callsign certificates, DER) under `trust`: self-signed CAs
+/// `trust` does not hold, which at least one of `users` chains to through `supplied`'s CAs.
+pub(crate) fn file_roots(users: &[Vec<u8>], supplied: &[Vec<u8>], trust: &Trust) -> Vec<FoundRoot> {
+    let others: Vec<X509> = supplied
+        .iter()
+        .filter_map(|d| X509::from_der(d).ok())
+        .collect();
+    let mut found: Vec<FoundRoot> = Vec::new();
+    for root in others.iter().filter(|c| is_root_shaped(c)) {
+        if trust.roots.contains(root) {
+            continue;
+        }
+        let Ok(der) = root.to_der() else { continue };
+        if found.iter().any(|f| f.root == der) {
+            continue;
+        }
+        // This root alone, so a chain that holds ends at it.
+        let alone = Trust {
+            roots: vec![root.clone()],
+            authorities: trust.authorities.clone(),
+        };
+        let mut authorities: Vec<Vec<u8>> = Vec::new();
+        let mut used = false;
+        for user in users {
+            let Ok(path) = chain(user, &alone, &others, false) else {
+                continue;
+            };
+            used = true;
+            for ca in path {
+                if trust.authorities.contains(&ca) || &ca == root {
+                    continue;
+                }
+                if let Ok(d) = ca.to_der()
+                    && !authorities.contains(&d)
+                {
+                    authorities.push(d);
+                }
+            }
+        }
+        if used {
+            let subject = describe(&der).map(|d| d.subject).unwrap_or_default();
+            found.push(FoundRoot {
+                fingerprint: fingerprint(&der),
+                root: der,
+                authorities,
+                subject,
+            });
+        }
+    }
+    found
+}
+
+/// Whether `der` may be kept as an accepted root (`root`), or as a CA under one: a store file is
+/// read by the same rules a file's roots are accepted by.
+pub(crate) fn acceptable_shape(der: &[u8], root: bool) -> bool {
+    X509::from_der(der).is_ok_and(|c| {
+        if root {
+            is_root_shaped(&c)
+        } else {
+            ca_shaped(&c)
+        }
+    })
 }
 
 /// The text of a UTF8String, PrintableString or IA5String value, as a callsign is written.

@@ -304,7 +304,9 @@ fn a_qso_lotw_would_refuse_is_left_out_and_the_rest_signed() {
 
 #[test]
 fn a_backup_not_under_the_trusted_root_signs_nothing() {
-    // LoTW's root, as the real program has it: the set's test certificates are not under it.
+    // LoTW's root, as the real program has it: the set's test certificates are not under it. The
+    // backup brings their root, one that `qg-trust import` would trust from a backup, but -i has
+    // no way to confirm or keep a root: it refuses, with TQSL's input error.
     let ran = run_at(
         &[
             "-i",

@@ -3,6 +3,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::roots::{self, RootSource};
 use super::{
     MAX_KEY_LEN, Store, StoreError, StoredCertificate, check_certificate, format, keyless_twin,
     keys,
@@ -41,18 +42,28 @@ fn utc_day(time: SystemTime) -> i64 {
 
 impl Store {
     /// Load ARRL's gzip/XML `.tq6` (plain XML is also accepted). Validate every certificate to
-    /// `trust` before publication. Matching pending requests attach by SPKI, callsign and DXCC,
-    /// exactly as `add_requested_certificate` does; other certificates are stored without keys.
-    /// All attachments and additions share one lock and atomic public-file replacement. A
-    /// missing or invalid pending key is an error, never silently downgraded to a keyless import.
+    /// `trust` and this store's accepted roots before publication. Matching pending requests attach
+    /// by SPKI, callsign and DXCC, exactly as `add_requested_certificate` does; other certificates
+    /// are stored without keys. All attachments and additions share one lock and atomic
+    /// public-file replacement. A missing or invalid pending key is an error, never silently
+    /// downgraded to a keyless import.
+    ///
+    /// A file whose certificates chain to a root it brings, not trusted yet, is refused with
+    /// [`ImportError::UntrustedRoot`] naming it, unless `accept_root` is that root's SHA-256
+    /// fingerprint: then the root is trusted from now on, kept in the same file replacement as the
+    /// certificates (`crate::certificate` says which roots may be). A fingerprint that is not such
+    /// a root's is refused with [`ImportError::RootMismatch`].
     pub fn import_tq6(
         &self,
         bytes: &[u8],
         trust: &Trust,
+        accept_root: Option<&str>,
     ) -> Result<Vec<ImportedCertificate>, ImportError> {
-        let certificates = import::tq6(bytes, trust)?;
+        let trust = self.trust_with(trust)?;
+        let import::Checked { certificates, root } = import::tq6(bytes, &trust, accept_root)?;
         let _lock = self.lock()?;
         let mut data = self.read()?;
+        roots::add(&mut data, root.as_slice(), RootSource::Tq6)?;
         let mut report: Vec<ImportedCertificate> = Vec::new();
         for certificate in certificates {
             // One already here is reported and the rest of the file still imported, unless it has
@@ -139,16 +150,20 @@ impl Store {
     /// required and verified before decrypting. RC2 (including TQSL's weak certificate bags),
     /// other algorithms and multiple user certificates/keys are refused. Passwords are UTF-8
     /// BMP text (empty allowed), at most `MAX_PASSWORD_LEN`; they are borrowed and never stored.
-    /// Only public metadata and the backend's credential name leave this method.
+    /// Only public metadata and the backend's credential name leave this method. A root the file
+    /// brings is confirmed with `accept_root`, as for [`Store::import_tq6`].
     pub fn import_pkcs12(
         &self,
         bytes: &[u8],
         password: &[u8],
         trust: &Trust,
+        accept_root: Option<&str>,
     ) -> Result<ImportedCertificate, ImportError> {
-        let loaded = pkcs12::read(bytes, password, trust)?;
+        let trust = self.trust_with(trust)?;
+        let loaded = pkcs12::read_confirming(bytes, password, &trust, accept_root)?;
         let _lock = self.lock()?;
         let mut data = self.read()?;
+        roots::add(&mut data, loaded.root.as_slice(), RootSource::P12)?;
         // The same certificate already here without its key takes this one.
         if let Some(i) = keyless_twin(&data, &loaded.certificate) {
             let name = keys::new_name("key:")?;

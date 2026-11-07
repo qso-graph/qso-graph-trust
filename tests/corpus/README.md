@@ -29,6 +29,23 @@ test keys. The key and `.p12` files are
 named one by one in `.github/secret_scanning.yml`, so GitHub's secret scanning passes over these
 and still catches a real key committed anywhere else.
 
+## roots
+
+Made by [`scripts/make-root-cases.sh`](../../scripts/make-root-cases.sh) with OpenSSL 3: a root QG
+Trust does not trust yet, as when ARRL starts issuing under a new one, and roots that must never be
+accepted. All "QSO Graph Trust TEST ONLY", "Not ARRL"; the keys behind them were thrown away, but
+for `user-a.p12`'s.
+
+| File | What it is |
+| --- | --- |
+| `new-root.pem` | "QGT New Test Root": self-signed, a CA that may sign certificates |
+| `new-ca.pem` | "QGT New Test CA", under it |
+| `user-a.pem`, `user-b.pem` | LoTW-shaped certificates for `QG0TEST` under the new CA, serials 1 and 2 |
+| `user-a.p12` | `user-a`'s key with the chain to the new root, password in `pki/p12-password` |
+| `other-root.pem` | "QGT Unused Test Root": self-signed, no certificate here chains to it |
+| `noca-root.pem` | "QGT Not A CA Root": self-signed, but `CA:false` |
+| `user-noca.pem` | a LoTW-shaped certificate issued by `noca-root` |
+
 ## Made by the tqsllib harness (phase 2, qso-graph-desktop#171)
 
 TQSL's own file formats are made by tqsllib itself, so they are exact: its key files (`keys/<call>`,

@@ -56,8 +56,9 @@ keys. Restore decrypts and authenticates, parses through the existing strict sto
 `StationLocation::new`), verifies every certificate against caller-supplied `Trust`, and checks every
 private key against its certificate or pending request's recorded SPKI, before acquiring the
 destination lock or changing anything.
-Production callers use `Trust::lotw()`, which pins ARRL's roots and production CAs; the part never
-supplies trust anchors. Custom test trust must include the issuers needed by its certificates.
+Production callers use `Trust::lotw()`, which pins ARRL's roots and production CAs; the part
+supplies only the roots the operator's store had accepted, under decision 0011's rules (below).
+Custom test trust must include the issuers needed by its certificates.
 
 Under the lock, restore reloads the destination, generates fresh credential names, stages the new
 keys, atomically replaces the file, then deletes the old file's keys. Any staging or pre-replacement
@@ -84,3 +85,9 @@ independently derives both AES keys with Python 3's PBKDF2, including the delibe
 key. It searches for all four secrets, with planted password and AES-key controls in debug and
 release. This instrumentation exists only in the custody test tool; no library API or feature
 exposes these secrets. The test directory is removed when the harness finishes.
+
+The store XML inside the part is whatever version the store writes; at store version 3 it carries
+the accepted roots and their CAs (decision 0008). The plaintext framing is unchanged, so its version
+byte stays `2`, and a part holding store version 2 XML still restores. On restore a part's roots are
+trusted by decision 0011's rules, as a backup's are: kept beside the destination's accepted roots
+and reported in `RestoreReport::roots`; a root no certificate in the part chains to is left out.

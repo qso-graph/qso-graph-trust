@@ -7,10 +7,11 @@ use base64ct::{Base64, Encoding};
 use x509_cert::der::Decode;
 use x509_cert::spki::SubjectPublicKeyInfoRef;
 
-use crate::certificate::{Certificate, MAX_CERTIFICATE_LEN};
+use crate::certificate::{Certificate, MAX_CERTIFICATE_LEN, acceptable_shape};
 use crate::station::{MAX_FIELDS, MAX_LEN, StationLocation};
 use crate::xml::{self, Element};
 
+use super::roots::{AcceptedRoot, MAX_ROOTS, RootKind, RootSource};
 use super::{
     Data, MAX_CERTIFICATES, MAX_FILE_LEN, MAX_LOCATIONS, MAX_NAME_LEN, MAX_PENDING_REQUESTS,
     MAX_SIGNED_KEY_LEN, MAX_SIGNED_QSOS, MAX_SIGNED_STATION_LEN, MAX_SIGNED_STATIONS,
@@ -40,7 +41,9 @@ pub(super) fn read(text: &str) -> Result<Data, StoreError> {
     // Version readers are separate: a future reader must not change what version 1 meant.
     match version {
         1 => read_v1(&root),
-        2 => read_sections(&root, false),
+        2 => read_sections(&root, false, false),
+        // Version 3 adds the optional section of accepted roots; versions 1 and 2 refuse it.
+        3 => read_sections(&root, false, true),
         _ => Err(StoreError::Invalid("unsupported version")),
     }
 }
@@ -49,18 +52,22 @@ pub(super) fn read(text: &str) -> Result<Data, StoreError> {
 // Counts are document-wide, so moving entries into an unexpected section cannot bypass a limit.
 fn xml_limits() -> xml::Limits<'static> {
     xml::Limits {
-        elements: 5
+        elements: 6
             + MAX_CERTIFICATES
             + MAX_LOCATIONS * (1 + MAX_FIELDS)
             + MAX_PENDING_REQUESTS
             + MAX_SIGNED_QSOS
-            + MAX_SIGNED_STATIONS,
+            + MAX_SIGNED_STATIONS
+            + 2 * MAX_ROOTS,
         elements_named: &[
             ("qgt-store", 1),
             ("certificates", 1),
             ("locations", 1),
             ("signed-qsos", 1),
             ("pending-requests", 1),
+            ("roots", 1),
+            ("root", MAX_ROOTS),
+            ("ca", MAX_ROOTS),
             ("certificate", MAX_CERTIFICATES),
             ("location", MAX_LOCATIONS),
             ("field", MAX_LOCATIONS * MAX_FIELDS),
@@ -72,7 +79,8 @@ fn xml_limits() -> xml::Limits<'static> {
             (_, "version" | "dxcc") => 10,
             ("q", "k") => MAX_SIGNED_KEY_LEN,
             ("q", "s") | ("s", "id") => 4,
-            ("q", "t") | ("request", "call" | "created") => 20,
+            ("q", "t") | ("request", "call" | "created") | ("root" | "ca", "accepted") => 20,
+            ("root" | "ca", "source") => 4,
             ("certificate", "id") => 41,
             ("request", "id") => 44,
             (_, "key") => 40,
@@ -81,7 +89,7 @@ fn xml_limits() -> xml::Limits<'static> {
             _ => MAX_SIGNED_KEY_LEN,
         },
         text_len: |element| match element {
-            "certificate" => MAX_CERTIFICATE_LEN.div_ceil(3) * 4,
+            "certificate" | "root" | "ca" => MAX_CERTIFICATE_LEN.div_ceil(3) * 4,
             "request" => 512,
             "field" => MAX_LEN,
             "s" => MAX_SIGNED_STATION_LEN,
@@ -92,10 +100,10 @@ fn xml_limits() -> xml::Limits<'static> {
 }
 
 fn read_v1(root: &Element<'_>) -> Result<Data, StoreError> {
-    read_sections(root, true)
+    read_sections(root, true, false)
 }
 
-fn read_sections(root: &Element<'_>, legacy: bool) -> Result<Data, StoreError> {
+fn read_sections(root: &Element<'_>, legacy: bool, roots: bool) -> Result<Data, StoreError> {
     container(root, &["version"])?;
     if root.children.iter().any(|c| {
         ![
@@ -105,6 +113,7 @@ fn read_sections(root: &Element<'_>, legacy: bool) -> Result<Data, StoreError> {
             "pending-requests",
         ]
         .contains(&c.name)
+            && !(roots && c.name == "roots")
     }) {
         return Err(StoreError::Invalid("store sections"));
     }
@@ -260,7 +269,62 @@ fn read_sections(root: &Element<'_>, legacy: bool) -> Result<Data, StoreError> {
             });
         }
     }
+    // Optional in version 3, omitted when empty: the roots this store accepted, and the CAs kept
+    // under them, read by the rules they were accepted by.
+    if roots && root.children.iter().any(|c| c.name == "roots") {
+        data.roots = read_roots(section(root, "roots")?)?;
+    }
     Ok(data)
+}
+
+fn read_roots(section: &Element<'_>) -> Result<Vec<AcceptedRoot>, StoreError> {
+    container(section, &[])?;
+    let mut roots: Vec<AcceptedRoot> = Vec::new();
+    for e in &section.children {
+        let kind = match e.name {
+            "root" => RootKind::Root,
+            "ca" => RootKind::Ca,
+            _ => return Err(StoreError::Invalid("accepted root element")),
+        };
+        if !e.children.is_empty() {
+            return Err(StoreError::Invalid("accepted root element"));
+        }
+        if roots.iter().filter(|r| r.kind == kind).count() >= MAX_ROOTS {
+            return Err(StoreError::Limit("accepted roots"));
+        }
+        attributes(e, &["source", "accepted"])?;
+        let source = RootSource::from_name(&attribute(e, "source", 4)?)
+            .ok_or(StoreError::Invalid("accepted root source"))?;
+        let accepted = attribute(e, "accepted", 20)?;
+        if accepted.is_empty() || !accepted.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(StoreError::Invalid("accepted root time"));
+        }
+        let accepted_at = accepted
+            .parse()
+            .map_err(|_| StoreError::Invalid("accepted root time"))?;
+        let encoded = text(e, MAX_CERTIFICATE_LEN.div_ceil(3) * 4)?;
+        let der = Base64::decode_vec(&encoded)
+            .map_err(|_| StoreError::Invalid("accepted root base64"))?;
+        if der.len() > MAX_CERTIFICATE_LEN {
+            return Err(StoreError::Limit("certificate bytes"));
+        }
+        let canonical = x509_cert::Certificate::from_der(&der)
+            .and_then(|c| x509_cert::der::Encode::to_der(&c))
+            .map_err(|_| StoreError::Invalid("accepted root DER"))?;
+        if canonical != der || !acceptable_shape(&der, kind == RootKind::Root) {
+            return Err(StoreError::Invalid("accepted root certificate"));
+        }
+        if roots.iter().any(|r| r.der == der) {
+            return Err(StoreError::Invalid("duplicate accepted root"));
+        }
+        roots.push(AcceptedRoot {
+            der,
+            kind,
+            source,
+            accepted_at,
+        });
+    }
+    Ok(roots)
 }
 
 fn section<'a, 'b>(root: &'a Element<'b>, name: &str) -> Result<&'a Element<'b>, StoreError> {
@@ -333,8 +397,8 @@ fn escape(out: &mut String, value: &str) -> Result<(), StoreError> {
 
 pub(super) fn write(data: &Data) -> Result<String, StoreError> {
     signed::validate(&data.signed_qsos)?;
-    let mut out = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<qgt-store version=\"2\">\n  <certificates>\n",
+    let mut out = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<qgt-store version=\"{VERSION}\">\n  <certificates>\n",
     );
     for c in &data.certificates {
         out.push_str("    <certificate id=\"");
@@ -385,6 +449,23 @@ pub(super) fn write(data: &Data) -> Result<String, StoreError> {
             out.push_str("</request>\n");
         }
         out.push_str("  </pending-requests>\n");
+    }
+    if !data.roots.is_empty() {
+        out.push_str("  <roots>\n");
+        for r in &data.roots {
+            let name = match r.kind {
+                RootKind::Root => "root",
+                RootKind::Ca => "ca",
+            };
+            out.push_str(&format!(
+                "    <{name} source=\"{}\" accepted=\"{}\">",
+                r.source.name(),
+                r.accepted_at
+            ));
+            out.push_str(&Base64::encode_string(&r.der));
+            out.push_str(&format!("</{name}>\n"));
+        }
+        out.push_str("  </roots>\n");
     }
     out.push_str("</qgt-store>\n");
     if out.len() > MAX_FILE_LEN {

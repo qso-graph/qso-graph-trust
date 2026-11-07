@@ -5,6 +5,8 @@
 //! PKCS#8 DER stays in a library-owned backend scoped to [`SERVICE`] (or [`TEST_SERVICE`] in tests).
 //! Each operation reloads the file while holding its OS lock, so separate library releases and
 //! processes cannot lose each other's writes. Unknown versions are refused before any mutation.
+//! The file also keeps the LoTW roots the operator has accepted beside the pinned ones
+//! ([`Store::trust`], [`Store::trusted_roots`], [`Store::remove_root`]).
 //!
 //! Applications that sign must install the wiping allocator required by this crate's README.
 //! Callers select a [`KeyBackend`]; raw credential access stays inside the library.
@@ -13,7 +15,10 @@ mod format;
 mod import;
 mod keys;
 mod part;
+mod roots;
 mod signed;
+
+pub use roots::{MAX_ROOTS, RootKind, RootSource, TrustedRoot};
 
 pub use signed::{
     DuplicateChoice, MAX_SIGNED_KEY_LEN, MAX_SIGNED_QSOS, MAX_SIGNED_STATION_LEN,
@@ -39,8 +44,9 @@ use crate::signing::{KeyError, TqslKey};
 use crate::station::StationLocation;
 use crate::tbk::BackedUpCertificate;
 
-/// The newest store format this build reads and writes.
-pub const VERSION: u32 = 2;
+/// The newest store format this build reads and writes. Version 3 adds the accepted roots; 1 and 2
+/// are still read.
+pub const VERSION: u32 = 3;
 /// The largest store file accepted, before parsing or allocating its contents.
 pub const MAX_FILE_LEN: usize = 32 * 1024 * 1024;
 /// The most certificates in a store.
@@ -77,7 +83,8 @@ pub struct StoredCertificate {
     /// The store's opaque certificate identifier, used for signing and deletion.
     pub id: String,
     /// The certificate, parsed as a LoTW callsign certificate. Reading the store does not establish
-    /// a new chain of trust; callers verify certificate issuers on import, as with `tbk::read`.
+    /// a new chain of trust; certificate issuers are verified on import, against the store's trust
+    /// (`Store::trust_with`), as with `tbk::read`.
     pub certificate: Certificate,
     /// The credential entry's name, if this certificate has a key.
     pub key_name: Option<String>,
@@ -154,8 +161,11 @@ pub enum StoreError {
     /// A new-only signed log holds a QSO another signing recorded after the plan was made.
     /// Nothing was written; prepare and sign again.
     SignedMeanwhile,
-    /// The requested certificate, location or key is absent.
+    /// The requested certificate, location, key or accepted root is absent.
     NotFound,
+    /// LoTW's pinned roots and CAs are part of this library and are always trusted: they cannot
+    /// be removed.
+    BuiltInRoot,
     /// Secure randomness was unavailable.
     Random,
     /// The file write failed and the backend also refused to remove the new key. It remains an
@@ -190,6 +200,10 @@ impl fmt::Display for StoreError {
                 "a QSO in this log was signed by another run meanwhile; nothing was written",
             ),
             Self::NotFound => f.write_str("the store entry or its key is missing"),
+            Self::BuiltInRoot => f.write_str(
+                "that is one of LoTW's roots or CAs built into QG Trust, which are always trusted \
+                 and cannot be removed",
+            ),
             Self::Random => f.write_str("secure randomness is unavailable"),
             Self::Rollback { write, cleanup } => write!(
                 f,
@@ -222,6 +236,7 @@ struct Data {
     certificates: Vec<StoredCertificate>,
     locations: Vec<StoredLocation>,
     pending_requests: Vec<PendingRequest>,
+    roots: Vec<roots::AcceptedRoot>,
 }
 
 /// A shared folder and its private, library-owned credential backend.

@@ -35,6 +35,13 @@ fn p12_password() -> Vec<u8> {
     .expect("the test .p12 password")
 }
 
+/// A password that is not the test set's: its own with a byte more, so no password is written here.
+fn wrong_password() -> Vec<u8> {
+    let mut wrong = p12_password();
+    wrong.push(b'x');
+    wrong
+}
+
 #[test]
 fn tq6_attaches_a_matching_pending_request_and_otherwise_loads_keyless() {
     for pending in [false, true] {
@@ -60,7 +67,7 @@ fn tq6_attaches_a_matching_pending_request_and_otherwise_loads_keyless() {
                 .expect("save");
         }
         let result = store
-            .import_tq6(&file("1024/QG0TEST.tq6"), &trust())
+            .import_tq6(&file("1024/QG0TEST.tq6"), &trust(), None)
             .expect("import");
         assert_eq!(result.len(), 1);
         assert_eq!(
@@ -81,14 +88,16 @@ fn tq6_attaches_a_matching_pending_request_and_otherwise_loads_keyless() {
 }
 
 #[test]
-fn tq6_never_trusts_its_own_roots_and_validates_the_entire_file_before_storing() {
+fn tq6_never_trusts_its_own_roots_unconfirmed_and_validates_the_entire_file_before_storing() {
     let folder = Folder::new();
     let (store, _) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
+    // The file's own root is named, not trusted, until it is confirmed.
     assert!(matches!(
-        store.import_tq6(&file("1024/QG0TEST.tq6"), &Trust::lotw()),
-        Err(ImportError::Certificate(_))
+        store.import_tq6(&file("1024/QG0TEST.tq6"), &Trust::lotw(), None),
+        Err(ImportError::UntrustedRoot { .. })
     ));
     assert!(store.certificates().expect("list").is_empty());
+    assert!(store.trust().expect("trust").certificates().0.len() == 2);
     let plain = crate::gzip::decompress(&file("1024/QG0TEST.tq6"), MAX_IMPORT_LEN).expect("XML");
     let text = String::from_utf8(plain.to_vec()).expect("text");
     let bad_cert = String::from_utf8(
@@ -108,7 +117,7 @@ fn tq6_never_trusts_its_own_roots_and_validates_the_entire_file_before_storing()
         "</tqslcerts>",
         &format!("<usercert>{}</usercert></tqslcerts>", &bad_cert[start..end]),
     );
-    assert!(store.import_tq6(text.as_bytes(), &trust()).is_err());
+    assert!(store.import_tq6(text.as_bytes(), &trust(), None).is_err());
     assert!(store.certificates().expect("list").is_empty());
 }
 
@@ -122,6 +131,7 @@ fn default_pkcs12_imports_for_both_corpus_key_password_cases_and_signs() {
                 &file(&format!("{case}/QG0TEST.p12")),
                 &p12_password(),
                 &trust(),
+                None,
             )
             .expect("import");
         assert!(imported.has_key);
@@ -149,21 +159,31 @@ fn wrong_password_tampering_and_rc2_are_refused_without_storage() {
     let (store, _) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
     let bytes = file("1024/QG0TEST.p12");
     assert!(matches!(
-        store.import_pkcs12(&bytes, b"wrong", &trust()),
+        store.import_pkcs12(&bytes, &wrong_password(), &trust(), None),
         Err(ImportError::Authentication)
     ));
     let mut flipped = bytes;
     flipped[500] ^= 1;
     assert!(matches!(
-        store.import_pkcs12(&flipped, &p12_password(), &trust()),
+        store.import_pkcs12(&flipped, &p12_password(), &trust(), None),
         Err(ImportError::Authentication)
     ));
     assert!(matches!(
-        store.import_pkcs12(&file("1024/QG0TEST-weak.p12"), &p12_password(), &trust()),
+        store.import_pkcs12(
+            &file("1024/QG0TEST-weak.p12"),
+            &p12_password(),
+            &trust(),
+            None
+        ),
         Err(ImportError::UnsupportedProtection)
     ));
     assert!(matches!(
-        store.import_pkcs12(&file("1024/QG0TEST-weak.p12"), b"wrong", &trust()),
+        store.import_pkcs12(
+            &file("1024/QG0TEST-weak.p12"),
+            &wrong_password(),
+            &trust(),
+            None
+        ),
         Err(ImportError::Authentication)
     ));
     assert!(store.certificates().expect("list").is_empty());
@@ -175,7 +195,7 @@ fn expiry_uses_validity_end_utc_dates_and_a_strict_threshold() {
     let folder = Folder::new();
     let (store, _) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
     store
-        .import_tq6(&file("1024/QG0TEST.tq6"), &trust())
+        .import_tq6(&file("1024/QG0TEST.tq6"), &trust(), None)
         .expect("import");
     let cert = store.certificates().expect("list").remove(0);
     let end = cert.certificate.validity().1;
@@ -228,18 +248,18 @@ fn tq6_bounds_and_nesting_are_refused() {
     let folder = Folder::new();
     let (store, _) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
     assert!(matches!(
-        store.import_tq6(&vec![0; MAX_IMPORT_LEN + 1], &trust()),
+        store.import_tq6(&vec![0; MAX_IMPORT_LEN + 1], &trust(), None),
         Err(ImportError::Limit)
     ));
     assert!(
         store
-            .import_tq6("<x>".repeat(20).as_bytes(), &trust())
+            .import_tq6("<x>".repeat(20).as_bytes(), &trust(), None)
             .is_err()
     );
     let bytes = file("1024/QG0TEST.tq6");
     assert!(
         store
-            .import_tq6(&bytes[..bytes.len() - 1], &trust())
+            .import_tq6(&bytes[..bytes.len() - 1], &trust(), None)
             .is_err()
     );
     assert!(store.certificates().expect("list").is_empty());
@@ -265,7 +285,7 @@ fn a_missing_pending_key_does_not_downgrade_to_a_keyless_import() {
         .expect("save");
     let before = std::fs::read(folder.0.join("store.xml")).expect("before");
     assert!(matches!(
-        store.import_tq6(&file("1024/QG0TEST.tq6"), &trust()),
+        store.import_tq6(&file("1024/QG0TEST.tq6"), &trust(), None),
         Err(ImportError::Store(StoreError::NotFound))
     ));
     assert_eq!(
@@ -279,7 +299,7 @@ fn a_missing_pending_key_does_not_downgrade_to_a_keyless_import() {
         .replace(&format::write(&data).expect("XML"))
         .expect("save");
     let report = store
-        .import_tq6(&file("1024/QG0TEST.tq6"), &trust())
+        .import_tq6(&file("1024/QG0TEST.tq6"), &trust(), None)
         .expect("keyless");
     assert!(!report[0].has_key);
     assert_eq!(store.pending_requests().expect("pending").len(), 1);
@@ -297,7 +317,7 @@ fn an_unused_untrusted_tq6_root_is_rejected_and_a_bounded_bundle_loads_whole() {
         &format!("<rootcert>{root}</rootcert></tqslcerts>"),
     );
     assert!(matches!(
-        store.import_tq6(with_root.as_bytes(), &trust()),
+        store.import_tq6(with_root.as_bytes(), &trust(), None),
         Err(ImportError::Certificate(_))
     ));
     assert!(store.certificates().expect("list").is_empty());
@@ -311,12 +331,12 @@ fn an_unused_untrusted_tq6_root_is_rejected_and_a_bounded_bundle_loads_whole() {
         &format!("<cacert>{ca}</cacert></tqslcerts>"),
     );
     assert!(matches!(
-        store.import_tq6(too_many.as_bytes(), &trust()),
+        store.import_tq6(too_many.as_bytes(), &trust(), None),
         Err(ImportError::Limit)
     ));
     assert!(store.certificates().expect("list").is_empty());
     store
-        .import_tq6(at_limit.as_bytes(), &trust())
+        .import_tq6(at_limit.as_bytes(), &trust(), None)
         .expect("at limit");
     assert_eq!(store.certificates().expect("list").len(), 1);
 }
@@ -327,12 +347,12 @@ fn a_key_imported_after_its_certificate_alone_is_attached_to_it() {
     let (store, _) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
     // ARRL's answer first, with no request here: the certificate alone, which cannot sign.
     let first = store
-        .import_tq6(&file("1024/QG0TEST.tq6"), &trust())
+        .import_tq6(&file("1024/QG0TEST.tq6"), &trust(), None)
         .expect("tq6");
     assert!(!first[0].has_key);
     // Then the same certificate with its key: the key goes to the certificate already here.
     let imported = store
-        .import_pkcs12(&file("1024/QG0TEST.p12"), &p12_password(), &trust())
+        .import_pkcs12(&file("1024/QG0TEST.p12"), &p12_password(), &trust(), None)
         .expect("p12");
     assert!(imported.has_key);
     assert_eq!(imported.id, first[0].id);
@@ -345,7 +365,7 @@ fn a_key_imported_after_its_certificate_alone_is_attached_to_it() {
         .expect("it signs");
     // With its key, the same certificate is already here.
     assert!(matches!(
-        store.import_pkcs12(&file("1024/QG0TEST.p12"), &p12_password(), &trust()),
+        store.import_pkcs12(&file("1024/QG0TEST.p12"), &p12_password(), &trust(), None),
         Err(ImportError::Store(StoreError::AlreadyExists))
     ));
 }

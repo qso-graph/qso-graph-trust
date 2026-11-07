@@ -8,8 +8,12 @@
 //! A backup is untrusted input that holds private keys. It is decompressed into one wiped buffer
 //! within a limit, and read by QG Trust's own XML reader, bounded as it reads, with
 //! no DTD and so no entity to expand. Every callsign certificate must chain, signature by signature,
-//! to a root the caller trusts ([`Trust::lotw`], ARRL's, pinned): the roots a backup carries
-//! establish nothing. Each certificate, key and location is checked as QG Trust
+//! to a root the caller trusts ([`Trust::lotw`], ARRL's, pinned, and the store's accepted roots).
+//! [`read`] takes no root from the backup. [`read_trusting_roots`] reads it as the operator's own:
+//! a root it carries is trusted when it is self-signed, a CA that may sign certificates with no
+//! critical extension unread, and one of the backup's callsign certificates chains to it through
+//! the backup's CAs ([`crate::certificate`]'s rules); a root none of them uses is never trusted.
+//! Each certificate, key and location is checked as QG Trust
 //! checks one on its own, and against the others it comes with: a key must be its certificate's, for
 //! the same call and DXCC entity, and a key with no password must be a whole, LoTW-shaped key. A
 //! protected key is checked the same way when it is first unlocked, which needs its password. A
@@ -29,7 +33,9 @@ use base64ct::{Base64, Encoding};
 use x509_cert::der::{DecodePem, Encode};
 use zeroize::Zeroizing;
 
-use crate::certificate::{Certificate, CertificateError, MAX_CERTIFICATE_LEN, Trust};
+use crate::certificate::{
+    Certificate, CertificateError, FoundRoot, MAX_CERTIFICATE_LEN, Trust, file_roots,
+};
 use crate::gzip::{self, GzipError};
 use crate::lotw;
 use crate::signing::{KeyEntry, KeyError};
@@ -48,8 +54,8 @@ pub const MAX_NAME_LEN: usize = 255;
 /// What a TQSL backup holds.
 #[derive(Debug)]
 pub struct Backup {
-    /// The root certificates the backup carries, as DER. They establish no trust: a certificate is
-    /// trusted for the roots QG Trust pins, never for one a file brings with it.
+    /// The root certificates the backup carries, as DER. They are trusted only as
+    /// [`read_trusting_roots`] says, and kept only by `Store::trust_backup_roots`.
     pub roots: Vec<Vec<u8>>,
     /// The certificate authorities' certificates, as DER.
     pub authorities: Vec<Vec<u8>>,
@@ -253,8 +259,22 @@ impl From<GzipError> for TbkError {
 }
 
 /// A TQSL backup read whole, gzipped as TQSL writes it or the XML itself, each callsign
-/// certificate checked against `trust`: [`Trust::lotw`] for a ham's own backup.
+/// certificate checked against `trust`: [`Trust::lotw`], or the store's trust
+/// (`Store::trust_with`). The roots the backup carries establish nothing here.
 pub fn read(bytes: &[u8], trust: &Trust) -> Result<Backup, TbkError> {
+    read_with(bytes, trust, false)
+}
+
+/// A TQSL backup read as [`read`] reads one, but as the operator's own: a root it carries is
+/// trusted for its certificates when it may be accepted, by [`crate::certificate`]'s rules
+/// (self-signed, a CA that may sign certificates, and a callsign certificate in the backup chains
+/// to it through the backup's CAs). `Store::trust_backup_roots` then keeps those roots, and says
+/// which are new.
+pub fn read_trusting_roots(bytes: &[u8], trust: &Trust) -> Result<Backup, TbkError> {
+    read_with(bytes, trust, true)
+}
+
+fn read_with(bytes: &[u8], trust: &Trust, own_roots: bool) -> Result<Backup, TbkError> {
     let plain;
     let text: &[u8] = if gzip::is_gzip(bytes) {
         plain = gzip::decompress(bytes, MAX_TBK_LEN)?;
@@ -294,9 +314,15 @@ pub fn read(bytes: &[u8], trust: &Trust) -> Result<Backup, TbkError> {
     }
     // Every certificate issued under a trusted root, through the CAs the backup carries if need be:
     // checked once all of them are read, whatever order they came in.
+    let trust = if own_roots {
+        let found = backup.found_roots(trust);
+        trust.with_found(&found)
+    } else {
+        trust.clone()
+    };
     for entry in &backup.certificates {
         if let Some(cert) = &entry.certificate {
-            cert.verify(trust, &backup.authorities)
+            cert.verify(&trust, &backup.authorities)
                 .map_err(|error| TbkError::Certificate {
                     callsign: entry.callsign.clone(),
                     error,
@@ -304,6 +330,25 @@ pub fn read(bytes: &[u8], trust: &Trust) -> Result<Backup, TbkError> {
         }
     }
     Ok(backup)
+}
+
+impl Backup {
+    /// The roots this backup carries that its own certificates chain to and `trust` does not hold,
+    /// by [`crate::certificate`]'s rules.
+    pub(crate) fn found_roots(&self, trust: &Trust) -> Vec<FoundRoot> {
+        let users: Vec<Vec<u8>> = self
+            .certificates
+            .iter()
+            .filter_map(|c| c.certificate.as_ref().map(|c| c.der().to_vec()))
+            .collect();
+        let supplied: Vec<Vec<u8>> = self
+            .roots
+            .iter()
+            .chain(&self.authorities)
+            .cloned()
+            .collect();
+        file_roots(&users, &supplied, trust)
+    }
 }
 
 fn malformed(what: impl Into<String>) -> TbkError {

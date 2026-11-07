@@ -7,8 +7,8 @@
 
 The library imports ARRL's `.tq6` response and password-authenticated PKCS#12 `.p12` files through
 `Store::import_tq6` and `Store::import_pkcs12`. It verifies every supplied certificate, including
-unused authorities, against caller trust before changing storage. Supplied roots establish no
-trust. A `.tq6` attaches pending requests by actual SPKI, callsign and DXCC; attachment validates the
+unused authorities, against caller trust before changing storage. A supplied root establishes
+trust only as the amendment below allows. A `.tq6` attaches pending requests by actual SPKI, callsign and DXCC; attachment validates the
 stored private key and publishes pending removal with certificate addition in one replacement.
 Other certificates are explicitly reported as keyless. A missing pending key is an error.
 
@@ -106,3 +106,30 @@ strictly before today. It uses validity-end, not QSO-end. The provided read-only
 is `/var/tmp/qgt-sol3/tqsl-src/openssl_cert.cpp`; the application source was available locally at
 `/tmp/claude-1000/-home-ki7mt-workspace-qso-graph/27400915-e24a-4149-b6d8-538456c3536b/scratchpad/src/tqsl/apps/tqsl.cpp`,
 whose adjacent `tqslversion.ver` says `2.8.7`.
+
+## Amendment: roots a file brings
+
+ARRL changes roots now and then and delivers a new one only inside the `.tq6` it issues; TQSL asks
+whether to install it. A root a file brings may now be accepted, when all of these hold: it is in
+the file being imported; it is self-signed, says it is a CA, may sign certificates (key usage, where
+present) and has no critical extension the chain check does not read; and at least one callsign
+certificate in the same file chains to it, signature by signature, through CA certificates in that
+file. A root no certificate uses is never added. Which acceptable roots are trusted depends on the
+file:
+
+| Imported file | Acceptable root not already trusted |
+| --- | --- |
+| `.tbk`, the operator's own TQSL backup | trusted automatically, and reported |
+| `.tq6` from ARRL | refused with `ImportError::UntrustedRoot { subject, fingerprint }` until the operator confirms its SHA-256 fingerprint (`accept_root`, `--trust-root`) |
+| `.p12` | as `.tq6` |
+| QG Trust's encrypted export part | trusted, like `.tbk`: its roots are QG Trust's own data, authenticated by the part's password |
+
+A confirmed fingerprint that is not such a root's is refused (`ImportError::RootMismatch`), never
+ignored. The import still verifies every supplied authority, so a file carrying an untrusted root
+none of its certificates uses is refused whole, as before. An accepted root is kept in the store
+with the CA certificates on the chains to it (decision 0008, version 3), in the same file
+replacement as the certificate, and joins the store's trust (`Store::trust`, `Store::trust_with`).
+LoTW's pinned roots and CAs are always trusted and cannot be removed; an accepted one can
+(`Store::remove_root`), taking with it the kept CAs that no longer chain to a trusted root.
+Fingerprints are SHA-256 of the DER, from the binding's existing AWS-LC digest; no dependency is
+added.

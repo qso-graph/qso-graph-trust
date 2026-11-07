@@ -30,14 +30,37 @@ fn filename_uses_tqsls_utc_format() {
         (4_107_542_400, "21000301-0000"),
     ] {
         assert_eq!(
-            filename(UNIX_EPOCH + Duration::from_secs(seconds)),
+            filename(UNIX_EPOCH + Duration::from_secs(seconds), "log.tq8"),
             format!("<TQSLUpl {expected}> log.tq8")
         );
     }
     assert_eq!(
-        filename(UNIX_EPOCH - Duration::from_secs(1)),
-        filename(UNIX_EPOCH)
+        filename(UNIX_EPOCH - Duration::from_secs(1), "log.tq8"),
+        filename(UNIX_EPOCH, "log.tq8")
     );
+}
+
+#[test]
+fn an_upload_is_named_by_its_file_and_never_its_folder() {
+    assert_eq!(upload_name("us12223.tq8"), "us12223.tq8");
+    assert_eq!(upload_name("/Users/someone/logs/us7831.tq8"), "us7831.tq8");
+    assert_eq!(upload_name("C:\\Logs\\Field Day.TQ8"), "Field_Day.TQ8");
+    assert_eq!(upload_name("contest.adi"), "contest.adi.tq8");
+    // Nothing that could end the header's quoted filename, or start a new line, survives.
+    assert_eq!(upload_name("a\"b\r\nX: y.tq8"), "a_b__X__y.tq8");
+    assert_eq!(upload_name(""), "log.tq8");
+    assert_eq!(upload_name("/logs/"), "log.tq8");
+    assert_eq!(upload_name(".."), "log.tq8");
+    assert_eq!(upload_name(&"x".repeat(200)).len(), 64 + 4);
+}
+
+#[test]
+fn a_named_upload_sends_that_name() {
+    let request =
+        super::UploadRequest::try_named(b"signed", "/home/someone/us12223.tq8").expect("request");
+    let head = String::from_utf8_lossy(request.body()).to_string();
+    assert!(head.contains("> us12223.tq8\"\r\n"), "{head}");
+    assert!(!head.contains("someone"), "{head}");
 }
 
 #[test]

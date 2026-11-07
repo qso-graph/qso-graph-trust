@@ -37,7 +37,7 @@ uploads one later. A key that TQSL protected with a password is asked for once, 
 | `qg-trust sign LOG -l NAME` | sign a log; `-b`/`-e` choose dates, `--again` signs QSOs signed before, `--cert ID` picks the certificate when you have more than one for the call |
 | `qg-trust send LOG -l NAME` | sign and upload, keeping the `.tq8` beside the log |
 | `qg-trust upload LOG.tq8` | upload a signed log |
-| `qg-trust import FILE` | a TQSL backup (`.tbk`), ARRL's answer to a request (`.tq6`) or a `.p12` |
+| `qg-trust import FILE` | a TQSL backup (`.tbk`), ARRL's answer to a request (`.tq6`) or a `.p12`; `--trust-root FINGERPRINT` trusts a new ARRL root the `.tq6` or `.p12` brings, once `import` has named it |
 | `qg-trust cert list` | your certificates and requests (`--json` for scripts) |
 | `qg-trust cert request` | ask ARRL for a certificate: writes the `.tq5` to upload at LoTW |
 | `qg-trust cert renew CALL` | renew one, with a new key, for the QSO dates it has (`--to DATE` or `--no-end-date` to change the last) |
@@ -46,6 +46,8 @@ uploads one later. A key that TQSL protected with a password is asked for once, 
 | `qg-trust location add NAME --call CALL --dxcc N --grid GRID FIELD=VALUE…` | add one |
 | `qg-trust location edit NAME …` / `delete NAME --force` | change or delete one |
 | `qg-trust location fields N` | the fields a DXCC entity's locations take |
+| `qg-trust root list` | the LoTW roots and CAs your certificates chain to, built in and accepted, with their SHA-256 fingerprints (`--json` for scripts) |
+| `qg-trust root remove FINGERPRINT` | stop trusting a root you accepted; the built-in ones stay |
 
 Every command has `--help`, with an example. TQSL's settings that change what is signed are options
 of `sign` and `send` (`--ignore-seconds`, `--qth`, `--mode ADIF=LOTW`, …); `import` names the ones a
