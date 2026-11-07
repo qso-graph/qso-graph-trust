@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# QG Trust's fuzzers: cargo-fuzz and libFuzzer, on a pinned nightly (docs/decisions/0012-fuzzing.md).
+# Never shipped, never published, and not a member of the repository's workspace: its own workspace,
+# lock file and toolchain, so nothing here reaches the published crates or what QSO Graph Desktop links.
+[package]
+name = "qso-graph-trust-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[dependencies]
+# libFuzzer's runtime (C++), linked into the fuzz binaries only (decision 0012).
+libfuzzer-sys = "=0.4.13"
+qso-graph-trust = { path = "../crates/qso-graph-trust" }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[[bin]]
+name = "adif"
+path = "fuzz_targets/adif.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tq6"
+path = "fuzz_targets/tq6.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "p12"
+path = "fuzz_targets/p12.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tbk"
+path = "fuzz_targets/tbk.rs"
+test = false
+doc = false
+bench = false

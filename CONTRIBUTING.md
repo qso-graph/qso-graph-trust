@@ -28,6 +28,23 @@ cargo run -p qso-graph-trust-cli -- --version
 The full list of checks CI runs is in [AGENTS.md](AGENTS.md); the plan and its phases are tracked in
 [qso-graph-desktop#169](https://github.com/qso-graph/qso-graph-desktop/issues/169).
 
+### Fuzzing
+
+The file readers are fuzzed with cargo-fuzz and libFuzzer, on the nightly `fuzz/rust-toolchain.toml`
+names, in `fuzz/` only ([decision 0012](docs/decisions/0012-fuzzing.md)). rustup installs that nightly
+when you run cargo there:
+
+```sh
+cargo install cargo-fuzz --version 0.13.2 --locked
+fuzz/seed.sh                      # seeds fuzz/corpus/<target>/ from tests/corpus
+cd fuzz
+cargo fuzz list                   # adif, tq6, p12, tbk
+cargo fuzz run adif -- -max_total_time=300 -max_len=16384 -timeout=20
+```
+
+A crash is saved in `fuzz/artifacts/<target>/`; replay it with `cargo fuzz run <target> <file>`. Fix it
+in the library with a regression test there, named for what it checks, never by committing the file.
+
 ## Ground rules
 
 - **Test data only.** No real certificate, key, password or QSO log, ever, in code, tests, issues or

@@ -5,7 +5,17 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The file readers are fuzzed: cargo-fuzz and libFuzzer, with a target for ADIF logs, `.tq6`, `.p12`
+  and `.tbk` files, each driving the library as `qg-trust` does and checking that no record the
+  library refuses is ever signed and that everything imported hangs together. In CI on every pull
+  request and longer each week. In `fuzz/` only, on a pinned nightly, and never shipped
+  (decision 0012); `cargo xtask policy` holds it to that.
+
 ## [0.1.3] - 2026-11-07
+
+0.1.2 was not released; its changes are in 0.1.3.
 
 ### Added
 
@@ -22,11 +32,6 @@ versions follow [Semantic Versioning](https://semver.org/).
   anything decrypted: in the command line, any value that could be a password is written
   `<redacted>`. The file is its owner's alone on Unix. A file that cannot be opened is said on
   standard error, in TQSL's words, and the run goes on.
-
-## [0.1.2] - 2026-11-07
-
-### Added
-
 - A new ARRL root can be trusted without a new QG Trust release. ARRL delivers a new root only
   inside the `.tq6` it issues; `qg-trust import` now names a root a `.tq6` or `.p12` brings, with its
   SHA-256 fingerprint, and trusts it when run again with `--trust-root <fingerprint>`. A root in

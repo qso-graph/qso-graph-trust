@@ -152,6 +152,57 @@ jobs:
           fi
           echo "RUSTSEC-2023-0071: still no fixed release; the exception stands"
 
+  # Coverage-guided fuzzing of the file readers (docs/decisions/0012-fuzzing.md): cargo fuzz and
+  # libFuzzer, on the dated nightly fuzz/rust-toolchain.toml names, for the fuzz binaries alone;
+  # everything that ships is built by the pinned stable in the jobs above. Each target runs 60
+  # seconds on a pull request and 10 minutes on the weekly run, from seeds copied out of
+  # tests/corpus. A crash, a hang or a broken invariant fails the job, and its input is kept.
+  fuzz:
+    name: fuzz
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      # fuzz/rust-toolchain.toml names the nightly; rustup installs it here. An exact cargo-fuzz:
+      # --locked pins its dependencies, --version which release runs.
+      - name: Rust nightly and cargo-fuzz
+        working-directory: fuzz
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          cargo install cargo-fuzz --version 0.13.2 --locked --quiet
+      # The fuzzers' own Rust is formatted and linted like the workspace's. --locked here also holds
+      # cargo fuzz, which has no such flag, to fuzz/Cargo.lock: a change to it fails this step first.
+      - name: cargo fmt and clippy (fuzz)
+        working-directory: fuzz
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets --locked
+      - name: Seed the corpora from tests/corpus
+        run: fuzz/seed.sh
+      - name: Build every target
+        working-directory: fuzz
+        run: cargo fuzz build
+      - name: Fuzz every target
+        working-directory: fuzz
+        env:
+          SECONDS_EACH: ${{ github.event_name == 'schedule' && '600' || '60' }}
+        run: |
+          for target in $(cargo fuzz list); do
+            case "$target" in adif) len=16384 ;; *) len=65536 ;; esac
+            cargo fuzz run "$target" -- -max_total_time="$SECONDS_EACH" -max_len="$len" \
+              -timeout=20 -rss_limit_mb=4096 -print_final_stats=1
+          done
+      - name: Keep what was found
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts
+          if-no-files-found: ignore
+
   # Exercise the exact release build and archive steps before merging. No signing environments
   # or secrets are passed; the reusable workflow signs only when its sign input is true.
   binaries:
@@ -168,7 +219,7 @@ jobs:
 
   ci-all-green:
     name: ci-all-green
-    needs: [check, policy, binaries]
+    needs: [check, policy, fuzz, binaries]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
