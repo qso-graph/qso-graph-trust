@@ -20,6 +20,13 @@
 //!   installs [`WIPING_ALLOCATOR`], so every block is wiped when it is freed,
 //!   whichever library allocated it.
 //!
+//! - **In a consumer's build** (`cargo xtask consumer <Cargo.toml>`, run from a release's
+//!   checkout by a program that builds the library in, such as QSO Graph Desktop): the library
+//!   is that release from [`REPOSITORY`] ([`consumer_source`]), everything it needs is the
+//!   version this repository's lock file holds ([`consumer_versions`]), it brings no C but
+//!   AWS-LC's, with AWS-LC's FIPS build accepted only as the consumer's ([`consumer_no_c`]), and
+//!   every program the consumer builds wipes what it frees.
+//!
 //! Each check is proved by planted cases it must catch (tests/planted.rs), and
 //! anything a check cannot read counts as a failure, never a pass.
 
@@ -476,11 +483,23 @@ fn members(meta: &Value) -> BTreeSet<&str> {
 /// build dependencies; never dev-dependencies, which only the tests use) brings
 /// native code, sorted. Empty means the check passes.
 pub fn no_c(meta: &Value, protected: &[&str]) -> Vec<String> {
-    no_c_reviewing(meta, protected, REVIEWED)
+    no_c_reviewing(meta, protected, REVIEWED, None)
+}
+
+/// [`no_c_reviewing`] in a consumer's build (see [`consumer_no_c`]): our crates are the
+/// consumer's dependencies from [`REPOSITORY`], and AWS-LC's FIPS build is the provider's when
+/// the consumer turns it on.
+struct InConsumer {
+    fips: bool,
 }
 
 /// [`no_c`] with the reviewed list given, so tests can name their own.
-fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)]) -> Vec<String> {
+fn no_c_reviewing(
+    meta: &Value,
+    protected: &[&str],
+    list: &[(&str, &str, &str)],
+    consumer: Option<&InConsumer>,
+) -> Vec<String> {
     let reviewed =
         |name: &str, version: &str| list.iter().any(|(n, v, _)| *n == name && *v == version);
     let empty = Vec::new();
@@ -504,6 +523,15 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
             .to_string()
     };
     let workspace = members(meta);
+    // Our own crates: the workspace's, or in a consumer's build those it takes from our repository.
+    let ours = |id: &str| match consumer {
+        None => workspace.contains(id),
+        Some(_) => packages
+            .get(id)
+            .is_some_and(|p| from_repository(p) && SHIPPED.iter().any(|s| p["name"] == *s)),
+    };
+    let fips = consumer.is_some_and(|c| c.fips);
+    let provider = |name: &str| crypto_provider(name) || (fips && name == FIPS_PROVIDER);
     let output_dir: Vec<PathBuf> = meta["target_directory"]
         .as_str()
         .and_then(|t| std::fs::canonicalize(t).ok())
@@ -525,8 +553,11 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
             problems.push(format!("protected crate {want} is not in this workspace"));
         }
         for id in &found {
-            if !workspace.contains(id) {
+            if consumer.is_none() && !workspace.contains(id) {
                 problems.push(format!("protected crate {want} is not a workspace member"));
+            }
+            if consumer.is_some() && !ours(id) {
+                problems.push(format!("protected crate {want} is not from {REPOSITORY}"));
             }
         }
         queue.extend(found);
@@ -541,11 +572,11 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
         let pkg = packages.get(id);
         if let Some(links) = pkg.and_then(|p| p["links"].as_str())
             && !os_binding(&name)
-            && !crypto_provider(&name)
+            && !provider(&name)
         {
             problems.push(format!("{name} links the native library {links}"));
         }
-        if !workspace.contains(id) && pkg.and_then(|p| p["source"].as_str()) != Some(CRATES_IO) {
+        if !ours(id) && pkg.and_then(|p| p["source"].as_str()) != Some(CRATES_IO) {
             problems.push(format!("{name} {version} is not a crates.io crate"));
         }
         if let Some(dir) = pkg
@@ -570,8 +601,8 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
             // zeroize's empty barrier, which keeps a key's wiping from
             // being optimized away, is one. In our own crates it stays refused, by
             // the compiler and by the token scan.
-            let outside = !workspace.contains(id);
-            let scanned = if crypto_provider(&name) {
+            let outside = !ours(id);
+            let scanned = if provider(&name) {
                 Vec::new()
             } else {
                 native_in(dir, &output_dir, os_binding(&name))
@@ -594,10 +625,7 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
             ] {
                 // Our own crates' only: outside crates' are reviewed with the rest
                 // of them, through cargo-vet.
-                if kinds.iter().any(|k| k == kind)
-                    && workspace.contains(id)
-                    && !reviewed(&name, &version)
-                {
+                if kinds.iter().any(|k| k == kind) && ours(id) && !reviewed(&name, &version) {
                     problems.push(format!(
                         "{name} {version} has {what} that has not been reviewed"
                     ));
@@ -622,17 +650,23 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
             // The provider's build tools (cc, cmake and theirs) compile AWS-LC and never ship; what
             // the provider needs at run time is still followed.
             let build_only = kinds.iter().all(|k| k["kind"] == "build");
-            if crypto_provider(&name) && build_only {
+            if provider(&name) && build_only {
                 continue;
             }
             let dep_name = field(dep_id, "name");
             // Only the binding may depend on the provider, so no other crate reaches AWS-LC's C.
-            if crypto_provider(&dep_name) && name != UNSAFE_BINDING && !crypto_provider(&name) {
+            if provider(&dep_name) && name != UNSAFE_BINDING && !provider(&name) {
                 problems.push(format!(
                     "{name} depends on {dep_name}: only {UNSAFE_BINDING} may"
                 ));
             }
-            if NATIVE_BUILD.contains(&dep_name.as_str()) && !crypto_provider(&name) {
+            // The FIPS build only under the safe API whose feature the consumer turned on.
+            if fips && dep_name == FIPS_PROVIDER && name != "aws-lc-rs" {
+                problems.push(format!(
+                    "{name} depends on {FIPS_PROVIDER}: only aws-lc-rs may"
+                ));
+            }
+            if NATIVE_BUILD.contains(&dep_name.as_str()) && !provider(&name) {
                 problems.push(format!("{name} builds native code through {dep_name}"));
             }
             queue.push_back(dep_id);
@@ -641,6 +675,179 @@ fn no_c_reviewing(meta: &Value, protected: &[&str], list: &[(&str, &str, &str)])
     problems.sort();
     problems.dedup();
     problems
+}
+
+/// Where QG Trust's releases are taken from by a program that builds them in: by git, at a
+/// release tag and its commit (QSO Graph Desktop's `QGD-LTW-0001`).
+pub const REPOSITORY: &str = "https://github.com/qso-graph/qso-graph-trust";
+
+/// AWS-LC's FIPS build. Never this workspace's: QSO Graph Desktop's, for its TLS and its backup's
+/// encryption (`QGD-LTW-0014`). In a consumer's build it is accepted as the provider's only when the
+/// consumer itself turns on aws-lc-rs's `fips` feature, and only under aws-lc-rs.
+pub const FIPS_PROVIDER: &str = "aws-lc-fips-sys";
+
+/// The crates a consumer takes from [`REPOSITORY`] to build the library in.
+const CONSUMED: &[&str] = &["qso-graph-trust", "qso-graph-trust-awslc"];
+
+/// Whether a package comes from [`REPOSITORY`] by git.
+fn from_repository(package: &Value) -> bool {
+    package["source"]
+        .as_str()
+        .and_then(|s| s.strip_prefix("git+"))
+        .and_then(|s| s.strip_prefix(REPOSITORY))
+        .is_some_and(|rest| rest.starts_with('?'))
+}
+
+/// Whether one of the consumer's own crates turns on aws-lc-rs's `fips` feature.
+pub fn consumer_turns_on_fips(meta: &Value) -> bool {
+    let workspace = members(meta);
+    meta["packages"].as_array().into_iter().flatten().any(|p| {
+        p["id"].as_str().is_some_and(|id| workspace.contains(id))
+            && p["dependencies"].as_array().into_iter().flatten().any(|d| {
+                d["name"] == "aws-lc-rs"
+                    && d["kind"].is_null()
+                    && d["features"]
+                        .as_array()
+                        .is_some_and(|f| f.iter().any(|f| f == "fips"))
+            })
+    })
+}
+
+/// A consumer's build of the library: each crate of [`CONSUMED`] is in it once, from
+/// [`REPOSITORY`] at the tag of its own version and at `commit`, the commit this check runs from.
+/// Sorted; empty passes.
+pub fn consumer_source(meta: &Value, commit: &str) -> Vec<String> {
+    let mut problems = Vec::new();
+    for want in CONSUMED {
+        let found: Vec<&Value> = meta["packages"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|p| p["name"] == *want)
+            .collect();
+        let [package] = found[..] else {
+            problems.push(format!(
+                "{want} is in the build {} times, not once",
+                found.len()
+            ));
+            continue;
+        };
+        let version = package["version"].as_str().unwrap_or("?");
+        let expected = format!("git+{REPOSITORY}?tag=v{version}#{commit}");
+        match package["source"].as_str() {
+            Some(source) if source == expected => {}
+            source => problems.push(format!(
+                "{want} {version} is from {}, not {expected}",
+                source.unwrap_or("this workspace")
+            )),
+        }
+    }
+    problems.sort();
+    problems
+}
+
+/// What the library needs to build and run in a consumer's build (normal and build edges, as
+/// [`no_c`] follows them; the provider's build tools are AWS-LC's, not the library's) is each the
+/// exact version this repository's lock file holds, so what is built is what was reviewed. The
+/// consumer's lock file resolves the library's dependencies itself, and can resolve them older or
+/// newer. AWS-LC's FIPS build, when the consumer turns it on, is the consumer's and not checked here.
+/// Sorted; empty passes.
+pub fn consumer_versions(meta: &Value, reviewed: &BTreeSet<(String, String)>) -> Vec<String> {
+    let fips = consumer_turns_on_fips(meta);
+    let packages: HashMap<&str, &Value> = meta["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| Some((p["id"].as_str()?, p)))
+        .collect();
+    let nodes: HashMap<&str, &Value> = meta["resolve"]["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|n| Some((n["id"].as_str()?, n)))
+        .collect();
+    let field = |id: &str, f: &str| {
+        packages
+            .get(id)
+            .and_then(|p| p[f].as_str())
+            .unwrap_or("?")
+            .to_string()
+    };
+    let mut problems = Vec::new();
+    let mut queue: VecDeque<&str> = packages
+        .iter()
+        .filter(|(_, p)| p["name"] == PROTECTED[0])
+        .map(|(id, _)| *id)
+        .collect();
+    if queue.is_empty() {
+        problems.push(format!("{} is not in the build", PROTECTED[0]));
+    }
+    let mut seen = BTreeSet::new();
+    while let Some(id) = queue.pop_front() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let (n, v) = (field(id, "name"), field(id, "version"));
+        let n = n.as_str();
+        if fips && n == FIPS_PROVIDER {
+            continue;
+        }
+        if !reviewed.contains(&(n.to_string(), v.clone())) {
+            problems.push(format!(
+                "{n} {v} is not the version QG Trust's lock file holds"
+            ));
+        }
+        let Some(node) = nodes.get(id) else {
+            problems.push(format!("{n} {v} has no dependency node"));
+            continue;
+        };
+        for dep in node["deps"].as_array().into_iter().flatten() {
+            let kinds = dep["dep_kinds"].as_array().into_iter().flatten();
+            let kinds: Vec<&Value> = kinds.collect();
+            if !kinds
+                .iter()
+                .any(|k| k["kind"].is_null() || k["kind"] == "build")
+            {
+                continue;
+            }
+            if crypto_provider(n) && kinds.iter().all(|k| k["kind"] == "build") {
+                continue;
+            }
+            if let Some(dep_id) = dep["pkg"].as_str() {
+                queue.push_back(dep_id);
+            }
+        }
+    }
+    problems.sort();
+    problems.dedup();
+    problems
+}
+
+/// [`no_c`] in a consumer's build: the library and everything it needs, as the consumer resolves
+/// them, bring no native code but AWS-LC's, the FIPS build accepted only as [`FIPS_PROVIDER`] says.
+pub fn consumer_no_c(meta: &Value) -> Vec<String> {
+    let consumer = InConsumer {
+        fips: consumer_turns_on_fips(meta),
+    };
+    no_c_reviewing(meta, PROTECTED, REVIEWED, Some(&consumer))
+}
+
+/// The `(name, version)` of every package in a lock file.
+pub fn locked(lock: &Path) -> Result<BTreeSet<(String, String)>, String> {
+    let table = read_toml(lock)?;
+    let packages = table
+        .get("package")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| format!("{} has no packages", lock.display()))?;
+    packages
+        .iter()
+        .map(|p| {
+            let field = |f: &str| p.get(f).and_then(toml::Value::as_str).map(str::to_string);
+            field("name")
+                .zip(field("version"))
+                .ok_or_else(|| format!("{} has a package with no name or version", lock.display()))
+        })
+        .collect()
 }
 
 /// What in a token stream links native code or holds assembly: a foreign block
@@ -2614,12 +2821,172 @@ mod tests {
         );
     }
 
+    const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    /// A consumer's build of the library: its own crate `app`, which turns on aws-lc-rs's `fips`
+    /// feature, and the library from [`REPOSITORY`] at v0.1.0 and [`COMMIT`], down to AWS-LC's two
+    /// builds.
+    fn consumer_graph() -> Value {
+        let ours = format!("git+{REPOSITORY}?tag=v0.1.0#{COMMIT}");
+        json!({
+            "workspace_members": ["app"],
+            "packages": [
+                {"id": "app", "name": "app", "version": "1.0.0", "source": null, "links": null, "targets": [{"kind": ["lib"]}],
+                 "dependencies": [{"name": "aws-lc-rs", "kind": null, "features": ["fips"]}]},
+                {"id": "lib", "name": "qso-graph-trust", "version": "0.1.0", "source": ours, "links": null, "targets": [{"kind": ["lib"]}]},
+                {"id": "bind", "name": "qso-graph-trust-awslc", "version": "0.1.0", "source": ours, "links": null, "targets": [{"kind": ["lib"]}]},
+                {"id": "rs", "name": "aws-lc-rs", "version": "1.18.1", "source": CRATES_IO, "links": null, "targets": [{"kind": ["lib"]}]},
+                {"id": "sys", "name": "aws-lc-sys", "version": "0.45.0", "source": CRATES_IO, "links": "aws_lc_0_45_0", "targets": [{"kind": ["lib"]}]},
+                {"id": "fips", "name": "aws-lc-fips-sys", "version": "0.14.2", "source": CRATES_IO, "links": "aws_lc_fips_0_14_2", "targets": [{"kind": ["lib"]}]}
+            ],
+            "resolve": {"nodes": [
+                {"id": "app", "deps": [
+                    {"pkg": "lib", "dep_kinds": [{"kind": null}]},
+                    {"pkg": "rs", "dep_kinds": [{"kind": null}]}
+                ]},
+                {"id": "lib", "deps": [{"pkg": "bind", "dep_kinds": [{"kind": null}]}]},
+                {"id": "bind", "deps": [
+                    {"pkg": "rs", "dep_kinds": [{"kind": null}]},
+                    {"pkg": "sys", "dep_kinds": [{"kind": null}]}
+                ]},
+                {"id": "rs", "deps": [
+                    {"pkg": "sys", "dep_kinds": [{"kind": null}]},
+                    {"pkg": "fips", "dep_kinds": [{"kind": null}]}
+                ]},
+                {"id": "sys", "deps": []},
+                {"id": "fips", "deps": []}
+            ]}
+        })
+    }
+
+    /// The versions the consumer graph's library is reviewed with.
+    fn consumer_reviewed() -> BTreeSet<(String, String)> {
+        [
+            ("qso-graph-trust", "0.1.0"),
+            ("qso-graph-trust-awslc", "0.1.0"),
+            ("aws-lc-rs", "1.18.1"),
+            ("aws-lc-sys", "0.45.0"),
+        ]
+        .into_iter()
+        .map(|(n, v)| (n.to_string(), v.to_string()))
+        .collect()
+    }
+
+    #[test]
+    fn a_consumer_builds_this_release_from_this_repository() {
+        let g = consumer_graph();
+        assert!(consumer_source(&g, COMMIT).is_empty());
+        // PLANTED: another commit than the one the check runs from.
+        let other = "f".repeat(40);
+        assert_eq!(
+            consumer_source(&g, &other),
+            vec![
+                format!(
+                    "qso-graph-trust 0.1.0 is from git+{REPOSITORY}?tag=v0.1.0#{COMMIT}, not git+{REPOSITORY}?tag=v0.1.0#{other}"
+                ),
+                format!(
+                    "qso-graph-trust-awslc 0.1.0 is from git+{REPOSITORY}?tag=v0.1.0#{COMMIT}, not git+{REPOSITORY}?tag=v0.1.0#{other}"
+                ),
+            ]
+        );
+        // PLANTED: a branch, a tag that is not the crate's version, crates.io, a path, a fork.
+        for source in [
+            json!(format!("git+{REPOSITORY}?branch=main#{COMMIT}")),
+            json!(format!("git+{REPOSITORY}?tag=v0.1.1#{COMMIT}")),
+            json!(CRATES_IO),
+            Value::Null,
+            json!(format!("git+{REPOSITORY}-fork?tag=v0.1.0#{COMMIT}")),
+        ] {
+            let mut h = consumer_graph();
+            h["packages"][1]["source"] = source.clone();
+            assert_eq!(consumer_source(&h, COMMIT).len(), 1, "{source}");
+        }
+        // PLANTED: two copies of the library.
+        let mut h = consumer_graph();
+        let copy = h["packages"][1].clone();
+        h["packages"].as_array_mut().expect("packages").push(copy);
+        assert_eq!(
+            consumer_source(&h, COMMIT),
+            vec!["qso-graph-trust is in the build 2 times, not once"]
+        );
+    }
+
+    #[test]
+    fn a_consumer_builds_only_the_reviewed_versions() {
+        let g = consumer_graph();
+        let reviewed = consumer_reviewed();
+        assert!(consumer_versions(&g, &reviewed).is_empty());
+        // PLANTED: the consumer's lock file resolves one of the library's dependencies otherwise.
+        let mut h = consumer_graph();
+        h["packages"][3]["version"] = json!("1.18.0");
+        assert_eq!(
+            consumer_versions(&h, &reviewed),
+            vec!["aws-lc-rs 1.18.0 is not the version QG Trust's lock file holds"]
+        );
+        // PLANTED: the FIPS build without the consumer turning it on is the library's, and unreviewed.
+        let mut h = consumer_graph();
+        h["packages"][0]["dependencies"] = json!([]);
+        assert_eq!(
+            consumer_versions(&h, &reviewed),
+            vec!["aws-lc-fips-sys 0.14.2 is not the version QG Trust's lock file holds"]
+        );
+    }
+
+    #[test]
+    fn a_consumer_brings_no_c_but_aws_lc() {
+        let g = consumer_graph();
+        assert!(consumer_turns_on_fips(&g));
+        assert!(consumer_no_c(&g).is_empty(), "{:?}", consumer_no_c(&g));
+        // PLANTED: the consumer does not turn the FIPS build on, so it is the library's C.
+        let mut h = consumer_graph();
+        h["packages"][0]["dependencies"] =
+            json!([{"name": "aws-lc-rs", "kind": null, "features": []}]);
+        assert!(!consumer_turns_on_fips(&h));
+        assert_eq!(
+            consumer_no_c(&h),
+            vec!["aws-lc-fips-sys links the native library aws_lc_fips_0_14_2"]
+        );
+        // PLANTED: the library reaches the FIPS build other than through aws-lc-rs.
+        let mut h = consumer_graph();
+        h["resolve"]["nodes"][1]["deps"]
+            .as_array_mut()
+            .expect("deps")
+            .push(json!({"pkg": "fips", "dep_kinds": [{"kind": null}]}));
+        assert_eq!(
+            consumer_no_c(&h),
+            vec![
+                "qso-graph-trust depends on aws-lc-fips-sys: only aws-lc-rs may",
+                "qso-graph-trust depends on aws-lc-fips-sys: only qso-graph-trust-awslc may",
+            ]
+        );
+        // PLANTED: the library from somewhere else.
+        let mut h = consumer_graph();
+        h["packages"][1]["source"] =
+            json!("git+https://example.invalid/qso-graph-trust?tag=v0.1.0#0");
+        assert_eq!(
+            consumer_no_c(&h),
+            vec![
+                format!("protected crate qso-graph-trust is not from {REPOSITORY}"),
+                "qso-graph-trust 0.1.0 is not a crates.io crate".to_string(),
+            ]
+        );
+        // This workspace's own build never takes the FIPS build, whatever turns it on.
+        let mut h = consumer_graph();
+        h["workspace_members"] = json!(["lib", "bind"]);
+        h["packages"][1]["source"] = Value::Null;
+        h["packages"][2]["source"] = Value::Null;
+        assert_eq!(
+            no_c(&h, PROTECTED),
+            vec!["aws-lc-fips-sys links the native library aws_lc_fips_0_14_2"]
+        );
+    }
+
     /// The test graph's outside crates, reviewed, so each test sees only its own finding.
     const TEST_REVIEWED: &[(&str, &str, &str)] =
         &[("middle", "1.0.0", "test"), ("cc", "1.2.0", "test")];
 
     fn check(g: &Value, protected: &[&str]) -> Vec<String> {
-        no_c_reviewing(g, protected, TEST_REVIEWED)
+        no_c_reviewing(g, protected, TEST_REVIEWED, None)
     }
 
     #[test]
