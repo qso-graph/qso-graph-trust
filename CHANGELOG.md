@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-07
+
 ### Added
 
 - `qg-trust -c CALL` (`--callsign`), as TQSL's: signs as CALL in place of the station location's
