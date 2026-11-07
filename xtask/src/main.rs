@@ -111,6 +111,11 @@ fn consumer(root_dir: &std::path::Path, manifest: &std::path::Path) -> ExitCode 
             return ExitCode::FAILURE;
         }
     };
+    for added in xtask::consumer_added(&meta, &reviewed) {
+        println!(
+            "consumer: {added}: not in QG Trust's lock file, brought by this build's features"
+        );
+    }
     let mut failed = false;
     for (check, problems) in [
         (

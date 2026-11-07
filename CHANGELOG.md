@@ -10,7 +10,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 - `cargo xtask consumer <Cargo.toml>`: the library's checks against another program's build of
   it, run from a release's checkout. The library must be that release, from this repository by
   its tag and commit; everything it needs must be the version this release's lock file holds,
-  since the other program's lock file resolves them itself; it brings no C but AWS-LC's, the
+  since the other program's lock file resolves them itself (a crate it does not hold at all was
+  brought by the program's own features, and is listed); it brings no C but AWS-LC's, the
   FIPS build accepted only when the program itself turns it on and only under aws-lc-rs; and
   every program it builds installs the wiping allocator. QSO Graph Desktop runs it in CI.
 

@@ -750,9 +750,46 @@ pub fn consumer_source(meta: &Value, commit: &str) -> Vec<String> {
 /// [`no_c`] follows them; the provider's build tools are AWS-LC's, not the library's) is each the
 /// exact version this repository's lock file holds, so what is built is what was reviewed. The
 /// consumer's lock file resolves the library's dependencies itself, and can resolve them older or
-/// newer. AWS-LC's FIPS build, when the consumer turns it on, is the consumer's and not checked here.
+/// newer. A crate the lock file does not hold at all is not a different version of a reviewed one:
+/// the consumer's features brought it (QSO Graph Desktop's napi turns on futures-util's `std`, which
+/// adds futures-channel), so it is the consumer's, listed by [`consumer_added`] and still held to
+/// [`consumer_no_c`]. AWS-LC's FIPS build, when the consumer turns it on, is the consumer's too.
 /// Sorted; empty passes.
 pub fn consumer_versions(meta: &Value, reviewed: &BTreeSet<(String, String)>) -> Vec<String> {
+    let names: BTreeSet<&str> = reviewed.iter().map(|(n, _)| n.as_str()).collect();
+    let (built, mut problems) = consumer_built(meta);
+    problems.extend(
+        built
+            .iter()
+            .filter(|(n, v)| {
+                names.contains(n.as_str()) && !reviewed.contains(&(n.clone(), v.clone()))
+            })
+            .map(|(n, v)| format!("{n} {v} is not the version QG Trust's lock file holds")),
+    );
+    problems.sort();
+    problems.dedup();
+    problems
+}
+
+/// The crates in the library's part of a consumer's build that its lock file does not hold at
+/// all, as `name version`: the consumer's features brought them ([`consumer_versions`]). Sorted.
+pub fn consumer_added(meta: &Value, reviewed: &BTreeSet<(String, String)>) -> Vec<String> {
+    let names: BTreeSet<&str> = reviewed.iter().map(|(n, _)| n.as_str()).collect();
+    let fips = consumer_turns_on_fips(meta);
+    let mut added: Vec<String> = consumer_built(meta)
+        .0
+        .into_iter()
+        .filter(|(n, _)| !names.contains(n.as_str()) && !(fips && n == FIPS_PROVIDER))
+        .map(|(n, v)| format!("{n} {v}"))
+        .collect();
+    added.sort();
+    added.dedup();
+    added
+}
+
+/// Every `(name, version)` the library needs in a consumer's build, as [`consumer_versions`]
+/// follows them, and what could not be read.
+fn consumer_built(meta: &Value) -> (BTreeSet<(String, String)>, Vec<String>) {
     let fips = consumer_turns_on_fips(meta);
     let packages: HashMap<&str, &Value> = meta["packages"]
         .as_array()
@@ -774,6 +811,7 @@ pub fn consumer_versions(meta: &Value, reviewed: &BTreeSet<(String, String)>) ->
             .to_string()
     };
     let mut problems = Vec::new();
+    let mut built = BTreeSet::new();
     let mut queue: VecDeque<&str> = packages
         .iter()
         .filter(|(_, p)| p["name"] == PROTECTED[0])
@@ -788,14 +826,10 @@ pub fn consumer_versions(meta: &Value, reviewed: &BTreeSet<(String, String)>) ->
             continue;
         }
         let (n, v) = (field(id, "name"), field(id, "version"));
+        built.insert((n.clone(), v.clone()));
         let n = n.as_str();
         if fips && n == FIPS_PROVIDER {
             continue;
-        }
-        if !reviewed.contains(&(n.to_string(), v.clone())) {
-            problems.push(format!(
-                "{n} {v} is not the version QG Trust's lock file holds"
-            ));
         }
         let Some(node) = nodes.get(id) else {
             problems.push(format!("{n} {v} has no dependency node"));
@@ -818,9 +852,7 @@ pub fn consumer_versions(meta: &Value, reviewed: &BTreeSet<(String, String)>) ->
             }
         }
     }
-    problems.sort();
-    problems.dedup();
-    problems
+    (built, problems)
 }
 
 /// [`no_c`] in a consumer's build: the library and everything it needs, as the consumer resolves
@@ -2923,12 +2955,40 @@ mod tests {
             consumer_versions(&h, &reviewed),
             vec!["aws-lc-rs 1.18.0 is not the version QG Trust's lock file holds"]
         );
-        // PLANTED: the FIPS build without the consumer turning it on is the library's, and unreviewed.
+        assert!(consumer_added(&g, &reviewed).is_empty());
+        // A crate the lock file does not hold at all is the consumer's, brought by its features:
+        // listed, and still held to the no-C check.
+        let mut h = consumer_graph();
+        h["packages"]
+            .as_array_mut()
+            .expect("packages")
+            .push(json!({"id": "chan", "name": "futures-channel", "version": "0.3.34", "source": CRATES_IO, "links": null, "targets": [{"kind": ["lib"]}]}));
+        h["resolve"]["nodes"][2]["deps"]
+            .as_array_mut()
+            .expect("deps")
+            .push(json!({"pkg": "chan", "dep_kinds": [{"kind": null}]}));
+        h["resolve"]["nodes"]
+            .as_array_mut()
+            .expect("nodes")
+            .push(json!({"id": "chan", "deps": []}));
+        assert!(consumer_versions(&h, &reviewed).is_empty());
+        assert_eq!(
+            consumer_added(&h, &reviewed),
+            vec!["futures-channel 0.3.34"]
+        );
+        assert!(consumer_no_c(&h).is_empty());
+        h["packages"][6]["links"] = json!("planted");
+        assert_eq!(
+            consumer_no_c(&h),
+            vec!["futures-channel links the native library planted"]
+        );
+        // The FIPS build the consumer did not turn on is not the consumer's: it is listed, and the
+        // no-C check refuses it (a_consumer_brings_no_c_but_aws_lc).
         let mut h = consumer_graph();
         h["packages"][0]["dependencies"] = json!([]);
         assert_eq!(
-            consumer_versions(&h, &reviewed),
-            vec!["aws-lc-fips-sys 0.14.2 is not the version QG Trust's lock file holds"]
+            consumer_added(&h, &reviewed),
+            vec!["aws-lc-fips-sys 0.14.2"]
         );
     }
 
