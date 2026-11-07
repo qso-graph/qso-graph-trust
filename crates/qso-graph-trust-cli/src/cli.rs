@@ -113,6 +113,7 @@ Commands:
   qg-trust import FILE      certificates, keys and locations from TQSL (.tbk), ARRL (.tq6) or a .p12
   qg-trust cert list        your certificates; cert request, renew, delete
   qg-trust location list    your station locations; location add, edit, delete
+  qg-trust root list        the LoTW roots QG Trust trusts; root remove
   qg-trust sign LOG -l NAME sign a log;  qg-trust send LOG -l NAME  signs and uploads it
   qg-trust upload LOG.tq8   upload a signed log
 qg-trust <command> --help says more, with an example.

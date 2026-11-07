@@ -3,22 +3,26 @@
 
 //! The plaintext is library-private: versioned public store XML followed by length-prefixed
 //! PKCS#8 DER in certificate order, then pending-request order. Public XML includes pending
-//! request metadata and the signed-QSO section unchanged.
+//! request metadata, the signed-QSO section and the accepted roots (store version 3) unchanged.
 
 use std::fmt;
 
 use zeroize::Zeroizing;
 
+use super::roots::{self, RootSource, TrustedRoot};
 use super::{Data, MAX_FILE_LEN, MAX_KEY_LEN, Store, StoreError, format, keys};
-use crate::certificate::Trust;
+use crate::certificate::{FoundRoot, Trust, file_roots};
 use crate::export::{self, ExportError, LOTW_PART, Password};
 use crate::signing::TqslKey;
 
 const MAGIC: &[u8] = b"QGT-STORE\x02";
 
-/// A restore result, containing counts only, never credentials.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// A restore result: counts and public root details only, never credentials.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RestoreReport {
+    /// Roots the part brought that this store did not trust before, now trusted: the part is QG
+    /// Trust's own data, authenticated by its password.
+    pub roots: Vec<TrustedRoot>,
     /// Signed-QSO records installed.
     pub signed_qsos: usize,
     /// Certificates installed, including public-only ones.
@@ -116,7 +120,11 @@ impl Store {
     }
 
     /// Authenticate and validate the complete part before touching this store. All certificates
-    /// must chain to caller-supplied trust, keys must match their certificate or pending-request
+    /// must chain to caller-supplied trust, this store's accepted roots, or roots the part itself
+    /// carries: those are QG Trust's own data, authenticated by the part's password, so a root
+    /// they hold is trusted when `crate::certificate`'s rules allow it (a self-signed CA a
+    /// certificate in the part chains to), kept beside this store's accepted roots and reported in
+    /// [`RestoreReport::roots`]. Keys must match their certificate or pending-request
     /// SPKI, and locations must pass the store's `StationLocation::new` reader. Staged keys precede atomic file replacement; old keys are
     /// deleted afterwards. A failure before replacement rolls back staged keys. A durability
     /// failure after replacement keeps both sets of keys and reports uncertain crash durability.
@@ -127,15 +135,20 @@ impl Store {
         trust: &Trust,
     ) -> Result<RestoreReport, PartError> {
         let opened = export::open(LOTW_PART, bytes, password)?;
-        let (mut data, secrets) = decode(&opened, trust)?;
+        let current = self.trust_with(trust)?;
+        let (mut data, secrets, found) = decode(&opened, &current)?;
+        let _lock = self.lock()?;
+        let old = self.read()?;
+        // The roots this store accepted stay; the part's own, where new, join them.
+        data.roots = old.roots.clone();
+        let added = roots::add(&mut data, &found, RootSource::Part)?;
         let report = RestoreReport {
+            roots: added,
             signed_qsos: data.signed_qsos.len(),
             certificates: data.certificates.len(),
             keys: secrets.len(),
             locations: data.locations.len(),
         };
-        let _lock = self.lock()?;
-        let old = self.read()?;
         let mut names = Vec::new();
         // Allocate fresh credential names so even a restore onto the source cannot overwrite a
         // key named by the current file. No backend mutation until all names and XML are checked.
@@ -204,15 +217,25 @@ fn take_record<'a>(input: &mut &'a [u8], max: usize) -> Result<&'a [u8], PartErr
 }
 
 type Secrets = Vec<Zeroizing<Vec<u8>>>;
-fn decode(opened: &[u8], trust: &Trust) -> Result<(Data, Secrets), PartError> {
+fn decode(opened: &[u8], trust: &Trust) -> Result<(Data, Secrets, Vec<FoundRoot>), PartError> {
     let mut input = opened.strip_prefix(MAGIC).ok_or(PartError::Invalid)?;
     let xml = take_record(&mut input, MAX_FILE_LEN)?;
     let data = format::read(std::str::from_utf8(xml).map_err(|_| PartError::Invalid)?)
         .map_err(|_| PartError::Invalid)?;
+    // The part's accepted roots are trusted by the same rules a file's are: one its certificates
+    // do not chain to is left out.
+    let users: Vec<Vec<u8>> = data
+        .certificates
+        .iter()
+        .map(|c| c.certificate.der().to_vec())
+        .collect();
+    let supplied: Vec<Vec<u8>> = data.roots.iter().map(|r| r.der.clone()).collect();
+    let found = file_roots(&users, &supplied, trust);
+    let trust = trust.with_found(&found);
     let mut secrets = Vec::new();
     for cert in &data.certificates {
         cert.certificate
-            .verify(trust, &[])
+            .verify(&trust, &[])
             .map_err(|_| PartError::Invalid)?;
         if cert.key_name.is_some() {
             let der = take_record(&mut input, MAX_KEY_LEN)?;
@@ -229,7 +252,7 @@ fn decode(opened: &[u8], trust: &Trust) -> Result<(Data, Secrets), PartError> {
     if !input.is_empty() {
         return Err(PartError::Invalid);
     }
-    Ok((data, secrets))
+    Ok((data, secrets, found))
 }
 
 #[cfg(test)]

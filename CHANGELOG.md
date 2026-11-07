@@ -5,6 +5,29 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- A new ARRL root can be trusted without a new QG Trust release. ARRL delivers a new root only
+  inside the `.tq6` it issues; `qg-trust import` now names a root a `.tq6` or `.p12` brings, with its
+  SHA-256 fingerprint, and trusts it when run again with `--trust-root <fingerprint>`. A root in
+  your own TQSL backup, or in QG Trust's own encrypted export, is trusted and named. Only a root
+  that is self-signed, a CA allowed to sign certificates, and that a callsign certificate in the same
+  file chains to is ever accepted; LoTW's pinned roots stay trusted always.
+- `qg-trust root list [--json]` lists every trusted root and CA, built in or accepted, with its
+  dates, serial and SHA-256 fingerprint; `qg-trust root remove <fingerprint>` stops trusting one you
+  accepted.
+- Library: `Store::trust`, `Store::trust_with`, `Store::trusted_roots`, `Store::remove_root`,
+  `Store::trust_backup_roots`, `tbk::read_trusting_roots`, `certificate::fingerprint` and
+  `certificate::parse_fingerprint`; `ImportError::UntrustedRoot` and `ImportError::RootMismatch`;
+  `RestoreReport::roots`. `Store::import_tq6` and `Store::import_pkcs12` take the confirmed
+  fingerprint as an `Option<&str>`. The store file is version 3, with a `<roots>` section; versions 1
+  and 2 are still read.
+
+### Fixed
+
+- `qg-trust location list` lines its columns up whatever the names' lengths; a name longer than
+  20 characters pushed the call, entity and grid columns along on its line.
+
 ## [0.1.1] - 2026-11-07
 
 ### Added

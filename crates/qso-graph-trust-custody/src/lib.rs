@@ -223,7 +223,7 @@ fn exercise_export(
         Store::open(folder.0.join("imports"), KeyBackend::Memory).map_err(|e| e.to_string())?;
     let p12 = Zeroizing::new(read(&case.join("QG0TEST.p12"))?);
     let imported = imports
-        .import_pkcs12(&p12, &import_password, &import_trust)
+        .import_pkcs12(&p12, &import_password, &import_trust, None)
         .map_err(|e| e.to_string())?;
     imports
         .with_key(&imported.id, |key| key.sign(b"custody"))
@@ -231,7 +231,7 @@ fn exercise_export(
         .map_err(|e| e.to_string())?;
     let wrong = Password::generate().map_err(|e| e.to_string())?;
     if imports
-        .import_pkcs12(&p12, wrong.expose_secret().as_bytes(), &import_trust)
+        .import_pkcs12(&p12, wrong.expose_secret().as_bytes(), &import_trust, None)
         .is_ok()
     {
         return Err("wrong import password accepted".into());

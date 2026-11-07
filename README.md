@@ -116,6 +116,12 @@ hidden. `send` leaves out QSOs you signed before unless you ask, and keeps `mylo
 `qg-trust sign mylog.adi -l Home` signs without uploading; `qg-trust upload mylog.tq8` uploads it
 later. To sign only some dates, add `-b 2026-01-01` and `-e 2026-06-30`.
 
+When ARRL starts issuing under a new root, its `.tq6` brings the root, and `qg-trust import` names it
+with its SHA-256 fingerprint before trusting it: run it again with `--trust-root <fingerprint>` once
+you know it is ARRL's. A new root in your own TQSL backup is trusted and named. `qg-trust root list`
+shows every root your certificates chain to, and `qg-trust root remove <fingerprint>` stops trusting
+one you accepted.
+
 From a logger, the `tqsl` options work as they are:
 
 ```sh

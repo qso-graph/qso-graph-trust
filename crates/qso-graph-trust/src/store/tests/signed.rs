@@ -433,17 +433,17 @@ fn old_version_stays_readable_but_never_accepts_nonempty_records() {
     let folder = Folder::new();
     let store = store(&folder);
     let path = folder.0.join("store.xml");
-    let legacy = empty_xml().replace("qgt-store version=\"2\"", "qgt-store version=\"1\"");
+    let legacy = empty_xml().replace("qgt-store version=\"3\"", "qgt-store version=\"1\"");
     fs::write(&path, &legacy).expect("old version");
     assert!(store.signed_qsos().expect("v1 reader").is_empty());
     store
         .add_signed_qsos(&[entry("new")])
         .expect("upgrade on mutation");
-    let current = fs::read_to_string(&path).expect("v2");
-    assert!(current.contains("qgt-store version=\"2\""));
+    let current = fs::read_to_string(&path).expect("v3");
+    assert!(current.contains("qgt-store version=\"3\""));
     fs::write(
         &path,
-        current.replace("qgt-store version=\"2\"", "qgt-store version=\"1\""),
+        current.replace("qgt-store version=\"3\"", "qgt-store version=\"1\""),
     )
     .expect("plant nonempty v1");
     assert!(store.signed_qsos().is_err());

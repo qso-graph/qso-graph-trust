@@ -4,8 +4,9 @@
 //! LoTW's own public certificates, the trust QG Trust pins. They are ARRL's public root and CA
 //! certificates, which ARRL sends to every LoTW user and TQSL installs; they hold public keys
 //! only, and can check a certificate ARRL issued but cannot issue or sign one. No private key is
-//! in QG Trust. A callsign certificate is trusted only if it
-//! chains to [`PUBLIC_ROOT_2015`] or [`PUBLIC_ROOT_2023`], never to a root a file brings with it.
+//! in QG Trust. A callsign certificate is trusted if it chains to [`PUBLIC_ROOT_2015`] or
+//! [`PUBLIC_ROOT_2023`], which are always trusted, or to a root the store has accepted under the
+//! rules in [`crate::certificate`].
 //!
 //! ARRL issues under two roots with the same name. [`PUBLIC_ROOT_2015`] and [`PUBLIC_CA_2019`] are ARRL's public
 //! certificates as TQSL 2.8.7 embeds them (`src/location.cpp`, `rootcertpem`
@@ -20,8 +21,10 @@
 //! at this crate's root, whose notice and disclaimer this file carries by reference.
 //! The 2015 root's and 2019 CA's dates have passed (on 2025-06-06 and 2023-06-19) and TQSL accepts an
 //! expired root or CA in a chain, so QG Trust does too; the callsign certificate itself must be in
-//! force when it signs. If ARRL issues under a root not here, importing such a certificate is refused
-//! naming the root, and the root is added here.
+//! force when it signs. If ARRL issues under a root not here, a `.tq6` or `.p12` bringing it is
+//! refused naming the root and its SHA-256 fingerprint until the operator confirms it, and a TQSL
+//! backup's is trusted and reported (`crate::store`'s accepted roots); the root is then added here
+//! in a release.
 
 /// ARRL's public "Logbook of the World Root CA" of 2015, to 2025-06-06; SHA-256 2E:35:F9:6E:F1:86:26:DC:90:1A:2C:F3:1B:FB:56:DA:FA:DC:70:30:D7:33:D9:B3:07:D0:DB:8E:87:C7:9A:0F.
 pub const PUBLIC_ROOT_2015: &str = "\

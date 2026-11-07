@@ -423,6 +423,7 @@ fn empty_store_roundtrips_and_missing_keys_cannot_export() {
             .restore_part(&bytes, &password, &trust())
             .expect("empty restore"),
         RestoreReport {
+            roots: Vec::new(),
             signed_qsos: 0,
             certificates: 0,
             keys: 0,

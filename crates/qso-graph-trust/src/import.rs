@@ -2,11 +2,19 @@
 // Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 
 //! Bounded certificate import. Use `Store::import_tq6` or `Store::import_pkcs12`; decrypted keys
-//! stay inside the library. File roots establish no trust. The whole file is validated before
-//! any store mutation. Errors contain categories and public certificate details only.
+//! stay inside the library. The whole file is validated before any store mutation. Errors contain
+//! categories and public certificate details only.
+//!
+//! A root the file brings is trusted only by [`crate::certificate`]'s rules: it is in the file,
+//! self-signed, a CA that may sign certificates with no critical extension unread, and a callsign
+//! certificate in the file chains to it through the file's CAs. For a `.tq6` or `.p12` the operator
+//! must also confirm it, by its SHA-256 fingerprint; until then the import is refused with
+//! [`ImportError::UntrustedRoot`] naming it. A confirmed root is stored with the certificate, in
+//! the same store write. LoTW's pinned roots, and those the store has accepted, need no confirming.
 
 use crate::certificate::{
-    Certificate, CertificateError, MAX_CERTIFICATE_LEN, Trust, verify_imported,
+    Certificate, CertificateError, FoundRoot, MAX_CERTIFICATE_LEN, Trust, file_roots,
+    parse_fingerprint, verify_imported,
 };
 use crate::gzip::{self, GzipError};
 use crate::signing::KeyError;
@@ -35,6 +43,22 @@ pub enum ImportError {
     Gzip(GzipError),
     /// A certificate is malformed or does not chain to caller trust.
     Certificate(CertificateError),
+    /// The file's certificates chain to a root it brings, which may be accepted but is not
+    /// trusted yet and was not confirmed. Nothing was imported; importing again confirming this
+    /// fingerprint trusts the root and imports the file.
+    UntrustedRoot {
+        /// The root's subject common name, as the root gives it.
+        subject: String,
+        /// The root's SHA-256 fingerprint, uppercase hexadecimal pairs separated by colons.
+        fingerprint: String,
+    },
+    /// The root fingerprint confirmed is not one this file's certificates chain to. Nothing was
+    /// imported.
+    RootMismatch {
+        /// The fingerprint given, as [`crate::certificate::fingerprint`] writes one; empty if what
+        /// was given is not a SHA-256 fingerprint.
+        given: String,
+    },
     /// The private key is invalid, not LoTW-shaped or does not match its certificate.
     Key(KeyError),
     /// Missing MAC, wrong password or modified authenticated content.
@@ -51,6 +75,21 @@ impl fmt::Display for ImportError {
             Self::Malformed => f.write_str("the certificate import is malformed"),
             Self::Gzip(e) => e.fmt(f),
             Self::Certificate(e) => e.fmt(f),
+            Self::UntrustedRoot {
+                subject,
+                fingerprint,
+            } => write!(
+                f,
+                "the certificates chain to a root that is not trusted yet: {subject}, SHA-256 \
+                 {fingerprint}"
+            ),
+            Self::RootMismatch { given } if given.is_empty() => {
+                f.write_str("the root to trust was not given as a SHA-256 fingerprint")
+            }
+            Self::RootMismatch { given } => write!(
+                f,
+                "the root to trust, SHA-256 {given}, is not one this file's certificates chain to"
+            ),
             Self::Key(e) => e.fmt(f),
             Self::Authentication => f.write_str("the PKCS#12 MAC could not be authenticated"),
             Self::UnsupportedProtection => {
@@ -90,28 +129,75 @@ pub struct ImportedCertificate {
     pub already_here: bool,
 }
 
+/// A file's certificates, checked, and the root the operator confirmed for them, if one was given.
+pub(crate) struct Checked {
+    pub certificates: Vec<Certificate>,
+    pub root: Option<FoundRoot>,
+}
+
+/// Checks every certificate of a `.tq6` or `.p12` against `trust`, with the root `accept_root`
+/// confirms, which must be one the file brings and its certificates chain to. When the file fails
+/// only for want of a root it brings that may be accepted and was not confirmed, that root is named.
 pub(crate) fn check_certificates(
     users: &[Vec<u8>],
     authorities: &[Vec<u8>],
     trust: &Trust,
-) -> Result<Vec<Certificate>, ImportError> {
+    accept_root: Option<&str>,
+) -> Result<Checked, ImportError> {
     if users.is_empty() {
         return Err(ImportError::Malformed);
     }
-    for authority in authorities {
-        verify_imported(authority, trust, authorities, true)?;
+    let found = file_roots(users, authorities, trust);
+    let root = match accept_root {
+        None => None,
+        Some(given) => {
+            let canonical = parse_fingerprint(given);
+            let Some(f) = found
+                .iter()
+                .find(|f| canonical.as_deref() == Some(f.fingerprint.as_str()))
+            else {
+                return Err(ImportError::RootMismatch {
+                    given: canonical.unwrap_or_default(),
+                });
+            };
+            Some(f.clone())
+        }
+    };
+    let under = |trust: &Trust| -> Result<Vec<Certificate>, ImportError> {
+        for authority in authorities {
+            verify_imported(authority, trust, authorities, true)?;
+        }
+        users
+            .iter()
+            .map(|der| {
+                let cert = Certificate::from_pem_or_der(der)?;
+                cert.verify(trust, authorities)?;
+                Ok(cert)
+            })
+            .collect()
+    };
+    match under(&trust.with_found(root.as_slice())) {
+        Ok(certificates) => Ok(Checked { certificates, root }),
+        Err(e) => {
+            // Refused only for want of a root the file brings: name it, so it can be confirmed.
+            if let Some(f) = found.iter().find(|f| Some(*f) != root.as_ref())
+                && under(&trust.with_found(&found)).is_ok()
+            {
+                return Err(ImportError::UntrustedRoot {
+                    subject: f.subject.clone(),
+                    fingerprint: f.fingerprint.clone(),
+                });
+            }
+            Err(e)
+        }
     }
-    users
-        .iter()
-        .map(|der| {
-            let cert = Certificate::from_pem_or_der(der)?;
-            cert.verify(trust, authorities)?;
-            Ok(cert)
-        })
-        .collect()
 }
 
-pub(crate) fn tq6(bytes: &[u8], trust: &Trust) -> Result<Vec<Certificate>, ImportError> {
+pub(crate) fn tq6(
+    bytes: &[u8],
+    trust: &Trust,
+    accept_root: Option<&str>,
+) -> Result<Checked, ImportError> {
     if bytes.len() > MAX_IMPORT_LEN {
         return Err(ImportError::Limit);
     }
@@ -155,7 +241,7 @@ pub(crate) fn tq6(bytes: &[u8], trust: &Trust) -> Result<Vec<Certificate>, Impor
             _ => return Err(ImportError::Malformed),
         }
     }
-    check_certificates(&users, &authorities, trust)
+    check_certificates(&users, &authorities, trust, accept_root)
 }
 
 pub(crate) fn is_authority(der: &[u8]) -> Result<bool, ImportError> {

@@ -116,3 +116,10 @@ with the imported key directly for every standard location.
 
 [caching]: https://learn.microsoft.com/en-us/windows/win32/fileio/file-caching
 [flush]: https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers
+
+Store version 3 (decision 0011's amendment) adds an optional `roots` section, omitted when empty:
+`<root source="tq6|p12|tbk|part" accepted="<Unix seconds>">` and `<ca …>` elements holding base64
+DER, at most `MAX_ROOTS` (16) of each. Each is read by the rules it was accepted by (a root must be
+a self-signed CA allowed to sign certificates, a CA must be a CA allowed to sign them), with
+canonical DER and no duplicates. Versions 1 and 2 remain readable and refuse the section; every
+write is version 3.

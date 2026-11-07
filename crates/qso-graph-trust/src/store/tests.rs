@@ -291,20 +291,20 @@ fn newer_versions_are_refused_on_open_and_before_any_mutation() {
     let folder = Folder::new();
     let keys = Arc::new(MemoryKeyStore::new());
     let (store, _) = open(&folder.0, &keys).expect("open");
-    let text = empty_xml().replacen("qgt-store version=\"2\"", "qgt-store version=\"3\"", 1);
+    let text = empty_xml().replacen("qgt-store version=\"3\"", "qgt-store version=\"4\"", 1);
     fs::write(folder.0.join("store.xml"), &text).expect("plant");
     assert!(matches!(
         open(&folder.0, &keys),
         Err(StoreError::NewerVersion {
-            found: 3,
-            supported: 2
+            found: 4,
+            supported: 3
         })
     ));
     assert!(matches!(
         store.add_location("home", &station()),
         Err(StoreError::NewerVersion {
-            found: 3,
-            supported: 2
+            found: 4,
+            supported: 3
         })
     ));
     assert!(matches!(
@@ -359,7 +359,7 @@ fn planted_bad_files_are_refused_and_not_rewritten() {
             "<signed-qsos version=\"2\"/>",
         ),
         valid.replace("<locations>", "<locations/><locations>"),
-        valid.replacen("qgt-store version=\"2\"", "qgt-store version=\"0\"", 1),
+        valid.replacen("qgt-store version=\"3\"", "qgt-store version=\"0\"", 1),
     ];
     for text in cases {
         fs::write(&path, &text).expect("plant");
@@ -945,4 +945,5 @@ mod requests;
 
 mod import;
 mod os;
+mod roots;
 mod signed;

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 
-//! `qg-trust`'s commands for people: `sign`, `upload`, `send`, `import`, `cert …` and `location …`,
+//! `qg-trust`'s commands for people: `sign`, `upload`, `send`, `import`, `cert …`, `location …` and
+//! `root …`,
 //! working on QG Trust's own store, with keys in the OS credential store. The same store
 //! QSO Graph Desktop uses, so a ham sees one set of certificates and locations in both.
 //!
@@ -13,21 +14,25 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
-use qso_graph_trust::certificate::Certificate;
+use qso_graph_trust::certificate::{Certificate, Trust};
 use qso_graph_trust::import::ImportError;
 use qso_graph_trust::options::{QthHandling, SigningOptions};
 use qso_graph_trust::qso::{Date, Qso};
 use qso_graph_trust::request::{Authorization, CallKind, CertificateRequest};
 use qso_graph_trust::signed_log::LogError;
 use qso_graph_trust::station::{self, StationLocation};
-use qso_graph_trust::store::{DuplicateChoice, Store, StoreError, StoredCertificate};
+use qso_graph_trust::store::{
+    DuplicateChoice, RootKind, RootSource, Store, StoreError, StoredCertificate, TrustedRoot,
+};
 use qso_graph_trust::upload::{UploadOutcome, UploadRequest};
 use qso_graph_trust::{VERSION, records, tbk};
 
 use crate::cli::{Action, Env, Exit, Tone, UploadFailure, Verify, read_file};
 
 /// The words that start a command. Anything else is the TQSL-style command line loggers use.
-pub(crate) const COMMANDS: &[&str] = &["sign", "upload", "send", "import", "cert", "location"];
+pub(crate) const COMMANDS: &[&str] = &[
+    "sign", "upload", "send", "import", "cert", "location", "root",
+];
 
 /// The largest log or signed log read.
 const MAX_LOG_LEN: usize = 64 * 1024 * 1024;
@@ -37,6 +42,7 @@ Examples:
   qg-trust import ~/Documents/tqsl-backup.tbk     your certificates, keys and locations, from TQSL
   qg-trust cert list                              what you have, and when each certificate expires
   qg-trust location list                          your station locations
+  qg-trust root list                              the LoTW roots your certificates chain to
   qg-trust sign log.adi -l Home                   sign log.adi into log.tq8
   qg-trust send log.adi -l Home                   sign it and upload it to LoTW
   qg-trust upload log.tq8                         upload a log already signed
@@ -80,7 +86,11 @@ enum Command {
     /// request (.tq6) or a certificate with its key (.p12).
     #[command(
         after_help = "Examples:\n  qg-trust import tqsl-backup.tbk\n  qg-trust import KI7MT.tq6\n  \
-        qg-trust import KI7MT.p12"
+        qg-trust import KI7MT.p12\n  qg-trust import KI7MT.tq6 --trust-root 1A:2B:3C:4D:...:9F\n\n\
+        When ARRL starts issuing under a new root, its .tq6 brings the root with it, and qg-trust \
+        names the root and its SHA-256 fingerprint before trusting it; run again with --trust-root \
+        and that fingerprint once you know it is ARRL's. A new root in your own TQSL backup is \
+        trusted, and named."
     )]
     Import(ImportArgs),
     /// Your callsign certificates: list, request, renew, delete.
@@ -89,6 +99,28 @@ enum Command {
     /// Your station locations: list, show, add, edit, delete.
     #[command(subcommand)]
     Location(Location),
+    /// The LoTW roots and CAs QG Trust trusts: list, remove.
+    #[command(subcommand)]
+    Root(Root),
+}
+
+#[derive(Debug, Subcommand)]
+enum Root {
+    /// List the roots and CAs your certificates must chain to: LoTW's, built in, and any you
+    /// accepted.
+    #[command(after_help = "Example:\n  qg-trust root list --json")]
+    List(ListArgs),
+    /// Stop trusting a root you accepted, by its SHA-256 fingerprint; LoTW's built-in ones stay.
+    #[command(after_help = "Example:\n  qg-trust root remove 1A:2B:3C:4D:...:9F\n\n\
+        qg-trust root list shows each root's fingerprint.")]
+    Remove(RootRemoveArgs),
+}
+
+#[derive(Debug, Args)]
+struct RootRemoveArgs {
+    /// The root's SHA-256 fingerprint, from qg-trust root list.
+    #[arg(value_name = "FINGERPRINT", value_parser = fingerprint)]
+    fingerprint: String,
 }
 
 #[derive(Debug, Args)]
@@ -166,6 +198,10 @@ struct ImportArgs {
     /// The files to import: .tbk, .tq6 or .p12.
     #[arg(value_name = "FILE", required = true)]
     files: Vec<PathBuf>,
+    /// Trust the root a .tq6 or .p12 brings, which qg-trust named when it refused it, by its
+    /// SHA-256 fingerprint.
+    #[arg(long, value_name = "FINGERPRINT", value_parser = fingerprint)]
+    trust_root: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -394,6 +430,11 @@ fn date(text: &str) -> Result<Date, &'static str> {
         .ok_or("a date must be YYYY-MM-DD or YYYYMMDD")
 }
 
+fn fingerprint(text: &str) -> Result<String, &'static str> {
+    qso_graph_trust::certificate::parse_fingerprint(text)
+        .ok_or("a SHA-256 fingerprint is 32 pairs of hexadecimal digits, as 0F:B9:62:...")
+}
+
 fn pair(text: &str) -> Result<(String, String), &'static str> {
     match pair_or_empty(text)? {
         (_, v) if v.is_empty() => Err("give a value after ="),
@@ -454,6 +495,7 @@ pub(crate) fn run(args: &[&str], env: &mut Env<'_>) -> u8 {
         Command::Import(a) => import(&a, env),
         Command::Cert(c) => cert(c, env),
         Command::Location(l) => location(l, env),
+        Command::Root(r) => root(r, env),
     };
     match code {
         Ok(code) | Err(code) => code as u8,
@@ -1109,19 +1151,35 @@ pub(crate) fn upload_bytes(bytes: &[u8], what: &str, env: &mut Env<'_>) -> Done 
 
 // ---- Importing ----
 
+fn kind_of(path: &Path) -> String {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default()
+}
+
 fn import(a: &ImportArgs, env: &mut Env<'_>) -> Done {
     let store = open(env)?;
+    // A confirmation that nothing here can use is refused, never ignored.
+    if a.trust_root.is_some()
+        && !a
+            .files
+            .iter()
+            .any(|p| matches!(kind_of(p).as_str(), "tq6" | "p12" | "pfx"))
+    {
+        env.message(
+            Tone::Error,
+            format_args!("--trust-root is for a .tq6 or .p12 that brings a root"),
+        );
+        return Err(Exit::CommandError);
+    }
+    let accept = a.trust_root.as_deref();
     let mut failed = false;
     for path in &a.files {
-        let kind = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(str::to_ascii_lowercase)
-            .unwrap_or_default();
-        let result = match kind.as_str() {
+        let result = match kind_of(path).as_str() {
             "tbk" => import_tbk(store, path, env),
-            "tq6" => import_tq6(store, path, env),
-            "p12" | "pfx" => import_p12(store, path, env),
+            "tq6" => import_tq6(store, path, accept, env),
+            "p12" | "pfx" => import_p12(store, path, accept, env),
             _ => {
                 env.message(
                     Tone::Error,
@@ -1142,10 +1200,42 @@ fn import(a: &ImportArgs, env: &mut Env<'_>) -> Done {
     }
 }
 
+/// The store's trust: the program's (LoTW's pinned roots) and the roots the store has accepted.
+fn store_trust(store: &Store, env: &mut Env<'_>) -> Result<Trust, Exit> {
+    store
+        .trust_with(env.trust)
+        .map_err(|e| store_error(env, "the trusted roots", &e))
+}
+
+/// One line for each root newly trusted.
+fn report_roots(roots: &[TrustedRoot], from: &str, env: &mut Env<'_>) {
+    for r in roots {
+        let _ = writeln!(
+            env.out,
+            "  trusted ARRL root {} SHA-256 {}, {from}",
+            r.subject, r.fingerprint
+        );
+    }
+}
+
+/// The message for a file whose certificates chain to a root it brings, not trusted yet.
+fn untrusted_root(path: &Path, subject: &str, fingerprint: &str, env: &mut Env<'_>) -> Exit {
+    env.message(
+        Tone::Error,
+        format_args!(
+            "{} brings an ARRL root QG Trust does not trust yet: {subject}, SHA-256 {fingerprint}. \
+             If it is ARRL's, run again with --trust-root {fingerprint}",
+            path.display()
+        ),
+    );
+    Exit::TqslError
+}
+
 fn import_tbk(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit> {
+    let trust = store_trust(store, env)?;
     let backup = read_file(path, tbk::MAX_TBK_LEN)
         .map_err(|e| e.to_string())
-        .and_then(|b| tbk::read(&b, env.trust).map_err(|e| e.to_string()));
+        .and_then(|b| tbk::read_trusting_roots(&b, &trust).map_err(|e| e.to_string()));
     let backup = match backup {
         Ok(b) => b,
         Err(e) => {
@@ -1153,6 +1243,11 @@ fn import_tbk(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit>
             return Err(Exit::InputError);
         }
     };
+    // Your own backup's roots are trusted, and named, before its certificates go in.
+    match store.trust_backup_roots(&backup, &trust) {
+        Ok(roots) => report_roots(&roots, "from the backup", env),
+        Err(e) => return Err(store_error(env, "the backup's roots", &e)),
+    }
     let mut failed = false;
     let (mut certs, mut locs) = (0usize, 0usize);
     for entry in &backup.certificates {
@@ -1293,7 +1388,50 @@ fn import_tbk(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit>
     if failed { Err(Exit::TqslError) } else { Ok(()) }
 }
 
-fn import_tq6(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit> {
+/// The root `accept` names, if this store did not trust it before: for saying it now does.
+fn newly_trusted(store: &Store, before: &[TrustedRoot], accept: Option<&str>) -> Vec<TrustedRoot> {
+    let Some(fp) = accept else {
+        return Vec::new();
+    };
+    if before.iter().any(|r| r.fingerprint == fp) {
+        return Vec::new();
+    }
+    store
+        .trusted_roots()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| r.fingerprint == fp && r.kind == RootKind::Root)
+        .collect()
+}
+
+/// What a refused import says about its root, when that is why.
+fn root_refusal(path: &Path, e: &ImportError, env: &mut Env<'_>) -> Option<Exit> {
+    match e {
+        ImportError::UntrustedRoot {
+            subject,
+            fingerprint,
+        } => Some(untrusted_root(path, subject, fingerprint, env)),
+        ImportError::RootMismatch { .. } => {
+            env.message(
+                Tone::Error,
+                format_args!(
+                    "{}: {e}; nothing was imported. Run it again without --trust-root to see the \
+                     root it brings",
+                    path.display()
+                ),
+            );
+            Some(Exit::TqslError)
+        }
+        _ => None,
+    }
+}
+
+fn import_tq6(
+    store: &Store,
+    path: &Path,
+    accept: Option<&str>,
+    env: &mut Env<'_>,
+) -> Result<(), Exit> {
     let bytes = match read_file(path, qso_graph_trust::import::MAX_IMPORT_LEN) {
         Ok(b) => b,
         Err(e) => {
@@ -1301,8 +1439,18 @@ fn import_tq6(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit>
             return Err(Exit::InputError);
         }
     };
-    match store.import_tq6(&bytes, env.trust) {
+    let trust = store_trust(store, env)?;
+    let before = store
+        .trusted_roots()
+        .map_err(|e| store_error(env, "the trusted roots", &e))?;
+    match store.import_tq6(&bytes, &trust, accept) {
         Ok(imported) => {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+            report_roots(
+                &newly_trusted(store, &before, accept),
+                &format!("from {}", name.unwrap_or_default()),
+                env,
+            );
             for c in &imported {
                 let _ = writeln!(
                     env.out,
@@ -1333,13 +1481,21 @@ fn import_tq6(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit>
             Ok(())
         }
         Err(e) => {
+            if let Some(code) = root_refusal(path, &e, env) {
+                return Err(code);
+            }
             env.message(Tone::Error, format_args!("{}: {e}", path.display()));
             Err(Exit::TqslError)
         }
     }
 }
 
-fn import_p12(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit> {
+fn import_p12(
+    store: &Store,
+    path: &Path,
+    accept: Option<&str>,
+    env: &mut Env<'_>,
+) -> Result<(), Exit> {
     let bytes = match read_file(path, qso_graph_trust::import::MAX_IMPORT_LEN) {
         Ok(b) => b,
         Err(e) => {
@@ -1361,8 +1517,17 @@ fn import_p12(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit>
             return Err(Exit::BadPassphrase);
         }
     };
-    match store.import_pkcs12(&bytes, &password, env.trust) {
+    let trust = store_trust(store, env)?;
+    let before = store
+        .trusted_roots()
+        .map_err(|e| store_error(env, "the trusted roots", &e))?;
+    match store.import_pkcs12(&bytes, &password, &trust, accept) {
         Ok(c) => {
+            report_roots(
+                &newly_trusted(store, &before, accept),
+                &format!("from {name}"),
+                env,
+            );
             let _ = writeln!(
                 env.out,
                 "Imported {}'s certificate and key ({}).",
@@ -1383,10 +1548,132 @@ fn import_p12(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit>
             Ok(())
         }
         Err(e) => {
+            if let Some(code) = root_refusal(path, &e, env) {
+                return Err(code);
+            }
             env.message(Tone::Error, format_args!("{}: {e}", path.display()));
             Err(Exit::TqslError)
         }
     }
+}
+
+// ---- Trusted roots ----
+
+fn root(r: Root, env: &mut Env<'_>) -> Done {
+    let store = open(env)?;
+    match r {
+        Root::List(a) => root_list(store, a.json, env),
+        Root::Remove(a) => match store.remove_root(&a.fingerprint) {
+            Ok(removed) => {
+                let _ = writeln!(
+                    env.out,
+                    "No longer trusting {} SHA-256 {}.",
+                    removed.subject, removed.fingerprint
+                );
+                Ok(Exit::Success)
+            }
+            Err(StoreError::NotFound) => {
+                env.message(
+                    Tone::Error,
+                    format_args!(
+                        "no root you accepted has the fingerprint {}; qg-trust root list shows them",
+                        a.fingerprint
+                    ),
+                );
+                Err(Exit::CommandError)
+            }
+            Err(StoreError::BuiltInRoot) => {
+                env.message(
+                    Tone::Error,
+                    format_args!(
+                        "{} is one of LoTW's roots or CAs built into QG Trust: it is always \
+                         trusted and cannot be removed",
+                        a.fingerprint
+                    ),
+                );
+                Err(Exit::CommandError)
+            }
+            Err(e) => Err(store_error(env, "the trusted roots", &e)),
+        },
+    }
+}
+
+fn root_list(store: &Store, json: bool, env: &mut Env<'_>) -> Done {
+    let roots = store
+        .trusted_roots()
+        .map_err(|e| store_error(env, "the trusted roots", &e))?;
+    let kind = |r: &TrustedRoot| match r.kind {
+        RootKind::Root => "root",
+        RootKind::Ca => "ca",
+    };
+    let state = |r: &TrustedRoot| {
+        if env.now < r.not_before {
+            "not yet in force"
+        } else if env.now > r.not_after {
+            "expired"
+        } else {
+            "in force"
+        }
+    };
+    if json {
+        let mut s = String::from("{\"roots\":[");
+        for (i, r) in roots.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            let accepted = r.accepted_at.map_or("null".to_string(), |t| {
+                format!(
+                    "\"{}\"",
+                    day(UNIX_EPOCH + std::time::Duration::from_secs(t))
+                )
+            });
+            let _ = write!(
+                s,
+                "{{\"kind\":\"{}\",\"subject\":{},\"serial\":\"{}\",\"not_before\":\"{}\",\
+                 \"not_after\":\"{}\",\"in_force\":{},\"sha256\":\"{}\",\"source\":\"{}\",\
+                 \"accepted\":{accepted}}}",
+                kind(r),
+                json_str(&r.subject),
+                r.serial,
+                day(r.not_before),
+                day(r.not_after),
+                state(r) == "in force",
+                r.fingerprint,
+                r.source.name()
+            );
+        }
+        s.push_str("]}");
+        let _ = writeln!(env.out, "{s}");
+        return Ok(Exit::Success);
+    }
+    for r in &roots {
+        let from = match r.source {
+            RootSource::BuiltIn => "built in",
+            RootSource::Tq6 => "from a .tq6",
+            RootSource::P12 => "from a .p12",
+            RootSource::Tbk => "from a TQSL backup",
+            RootSource::Part => "from a QG Trust export",
+        };
+        let source = match r.accepted_at {
+            Some(t) => format!(
+                "{from}, {}",
+                day(UNIX_EPOCH + std::time::Duration::from_secs(t))
+            ),
+            None => from.to_string(),
+        };
+        let _ = writeln!(
+            env.out,
+            "{:<4}  {:<35} {} to {}  {}  {source}\n      SHA-256 {}   serial {}",
+            kind(r).to_ascii_uppercase(),
+            r.subject,
+            day(r.not_before),
+            day(r.not_after),
+            state(r),
+            r.fingerprint,
+            r.serial
+        );
+    }
+    Ok(Exit::Success)
 }
 
 // ---- Certificates ----
@@ -1832,10 +2119,17 @@ fn location(l: Location, env: &mut Env<'_>) -> Done {
                      qg-trust location add makes one."
                 );
             } else {
+                // As wide as the longest name, so the columns line up whatever the names.
+                let width = locations
+                    .iter()
+                    .map(|l| l.name.chars().count())
+                    .max()
+                    .unwrap_or(0)
+                    .max(20);
                 for l in &locations {
                     let _ = writeln!(
                         env.out,
-                        "{:<20} {:<10} {}{}",
+                        "{:<width$} {:<10} {}{}",
                         l.name,
                         l.station.call(),
                         entity(l.station.dxcc()),

@@ -593,6 +593,25 @@ fn station_locations_are_added_shown_changed_and_deleted() {
 }
 
 #[test]
+fn the_location_list_lines_up_whatever_the_names() {
+    let ham = Ham::new();
+    for name in ["Home", "N0CALL-POTA-US-12223-Idaho"] {
+        let ran = ham.run(&[
+            "location", "add", name, "--call", "N0CALL", "--dxcc", "291", "--grid", "DN13",
+        ]);
+        assert_eq!(ran.code, 0, "{}", ran.err);
+    }
+    let list = ham.run(&["location", "list"]);
+    let starts: Vec<usize> = list
+        .out
+        .lines()
+        .map(|l| l.find(" N0CALL ").expect("the call column"))
+        .collect();
+    assert_eq!(starts.len(), 2, "{}", list.out);
+    assert_eq!(starts[0], starts[1], "{}", list.out);
+}
+
+#[test]
 fn every_command_has_help_with_an_example() {
     let ham = Ham::new();
     for command in [
@@ -1286,4 +1305,212 @@ fn a_qso_outside_the_certificate_cannot_make_a_later_one_fail() {
         ran.out,
         ran.err
     );
+}
+
+/// A case from tests/corpus/roots (scripts/make-root-cases.sh): test roots nothing trusts.
+fn root_case(name: &str) -> String {
+    let file = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/corpus/roots")
+        .join(format!("{name}.pem"));
+    String::from_utf8(std::fs::read(file).expect("a root case"))
+        .expect("PEM")
+        .trim()
+        .to_string()
+}
+
+/// The new test root's and the unused one's SHA-256 fingerprints, as `openssl x509 -fingerprint
+/// -sha256` gives them: an oracle beside the library's own.
+const NEW_ROOT: &str = "C6:9E:99:A0:0D:AB:FF:9C:FF:DA:7F:47:26:84:F0:C8:5C:6D:11:C7:67:A3:E9:72:A9:ED:7A:97:1E:8E:58:29";
+const OTHER_ROOT: &str = "10:BB:3E:DE:62:77:1E:4C:4E:2A:53:E9:CA:2D:C7:21:7F:3E:26:DA:56:1B:FD:6C:92:96:F6:87:3D:D9:6D:26";
+const ROOT_2023: &str = "0F:B9:62:75:EA:CA:03:EF:29:FF:50:9D:9E:54:5B:1F:38:61:F4:46:8F:06:87:BE:CC:59:3E:D0:06:04:B2:E6";
+
+/// A .tq6 for `user` under the new test root, written to a scratch folder.
+fn new_root_tq6(user: &str) -> PathBuf {
+    let xml = format!(
+        "<?xml version=\"1.0\"?>\n<tqsldata><tqslcerts>\n<rootcert>\n{}\n</rootcert>\n\
+         <cacert>\n{}\n</cacert>\n<usercert>\n{}\n</usercert>\n</tqslcerts></tqsldata>\n",
+        root_case("new-root"),
+        root_case("new-ca"),
+        root_case(user)
+    );
+    let file = scratch().join(format!("{user}.tq6"));
+    std::fs::write(&file, xml).expect("write");
+    file
+}
+
+#[test]
+fn a_new_arrl_root_is_named_and_trusted_only_with_trust_root() {
+    let ham = Ham::new();
+    let tq6 = new_root_tq6("user-a");
+    let ran = ham.run(&["import", path(&tq6)]);
+    assert_eq!(ran.code, 4, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.err
+            .contains("brings an ARRL root QG Trust does not trust yet: QGT New Test Root"),
+        "{}",
+        ran.err
+    );
+    assert!(
+        ran.err.contains(&format!(
+            "SHA-256 {NEW_ROOT}. If it is ARRL's, run again with --trust-root {NEW_ROOT}"
+        )),
+        "{}",
+        ran.err
+    );
+    assert!(ham.store.certificates().expect("list").is_empty());
+    // Another root's fingerprint is refused, never ignored.
+    let ran = ham.run(&["import", path(&tq6), "--trust-root", OTHER_ROOT]);
+    assert_eq!(ran.code, 4, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.err
+            .contains("is not one this file's certificates chain to; nothing was imported"),
+        "{}",
+        ran.err
+    );
+    assert!(ham.store.certificates().expect("list").is_empty());
+    // What is not a fingerprint at all is a usage error.
+    let ran = ham.run(&["import", path(&tq6), "--trust-root", "0F:B9"]);
+    assert_eq!(ran.code, 10, "{}{}", ran.out, ran.err);
+    // A backup alone has no use for it.
+    let ran = ham.run(&[
+        "import",
+        path(&set("standard.tbk")),
+        "--trust-root",
+        NEW_ROOT,
+    ]);
+    assert_eq!(ran.code, 10, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.err.contains("--trust-root is for a .tq6 or .p12"),
+        "{}",
+        ran.err
+    );
+    // Confirmed: trusted and said so, and the certificate is in.
+    let ran = ham.run(&["import", path(&tq6), "--trust-root", NEW_ROOT]);
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.out.contains(&format!(
+            "trusted ARRL root QGT New Test Root SHA-256 {NEW_ROOT}, from user-a.tq6"
+        )),
+        "{}",
+        ran.out
+    );
+    assert_eq!(ham.store.certificates().expect("list").len(), 1);
+    // A later certificate under it needs no confirming, and nothing new is trusted.
+    let ran = ham.run(&["import", path(&new_root_tq6("user-b"))]);
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    assert!(!ran.out.contains("trusted ARRL root"), "{}", ran.out);
+    assert_eq!(ham.store.certificates().expect("list").len(), 2);
+}
+
+#[test]
+fn root_list_shows_the_built_in_roots_and_those_accepted_and_root_remove_drops_one() {
+    let ham = Ham::new();
+    let list = ham.run(&["root", "list"]);
+    assert_eq!(list.code, 0, "{}", list.err);
+    let lines: Vec<&str> = list.out.lines().collect();
+    assert_eq!(lines.len(), 8, "{}", list.out);
+    assert!(
+        lines[2].starts_with("ROOT  Logbook of the World Root CA        2023-06-28 to 2033-06-25"),
+        "{}",
+        list.out
+    );
+    assert!(lines[2].ends_with("built in"), "{}", list.out);
+    assert_eq!(
+        lines[3],
+        format!("      SHA-256 {ROOT_2023}   serial B6DC0911164D9C51")
+    );
+    assert!(
+        lines[6].starts_with("CA    Logbook of the World Production CA"),
+        "{}",
+        list.out
+    );
+    // A built-in one cannot be removed.
+    let ran = ham.run(&["root", "remove", ROOT_2023]);
+    assert_eq!(ran.code, 10, "{}{}", ran.out, ran.err);
+    assert!(ran.err.contains("built into QG Trust"), "{}", ran.err);
+    // One accepted is listed with where it came from, then removed.
+    let tq6 = new_root_tq6("user-a");
+    assert_eq!(
+        ham.run(&["import", path(&tq6), "--trust-root", NEW_ROOT])
+            .code,
+        0
+    );
+    let list = ham.run(&["root", "list"]);
+    assert!(list.out.contains("ROOT  QGT New Test Root"), "{}", list.out);
+    assert!(list.out.contains("CA    QGT New Test CA"), "{}", list.out);
+    assert!(list.out.contains("from a .tq6, "), "{}", list.out);
+    assert!(
+        list.out.contains(&format!("SHA-256 {NEW_ROOT}")),
+        "{}",
+        list.out
+    );
+    let json = ham.run(&["root", "list", "--json"]);
+    assert_eq!(json.code, 0, "{}", json.err);
+    assert!(
+        json.out.starts_with("{\"roots\":[{\"kind\":\"root\""),
+        "{}",
+        json.out
+    );
+    assert!(
+        json.out
+            .contains("\"subject\":\"QGT New Test Root\",\"serial\":"),
+        "{}",
+        json.out
+    );
+    assert!(
+        json.out.contains(&format!(
+            "\"sha256\":\"{NEW_ROOT}\",\"source\":\"tq6\",\"accepted\":\""
+        )),
+        "{}",
+        json.out
+    );
+    assert!(
+        json.out
+            .contains("\"source\":\"built in\",\"accepted\":null"),
+        "{}",
+        json.out
+    );
+    // Typed without colons, in lowercase.
+    let typed = NEW_ROOT.replace(':', "").to_ascii_lowercase();
+    let ran = ham.run(&["root", "remove", &typed]);
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.out.contains(&format!(
+            "No longer trusting QGT New Test Root SHA-256 {NEW_ROOT}."
+        )),
+        "{}",
+        ran.out
+    );
+    assert_eq!(ham.run(&["root", "list"]).out.lines().count(), 8);
+    let ran = ham.run(&["root", "remove", NEW_ROOT]);
+    assert_eq!(ran.code, 10, "{}{}", ran.out, ran.err);
+    assert!(ran.err.contains("no root you accepted"), "{}", ran.err);
+}
+
+#[test]
+fn a_new_root_in_your_own_backup_is_trusted_and_named() {
+    let ham = Ham::new();
+    let xml = format!(
+        "<?xml version=\"1.0\"?>\n<TQSL_Configuration><Certificates><RootCert>{}</RootCert>\
+         <CACert>{}</CACert><UserCert CallSign=\"QG0TEST\" dxcc=\"291\" serial=\"1\">\
+         <SignedCert>{}</SignedCert></UserCert></Certificates></TQSL_Configuration>",
+        root_case("new-root"),
+        root_case("new-ca"),
+        root_case("user-a")
+    );
+    let tbk = scratch().join("own.tbk");
+    std::fs::write(&tbk, xml).expect("write");
+    let ran = ham.run(&["import", path(&tbk)]);
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.out.contains(&format!(
+            "trusted ARRL root QGT New Test Root SHA-256 {NEW_ROOT}, from the backup"
+        )),
+        "{}",
+        ran.out
+    );
+    assert!(ran.out.contains("Imported 1 certificate"), "{}", ran.out);
+    // Imported again: nothing new to trust.
+    let ran = ham.run(&["import", path(&tbk)]);
+    assert!(!ran.out.contains("trusted ARRL root"), "{}", ran.out);
 }
