@@ -23,7 +23,7 @@ name = "qgt-custody-unwiped"
 path = "src/bin/qgt-custody-unwiped.rs"
 
 [dependencies]
-qso-graph-trust = { path = "../qso-graph-trust", version = "=0.1.0" }
+qso-graph-trust = { path = "../qso-graph-trust", version = "=0.1.1" }
 zeroizing-alloc = { version = "=0.1.1", default-features = false }
 zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
 

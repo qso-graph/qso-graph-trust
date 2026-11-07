@@ -34,7 +34,8 @@ its own.
   receives; [tqsllib's API documentation](https://www.rickmurphy.net/lotw/doxygen/); and
   [TQSL's change log](https://lotw.arrl.org/lotw-help/tqslchangelog/). QSO Graph Trust carries two things
   of TQSL's, both ARRL's, under ARRL's terms: the TQSL configuration (`config.xml`), from which its LoTW
-  tables are generated, and ARRL's root and CA certificates as TQSL embeds them. TQSL 2.8.7, built from
+  tables are generated, and ARRL's root and CA certificates (the 2015 pair as TQSL embeds them, the 2023 pair as ARRL
+  issues them in a `.tq6`). TQSL 2.8.7, built from
   its own source, is the reference its signed records and signatures are tested against, byte for byte.
 - **Other open-source projects:** rfrht's [qso-web](https://github.com/rfrht/qso-web), credited below,
   and a survey of 126 ham-radio Rust crates on crates.io, which found no other LoTW signing crate.

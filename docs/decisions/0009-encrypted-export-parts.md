@@ -56,7 +56,7 @@ keys. Restore decrypts and authenticates, parses through the existing strict sto
 `StationLocation::new`), verifies every certificate against caller-supplied `Trust`, and checks every
 private key against its certificate or pending request's recorded SPKI, before acquiring the
 destination lock or changing anything.
-Production callers use `Trust::lotw()`, which pins ARRL's root and production CA; the part never
+Production callers use `Trust::lotw()`, which pins ARRL's roots and production CAs; the part never
 supplies trust anchors. Custom test trust must include the issuers needed by its certificates.
 
 Under the lock, restore reloads the destination, generates fresh credential names, stages the new

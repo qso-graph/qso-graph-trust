@@ -235,12 +235,16 @@ impl fmt::Debug for Trust {
 }
 
 impl Trust {
-    /// LoTW's: ARRL's root, and its production CA, as TQSL embeds them, pinned in this library.
+    /// LoTW's: ARRL's two public roots and their production CAs, pinned in this library
+    /// ([`crate::lotw::arrl`]).
     pub fn lotw() -> Trust {
+        use crate::lotw::arrl::{
+            PUBLIC_CA_2019, PUBLIC_CA_2023, PUBLIC_ROOT_2015, PUBLIC_ROOT_2023,
+        };
         let pem = |p: &str| X509::from_pem(p.as_bytes()).expect("LoTW's pinned certificates parse");
         Trust {
-            roots: vec![pem(crate::lotw::arrl::ROOT)],
-            authorities: vec![pem(crate::lotw::arrl::PRODUCTION_CA)],
+            roots: vec![pem(PUBLIC_ROOT_2015), pem(PUBLIC_ROOT_2023)],
+            authorities: vec![pem(PUBLIC_CA_2019), pem(PUBLIC_CA_2023)],
         }
     }
 
@@ -485,14 +489,46 @@ mod tests {
     }
 
     #[test]
-    fn lotws_pinned_ca_is_signed_by_its_pinned_root() {
-        // A real chain: ARRL's 4096-bit root's SHA-512 signature over its production CA.
+    fn lotws_pinned_cas_are_each_signed_by_their_own_pinned_root() {
+        // Real chains: each of ARRL's 4096-bit roots' signatures over its own production CA.
         let trust = Trust::lotw();
-        assert!(signed_by(&trust.authorities[0], &trust.roots[0]));
-        assert!(is_ca(&trust.authorities[0]) && is_ca(&trust.roots[0]));
-        // And it passes the limits a CA must keep, as a chain through it would need.
-        let ca = &trust.authorities[0];
-        assert!(allows(ca, KeyUsages::KeyCertSign) && criticals_understood(ca));
+        assert_eq!((trust.roots.len(), trust.authorities.len()), (2, 2));
+        for (ca, root) in trust.authorities.iter().zip(&trust.roots) {
+            assert!(signed_by(ca, root));
+            assert!(is_ca(ca) && is_ca(root));
+            // And it passes the limits a CA must keep, as a chain through it would need.
+            assert!(allows(ca, KeyUsages::KeyCertSign) && criticals_understood(ca));
+        }
+        // The two roots share a name, and neither signed the other's CA: each is needed.
+        assert_eq!(
+            trust.roots[0].tbs_certificate.subject.to_string(),
+            trust.roots[1].tbs_certificate.subject.to_string()
+        );
+        assert!(!signed_by(&trust.authorities[1], &trust.roots[0]));
+        assert!(!signed_by(&trust.authorities[0], &trust.roots[1]));
+    }
+
+    #[test]
+    fn the_2023_production_ca_is_trusted_and_was_refused_under_the_2015_root_alone() {
+        // What 0.1.0 did: a callsign certificate issued since mid-2023 was refused, naming the root.
+        let ca = der_of(crate::lotw::arrl::PUBLIC_CA_2023.as_bytes());
+        let only_2015 = Trust {
+            roots: vec![
+                X509::from_pem(crate::lotw::arrl::PUBLIC_ROOT_2015.as_bytes()).expect("root"),
+            ],
+            authorities: Vec::new(),
+        };
+        assert!(matches!(
+            verify_imported(&ca, &only_2015, &[], true),
+            Err(CertificateError::Untrusted { .. })
+        ));
+        assert_eq!(verify_imported(&ca, &Trust::lotw(), &[], true), Ok(()));
+        // A file bringing the 2023 root does not make it trusted: only the pinned copy does.
+        let root = der_of(crate::lotw::arrl::PUBLIC_ROOT_2023.as_bytes());
+        assert!(matches!(
+            verify_imported(&ca, &only_2015, &[root], true),
+            Err(CertificateError::Untrusted { .. })
+        ));
     }
 
     #[test]

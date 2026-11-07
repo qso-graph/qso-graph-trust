@@ -18,6 +18,7 @@ fn main() -> ExitCode {
     let root_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     match (args.first().map(String::as_str), args.len()) {
         (Some("policy"), 1) => {}
+        (Some("consumer"), 2) => return consumer(&root_dir, &PathBuf::from(&args[1])),
         (Some("canary"), 1) => {
             return match xtask::canary(&root_dir, &[]) {
                 Ok(()) => {
@@ -31,7 +32,9 @@ fn main() -> ExitCode {
             };
         }
         _ => {
-            eprintln!("usage: cargo xtask policy | cargo xtask canary");
+            eprintln!(
+                "usage: cargo xtask policy | cargo xtask canary | cargo xtask consumer <Cargo.toml>"
+            );
             return ExitCode::from(2);
         }
     }
@@ -78,11 +81,78 @@ fn main() -> ExitCode {
     }
 }
 
+/// `cargo xtask consumer <Cargo.toml>`: run from a checkout of one of QG Trust's releases, the
+/// library's checks against another program's build of it (QSO Graph Desktop's `QGD-LTW-0001`):
+/// that release, the versions it was reviewed with, no C but AWS-LC's, and every program wiping
+/// what it frees.
+fn consumer(root_dir: &std::path::Path, manifest: &std::path::Path) -> ExitCode {
+    let commit = match std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(root_dir)
+        .output()
+    {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        _ => {
+            eprintln!("consumer: cannot read this checkout's commit");
+            return ExitCode::FAILURE;
+        }
+    };
+    let reviewed = match xtask::locked(&root_dir.join("Cargo.lock")) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("consumer: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let meta = match xtask::metadata(manifest) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("consumer: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    for added in xtask::consumer_added(&meta, &reviewed) {
+        println!(
+            "consumer: {added}: not in QG Trust's lock file, brought by this build's features"
+        );
+    }
+    let mut failed = false;
+    for (check, problems) in [
+        (
+            "this release of QG Trust",
+            xtask::consumer_source(&meta, &commit),
+        ),
+        (
+            "the versions QG Trust was reviewed with",
+            on_shipping_targets(manifest, |meta| xtask::consumer_versions(meta, &reviewed)),
+        ),
+        (
+            "no C in the library",
+            on_shipping_targets(manifest, xtask::consumer_no_c),
+        ),
+        ("the wiping allocator", xtask::wiping_allocator(&meta)),
+    ] {
+        if problems.is_empty() {
+            println!("consumer: {check}: pass");
+        } else {
+            failed = true;
+            for p in problems {
+                eprintln!("consumer: {check}: FAIL: {p}");
+            }
+        }
+    }
+    if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
 /// A dependency-graph check once per shipping platform, on its own tree with
 /// every feature enabled.
 fn on_shipping_targets(
     root: &std::path::Path,
-    check: fn(&serde_json::Value) -> Vec<String>,
+    check: impl Fn(&serde_json::Value) -> Vec<String>,
 ) -> Vec<String> {
     let mut problems = Vec::new();
     for target in xtask::SHIPPING_TARGETS {
