@@ -2,14 +2,20 @@
 // Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 
 //! LoTW's own certificates, the trust QG Trust pins: a callsign certificate is trusted only if it
-//! chains to [`ROOT`], never to a root a file brings with it.
+//! chains to [`ROOT`] or [`ROOT_2023`], never to a root a file brings with it.
 //!
-//! Both are ARRL's public certificates as TQSL 2.8.7 embeds them (`src/location.cpp`, `rootcertpem`
+//! ARRL issues under two roots with the same name. [`ROOT`] and [`PRODUCTION_CA`] are ARRL's public
+//! certificates as TQSL 2.8.7 embeds them (`src/location.cpp`, `rootcertpem`
 //! and `cacertpem`, at commit d9e01726e54887f8241e86e789c5b91f02043ebd), the same anchor TQSL loads.
+//! [`ROOT_2023`] and [`PRODUCTION_CA_2023`] are the root and CA every callsign certificate issued
+//! since mid-2023 chains to. TQSL embeds neither, even at its head (8ae195c, 2026-10-29): it takes
+//! them from the `.tq6` ARRL issues with a certificate. These are from ARRL's `.tq6` of 2025-09-26
+//! for KI7MT, byte for byte the same as the copies in his TQSL backup of 2026-11-01. Neither is
+//! signed by the older root, and the 2023 CA by the 2023 root only.
 //! TrustedQSL is Copyright (C) 2001-2015 American Radio Relay League, Inc., portions (C) 2003-2026 The
 //! TrustedQSL Developers; what is copied here is redistributed under ARRL's terms in LICENSE-ARRL.md
 //! at this crate's root, whose notice and disclaimer this file carries by reference.
-//! Their dates have passed (the root's on 2025-06-06, the CA's on 2023-06-19) and TQSL accepts an
+//! The 2015 root's and 2019 CA's dates have passed (on 2025-06-06 and 2023-06-19) and TQSL accepts an
 //! expired root or CA in a chain, so QG Trust does too; the callsign certificate itself must be in
 //! force when it signs. If ARRL issues under a root not here, importing such a certificate is refused
 //! naming the root, and the root is added here.
@@ -57,6 +63,95 @@ hYyOMmcrBVAtTkq6DXugr0e2VBhs2wHlX3hVhlwNIGBA3Xrlji1Hx3gQjS0JZa1D\n\
 ZCnX6/oGCbS6pio5/TyI0b1vArTMY1Sk/LFF7KjgfXGcxGO0i55HBqQhM3O68q/c\n\
 vbT46W7TQ5zZUgFBeMltaxc2z3UsTiM02nF4K4hmsfD8Equh2fA5msc+p5PuaOJR\n\
 4vVAjEWroIfchuU2z2ynrs3ZxrkZjJ+x72jD\n\
+-----END CERTIFICATE-----\n\
+";
+
+/// "Logbook of the World Root CA" of 2023, American Radio Relay League, serial B6:DC:09:11:16:4D:9C:51, to
+/// 2033-06-25; SHA-256 0F:B9:62:75:EA:CA:03:EF:29:FF:50:9D:9E:54:5B:1F:38:61:F4:46:8F:06:87:BE:CC:59:3E:D0:06:04:B2:E6.
+pub const ROOT_2023: &str = "\
+-----BEGIN CERTIFICATE-----\n\
+MIIHZzCCBU+gAwIBAgIJALbcCREWTZxRMA0GCSqGSIb3DQEBDQUAMIHSMQswCQYD\n\
+VQQGEwJVUzELMAkGA1UECBMCQ1QxEjAQBgNVBAcTCU5ld2luZ3RvbjEkMCIGA1UE\n\
+ChMbQW1lcmljYW4gUmFkaW8gUmVsYXkgTGVhZ3VlMR0wGwYDVQQLExRMb2dib29r\n\
+IG9mIHRoZSBXb3JsZDElMCMGA1UEAxMcTG9nYm9vayBvZiB0aGUgV29ybGQgUm9v\n\
+dCBDQTEYMBYGCgmSJomT8ixkARkWCGFycmwub3JnMRwwGgYJKoZIhvcNAQkBFg1s\n\
+b3R3QGFycmwub3JnMB4XDTIzMDYyODEyMjgzNVoXDTMzMDYyNTEyMjgzNVowgdIx\n\
+CzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDVDESMBAGA1UEBxMJTmV3aW5ndG9uMSQw\n\
+IgYDVQQKExtBbWVyaWNhbiBSYWRpbyBSZWxheSBMZWFndWUxHTAbBgNVBAsTFExv\n\
+Z2Jvb2sgb2YgdGhlIFdvcmxkMSUwIwYDVQQDExxMb2dib29rIG9mIHRoZSBXb3Js\n\
+ZCBSb290IENBMRgwFgYKCZImiZPyLGQBGRYIYXJybC5vcmcxHDAaBgkqhkiG9w0B\n\
+CQEWDWxvdHdAYXJybC5vcmcwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoIC\n\
+AQDu5tx6+GtZiaMAZCGTeNgZ62kZ4Hvs3QYUMJw4UPo9buQ+Ga/OAQ0/DWMJl6Lc\n\
+zcfGm0OFzQAJTGezCaW7GRsmqgE9yrDUCcF0fgOuIrV6GnKppcHyDGOSjaORPv1C\n\
+B2Qwv3TmAHhe3lqxgA7hnWE+CivVumL7/kVEnlGQpWgkgVQ831qiozRzzkgNb9jY\n\
+KF2qmleGjC7iu+xneNc9iy3p0I/5+SAkxzuScR/Egy8UR3zz0T3blDIySvmv2cUM\n\
+0WXGUQAYEGULr59cQd1/q0Ommtiz2S4XYWEBWaD6jK4JTy5fbloIClJWnZ10/kQu\n\
+y167PcUBVkD8I6BVGPXK66EO2MvpgScM3e3qNYQgCch2rVaolHzmCjdhB1H2bVKU\n\
+aYevuGiXyuV8XG3yotSOfRVrUS+8RnJ1yHpmzxVl/ZOvG/CjhpQNptVVqggUw5ht\n\
+/4wk8ms9pw6RywOc8vVsOMIgaO3lyiZHBrtYCYfDEfWv+yuNQnaPu1fwWLKqHZoz\n\
+wqN1P7PnDSszbvRTYWglDQjK4He7+xVP9hWTupuYGK5/wMZiP+EYb9DBSVVuXPUF\n\
+iS3RyG9Ch9c/aqKUUYJ0UDofqlFxnzTdl9L1T1IuqDD1MIPsLRhZvQgzLjCseVOf\n\
+/K95s2d7DEjNRdVLL5pq1A7tdSWo2eqwgUebbv0/GR6PewIDAQABo4IBPDCCATgw\n\
+HQYDVR0OBBYEFEt2H+7kQF6SuCaguR8mJxeLt2EgMIIBBwYDVR0jBIH/MIH8gBRL\n\
+dh/u5EBekrgmoLkfJicXi7dhIKGB2KSB1TCB0jELMAkGA1UEBhMCVVMxCzAJBgNV\n\
+BAgTAkNUMRIwEAYDVQQHEwlOZXdpbmd0b24xJDAiBgNVBAoTG0FtZXJpY2FuIFJh\n\
+ZGlvIFJlbGF5IExlYWd1ZTEdMBsGA1UECxMUTG9nYm9vayBvZiB0aGUgV29ybGQx\n\
+JTAjBgNVBAMTHExvZ2Jvb2sgb2YgdGhlIFdvcmxkIFJvb3QgQ0ExGDAWBgoJkiaJ\n\
+k/IsZAEZFghhcnJsLm9yZzEcMBoGCSqGSIb3DQEJARYNbG90d0BhcnJsLm9yZ4IJ\n\
+ALbcCREWTZxRMAwGA1UdEwQFMAMBAf8wDQYJKoZIhvcNAQENBQADggIBAJi97ToZ\n\
+WGHJ0T6wsTyXa41O7FRzKV7kiTb56lpmWf86eKPxfOLHjkeIJz1DDwyUXOrCrJIX\n\
+t8lKdQCmAZf+j3AD7VMb7JfCkFpdT7lP5j0gOfuqesh7GFXYVsCzpQy8vb79cQ5Q\n\
+/aGErPyPb4e52cZMHpBGuJy7Y+4a/b5UV6NRkN+Jo8yE7jaYimzNBElHtn8dseW0\n\
+/kU6Gvwk+3YwJUzhrwXApMC4Ne0tEWbWO/2eXKex6GoU+n0Xc046peslXFPm2e5v\n\
+qBba1PH3Rk+DhpjLQBqZKYYB5oZazEHELQHOlmso5kjQCeQB/5Mc2nxuVKNhsY2W\n\
+vm53A43dHBOoNPQa9MbDw5bnSGD4byuP0/EfPUb0PYV9jNhXyzWJywO+Vprozj7C\n\
+FcRZNYKpxbVNopyU1YBqDj4LXZUCUR4jmk62EUMyvWKDBa5wpbhQZ9Ef+Xo4Uuy2\n\
+M1Q8rXri1LUhTnic1hNyfMw1T2WFwhWw6kaN+uvEuU0bYdbO/SoVqYeMgm6x0IyC\n\
+a0vuuj+Tj/X0v3CJt8QLRneqb88tIFy83kQLlK1WbRNFd8HJHP6msJVWlcEBrm+T\n\
+kjButHXG2m0MB0xLpRVfWtXLQCxSxeCK/nD1LOkgCkBO0PV0Vjw7U262KmwirveO\n\
+XpEKeQDBu2XkTgK8GkeeyYeCEgrS9hGUFeRw\n\
+-----END CERTIFICATE-----\n\
+";
+
+/// "Logbook of the World Production CA" of 2023, serial 0A, to 2027-06-29, issued by [`ROOT_2023`];
+/// SHA-256 98:EA:7D:C6:B1:4D:8E:A6:A5:B7:26:83:0D:45:E2:B5:A5:E0:ED:5B:5D:B9:B1:26:E8:AD:13:2D:33:5D:9A:8C.
+pub const PRODUCTION_CA_2023: &str = "\
+-----BEGIN CERTIFICATE-----\n\
+MIIGZTCCBE2gAwIBAgIBCjANBgkqhkiG9w0BAQsFADCB0jELMAkGA1UEBhMCVVMx\n\
+CzAJBgNVBAgTAkNUMRIwEAYDVQQHEwlOZXdpbmd0b24xJDAiBgNVBAoTG0FtZXJp\n\
+Y2FuIFJhZGlvIFJlbGF5IExlYWd1ZTEdMBsGA1UECxMUTG9nYm9vayBvZiB0aGUg\n\
+V29ybGQxJTAjBgNVBAMTHExvZ2Jvb2sgb2YgdGhlIFdvcmxkIFJvb3QgQ0ExGDAW\n\
+BgoJkiaJk/IsZAEZFghhcnJsLm9yZzEcMBoGCSqGSIb3DQEJARYNbG90d0BhcnJs\n\
+Lm9yZzAeFw0yMzA2MjkxNTAwMTlaFw0yNzA2MjkxNTAwMTlaMIHYMQswCQYDVQQG\n\
+EwJVUzELMAkGA1UECBMCQ1QxEjAQBgNVBAcTCU5ld2luZ3RvbjEkMCIGA1UEChMb\n\
+QW1lcmljYW4gUmFkaW8gUmVsYXkgTGVhZ3VlMR0wGwYDVQQLExRMb2dib29rIG9m\n\
+IHRoZSBXb3JsZDErMCkGA1UEAxMiTG9nYm9vayBvZiB0aGUgV29ybGQgUHJvZHVj\n\
+dGlvbiBDQTEYMBYGCgmSJomT8ixkARkWCGFycmwub3JnMRwwGgYJKoZIhvcNAQkB\n\
+Fg1sb3R3QGFycmwub3JnMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n\
+tHRuFAEtRI5jOoxHehXT5Or4rv8Mbu9K2Xo6Hoi35jQZMGoOID1EH/HmUCH2f2lS\n\
+dSYZSxruysz/GJP8SKt3xmJYYGwdwTx5YpMFm89AjPIEk7ntI3XqbKDLT74QXOa1\n\
+dam4XCil+qxMZm2TZVvzh8OrKviJI/BgV+OzWCEaUku5eI+CmufvTVOmFLL8G6H3\n\
+vReK+o/eyxfLw6BxOrZFGiZgl3D6jUfTyrGfV7PDndX1tElQfIJfjT5mHDIg5t82\n\
+CTaG2/rohoEXY3G6noPPYDnVHwFrssR4FImaJ8lzlpSoGxOPvYZz30WmZqZ/RHvw\n\
+KmnY7EUXwWUTaKvCYLd5bwIDAQABo4IBPDCCATgwHQYDVR0OBBYEFLaOyEnEC0rc\n\
+FSv+/8rSVJQGKui8MIIBBwYDVR0jBIH/MIH8gBRLdh/u5EBekrgmoLkfJicXi7dh\n\
+IKGB2KSB1TCB0jELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNUMRIwEAYDVQQHEwlO\n\
+ZXdpbmd0b24xJDAiBgNVBAoTG0FtZXJpY2FuIFJhZGlvIFJlbGF5IExlYWd1ZTEd\n\
+MBsGA1UECxMUTG9nYm9vayBvZiB0aGUgV29ybGQxJTAjBgNVBAMTHExvZ2Jvb2sg\n\
+b2YgdGhlIFdvcmxkIFJvb3QgQ0ExGDAWBgoJkiaJk/IsZAEZFghhcnJsLm9yZzEc\n\
+MBoGCSqGSIb3DQEJARYNbG90d0BhcnJsLm9yZ4IJALbcCREWTZxRMAwGA1UdEwQF\n\
+MAMBAf8wDQYJKoZIhvcNAQELBQADggIBACDrI4HotIV52XZgCo1t/9sssU5UDE0e\n\
+6I5VPTNvre05RHjsLTQ5Z4NksBr0CsNImUGsNqSaUrbmwwz+nOrSYjeZNn8YLAq8\n\
+AieJJouyBdFtkPk3uLNWnz+Z+P0NbMCYmmjk6g/sO9qw6z+tBtktTgU4u9o+Sth0\n\
+lLpcZjwLFqXhMO4+wDx7Izz6iJMe3UDsktgB6vGCOk4mZsSfzrJtiurhgabmRJF9\n\
+RlRHMlPvrZ0gO8u46aD5Lgai9KwUp7/Pmh0U4FSAP7CHpGuOZxzf0MMne3PEkAHD\n\
+ArJEIHEOB/ZpvVyWzo/rOmnNhbFnCSAfyruy9ePxZWE23KPL8RHYywaDPfQHYpEB\n\
+ihr4OVff75ac9jD6E+4dh96JASbWJKBKkjkaLn5JwSK+cNd+Ra6BV+ChFiuuG+jj\n\
+0WnlIXar/wXf8FxI65zaC7OqSezXZbdQkwMhHun2C/L7kH6iXo3wfbHqdo7kDxOy\n\
+QVQWD4gtdH+IPcFB6QYwLmAkzT+23pTPHkFdZtyUs27v3aT7U6JY1nScSApWo8VX\n\
+5C/w6TceUuYbmYbFkmmOcFZ1g8vH8rGFW5u6WcNJG6ry7vckJBcL6INaJDx3QmiV\n\
+K4t1FQgHdxjg6YoInK0TsT53ZJessldxV+oqLxF/OSHVVFJv0K4Cltpe34i4qGqp\n\
+tBwPJo4njjGW\n\
 -----END CERTIFICATE-----\n\
 ";
 

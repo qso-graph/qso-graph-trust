@@ -101,9 +101,9 @@ from these, and how is QG Trust's own:
   receives; [tqsllib's API documentation](https://www.rickmurphy.net/lotw/doxygen/); and
   [TQSL's change log](https://lotw.arrl.org/lotw-help/tqslchangelog/). QG Trust carries two things of
   TQSL's, both ARRL's, under ARRL's terms: the TQSL configuration (`config.xml`), from which the LoTW
-  tables are generated, and ARRL's root and CA certificates as TQSL embeds them. TQSL 2.8.7, built from
-  its own source, is the reference QG Trust's signed records and signatures are tested against, byte
-  for byte.
+  tables are generated, and ARRL's root and CA certificates (the 2015 pair as TQSL embeds them, the
+  2023 pair as ARRL issues them in a `.tq6`). TQSL 2.8.7, built from its own source, is the reference
+  QG Trust's signed records and signatures are tested against, byte for byte.
 - **Other open-source projects:** qso-web, above, and a survey of 126 ham-radio Rust crates on crates.io,
   which found no other LoTW signing crate.
 - **Standards:** [ADIF 3.1.7](https://adif.org/317/ADIF_317.htm); RFC 5280 (X.509 certificates),

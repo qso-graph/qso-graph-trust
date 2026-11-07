@@ -15,7 +15,8 @@ K1MK, KE3Z, K1MU, KC2YWE and AA6YQ. TrustedQSL is Copyright (C) 2001-2015 Americ
 League, Inc., portions (C) 2003-2026 The TrustedQSL Developers, and licensed under ARRL's BSD-style
 terms. QGT is not ported from TQSL's code. It carries two things of TrustedQSL's, both ARRL's: the TQSL
 configuration (data/tqsl-config/config.xml, and the tables generated from it) and ARRL's root and CA
-certificates as TQSL embeds them (crates/qso-graph-trust/src/lotw/arrl.rs). Each carries ARRL's
+certificates (crates/qso-graph-trust/src/lotw/arrl.rs): the 2015 root and 2019 CA as TQSL embeds them,
+and the 2023 root and CA as ARRL issues them in a .tq6. Each carries ARRL's
 copyright notice and licence terms as they require: data/tqsl-config/LICENSE.txt, and its unchanged
 copy crates/qso-graph-trust/LICENSE-ARRL.md, which ships with the library.
 

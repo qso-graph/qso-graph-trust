@@ -17,6 +17,13 @@ versions follow [Semantic Versioning](https://semver.org/).
   FIPS build accepted only when the program itself turns it on and only under aws-lc-rs; and
   every program it builds installs the wiping allocator. QSO Graph Desktop runs it in CI.
 
+### Fixed
+
+- A callsign certificate ARRL issued since mid-2023 is trusted. 0.1.0 pinned only the root and CA
+  TQSL 2.8.7 embeds (2015 and 2019) and refused one issued under ARRL's 2023 root and CA, which
+  share their names, saying it was "not issued under a trusted LoTW root". Both 2023 certificates
+  are pinned now, from ARRL's own `.tq6`; TQSL takes them from there too, and embeds neither.
+
 ### Changed
 
 - Signing and publication require KI7MT's manually started Release workflow on main and its exact
