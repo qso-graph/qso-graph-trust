@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# What cargo fuzz writes: its build, the corpora it grows (seeded by seed.sh), its findings and
+# coverage. A finding is kept as a library test, never as a file here (docs/decisions/0012-fuzzing.md).
+/target
+/corpus
+/artifacts
+/coverage

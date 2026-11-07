@@ -4,6 +4,9 @@ Files QGT's tests read. **Everything here is test data made from test keys.** No
 real ham's certificate or key is here, and LoTW would refuse all of it. Never add a real certificate,
 key, `.tbk` file or log.
 
+The fuzzers' seeds are copied from here by [`fuzz/seed.sh`](../../fuzz/seed.sh) (decision 0012), so a
+file added here for a reader's tests can be named there too.
+
 ## pki
 
 Made by [`scripts/make-test-pki.sh`](../../scripts/make-test-pki.sh) with OpenSSL 3, shaped the way

@@ -2002,7 +2002,11 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
             let name = entry.file_name().to_string_lossy().into_owned();
             let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
             if is_dir {
-                if !(d == root && matches!(name.as_str(), "target" | ".git")) {
+                // Cargo's output is left out where Cargo puts it: the root's `target`, and the
+                // fuzzers' own workspace's, exactly `fuzz/target` (decision 0012).
+                let output = (d == root && matches!(name.as_str(), "target" | ".git"))
+                    || (d == root.join(FUZZ_DIR) && name == "target");
+                if !output {
                     stack.push(path);
                 }
                 continue;
@@ -2016,8 +2020,14 @@ pub fn no_lint_overrides(root: &Path) -> Vec<String> {
             // `.cargo/config.toml` are allowed.
             let lower = name.to_ascii_lowercase();
             let exact_root_toolchain = d == root && name == "rust-toolchain.toml";
+            // The fuzzers' nightly, exactly `fuzz/rust-toolchain.toml` and nowhere else: it selects
+            // the compiler only for the fuzz workspace, which ships nothing (decision 0012), and
+            // `fuzzers` holds it to a dated nightly.
+            let exact_fuzz_toolchain = path == root.join(FUZZ_DIR).join("rust-toolchain.toml");
             if lower == "rust-toolchain"
-                || (lower == "rust-toolchain.toml" && !exact_root_toolchain)
+                || (lower == "rust-toolchain.toml"
+                    && !exact_root_toolchain
+                    && !exact_fuzz_toolchain)
             {
                 problems.push(format!("{} is a toolchain file", path.display()));
             }
@@ -2313,6 +2323,115 @@ pub fn flags_allowed(flags: &str) -> bool {
     true
 }
 
+/// The fuzzers' directory at the repository's root: a Cargo workspace of its own, built on a
+/// pinned nightly with libFuzzer, never shipped (decision 0012).
+pub const FUZZ_DIR: &str = "fuzz";
+
+/// What cargo fuzz writes under [`FUZZ_DIR`], and fuzz/.gitignore leaves out.
+const FUZZ_OUTPUTS: &[&str] = &["target", "corpus", "artifacts", "coverage"];
+
+/// Whether a toolchain channel is a dated nightly, such as `nightly-2026-10-30`.
+fn is_dated_nightly(channel: &str) -> bool {
+    channel.strip_prefix("nightly-").is_some_and(|date| {
+        let parts: Vec<&str> = date.split('-').collect();
+        parts.len() == 3
+            && [4, 2, 2]
+                .iter()
+                .zip(&parts)
+                .all(|(n, p)| p.len() == *n && p.bytes().all(|b| b.is_ascii_digit()))
+    })
+}
+
+/// The fuzzers hold to their exception and no further (decision 0012): `fuzz/rust-toolchain.toml`
+/// names a dated nightly; `fuzz/Cargo.toml` is a workspace of its own, never published, a
+/// cargo-fuzz crate, and every dependency from crates.io is pinned with `=`; and the fuzzers' own
+/// Rust, `fuzz/src` and `fuzz/fuzz_targets`, holds nothing that brings unsafe code, read as tokens as
+/// the workspace's crates are, with every crate root saying `#![forbid(unsafe_code)]`. A repository
+/// without `fuzz/` passes. Sorted; empty passes.
+pub fn fuzzers(root: &Path) -> Vec<String> {
+    let dir = root.join(FUZZ_DIR);
+    if !dir.is_dir() {
+        return Vec::new();
+    }
+    let mut problems = Vec::new();
+    match read_toml(&dir.join("rust-toolchain.toml")) {
+        Ok(t) => {
+            let channel = t
+                .get("toolchain")
+                .and_then(|c| c.get("channel"))
+                .and_then(toml::Value::as_str);
+            if !channel.is_some_and(is_dated_nightly) {
+                problems.push(format!(
+                    "fuzz/rust-toolchain.toml must name a dated nightly, not {channel:?}"
+                ));
+            }
+        }
+        Err(e) => problems.push(e),
+    }
+    match read_toml(&dir.join("Cargo.toml")) {
+        Ok(t) => {
+            if !t.get("workspace").is_some_and(toml::Value::is_table) {
+                problems.push("fuzz/Cargo.toml is not a workspace of its own".to_string());
+            }
+            let package = t.get("package");
+            if package.and_then(|p| p.get("publish")) != Some(&toml::Value::Boolean(false)) {
+                problems.push("fuzz/Cargo.toml does not say publish = false".to_string());
+            }
+            if package
+                .and_then(|p| p.get("metadata"))
+                .and_then(|m| m.get("cargo-fuzz"))
+                != Some(&toml::Value::Boolean(true))
+            {
+                problems.push("fuzz/Cargo.toml is not a cargo-fuzz crate".to_string());
+            }
+            for (name, dep) in t
+                .get("dependencies")
+                .and_then(toml::Value::as_table)
+                .into_iter()
+                .flatten()
+            {
+                let version = match dep {
+                    toml::Value::String(v) => Some(v.as_str()),
+                    other => other.get("version").and_then(toml::Value::as_str),
+                };
+                let path = dep.get("path").is_some();
+                if !(path && version.is_none() || version.is_some_and(|v| v.starts_with('='))) {
+                    problems.push(format!(
+                        "fuzz/Cargo.toml: {name} is not pinned with = or a path in this repository"
+                    ));
+                }
+            }
+        }
+        Err(e) => problems.push(e),
+    }
+    for sub in ["src", "fuzz_targets"] {
+        let code = dir.join(sub);
+        if !code.is_dir() {
+            continue;
+        }
+        problems.extend(unsafe_tokens_in(&code, &[]));
+        let roots: Vec<PathBuf> = if sub == "src" {
+            vec![code.join("lib.rs")]
+        } else {
+            std::fs::read_dir(&code)
+                .map(|e| e.filter_map(Result::ok).map(|e| e.path()).collect())
+                .unwrap_or_default()
+        };
+        for path in roots.iter().filter(|p| p.is_file()) {
+            match std::fs::read_to_string(path) {
+                Ok(text) if forbids_unsafe(&text) => {}
+                Ok(_) => problems.push(format!(
+                    "{} does not say #![forbid(unsafe_code)]",
+                    path.display()
+                )),
+                Err(e) => problems.push(format!("cannot read {}: {e}", path.display())),
+            }
+        }
+    }
+    problems.sort();
+    problems
+}
+
 /// What the canary appends to the library: unsafe code the compiler must refuse.
 /// An anonymous constant holding an empty `unsafe` block: it takes no name and
 /// looks none up, so nothing the library declares can collide with it or redirect
@@ -2456,9 +2575,9 @@ pub fn refused_by_unsafe_code(json_lines: &str) -> bool {
     })
 }
 
-/// Copy this repository's files to `to`, leaving out `.git`, every `target`
-/// directory and Cargo's output directory, so the canary builds what a commit
-/// holds. Symbolic links are not followed.
+/// Copy this repository's files to `to`, leaving out `.git`, the root's `target`,
+/// Cargo's output directory and what cargo fuzz writes, so the canary builds what
+/// a commit holds. Symbolic links are not followed.
 fn copy_repository(from: &Path, to: &Path, output: Option<&Path>) -> Result<(), String> {
     let output = output.and_then(|o| std::fs::canonicalize(o).ok());
     let mut stack = vec![(from.to_path_buf(), to.to_path_buf())];
@@ -2479,7 +2598,11 @@ fn copy_repository(from: &Path, to: &Path, output: Option<&Path>) -> Result<(), 
                     .is_some_and(|o| std::fs::canonicalize(&path).is_ok_and(|p| p == *o));
                 // `target` only at the root, where Cargo puts it: a source module
                 // may be named `target` (found in review).
-                if name == ".git" || (src == from && name == "target") || is_output {
+                // And what cargo fuzz writes, exactly under `fuzz/` (fuzz/.gitignore): no commit
+                // holds it.
+                let fuzz_output = src == from.join(FUZZ_DIR)
+                    && FUZZ_OUTPUTS.iter().any(|o| name == std::ffi::OsStr::new(o));
+                if name == ".git" || (src == from && name == "target") || is_output || fuzz_output {
                     continue;
                 }
                 stack.push((path, dst.join(name)));
