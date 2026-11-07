@@ -35,6 +35,13 @@ fn p12_password() -> Vec<u8> {
     .expect("the test .p12 password")
 }
 
+/// A password that is not the test set's: its own with a byte more, so no password is written here.
+fn wrong_password() -> Vec<u8> {
+    let mut wrong = p12_password();
+    wrong.push(b'x');
+    wrong
+}
+
 #[test]
 fn tq6_attaches_a_matching_pending_request_and_otherwise_loads_keyless() {
     for pending in [false, true] {
@@ -152,7 +159,7 @@ fn wrong_password_tampering_and_rc2_are_refused_without_storage() {
     let (store, _) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
     let bytes = file("1024/QG0TEST.p12");
     assert!(matches!(
-        store.import_pkcs12(&bytes, b"wrong", &trust(), None),
+        store.import_pkcs12(&bytes, &wrong_password(), &trust(), None),
         Err(ImportError::Authentication)
     ));
     let mut flipped = bytes;
@@ -171,7 +178,12 @@ fn wrong_password_tampering_and_rc2_are_refused_without_storage() {
         Err(ImportError::UnsupportedProtection)
     ));
     assert!(matches!(
-        store.import_pkcs12(&file("1024/QG0TEST-weak.p12"), b"wrong", &trust(), None),
+        store.import_pkcs12(
+            &file("1024/QG0TEST-weak.p12"),
+            &wrong_password(),
+            &trust(),
+            None
+        ),
         Err(ImportError::Authentication)
     ));
     assert!(store.certificates().expect("list").is_empty());
