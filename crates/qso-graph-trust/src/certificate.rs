@@ -235,14 +235,16 @@ impl fmt::Debug for Trust {
 }
 
 impl Trust {
-    /// LoTW's: ARRL's two roots and their production CAs, pinned in this library
+    /// LoTW's: ARRL's two public roots and their production CAs, pinned in this library
     /// ([`crate::lotw::arrl`]).
     pub fn lotw() -> Trust {
-        use crate::lotw::arrl::{PRODUCTION_CA, PRODUCTION_CA_2023, ROOT, ROOT_2023};
+        use crate::lotw::arrl::{
+            PUBLIC_CA_2019, PUBLIC_CA_2023, PUBLIC_ROOT_2015, PUBLIC_ROOT_2023,
+        };
         let pem = |p: &str| X509::from_pem(p.as_bytes()).expect("LoTW's pinned certificates parse");
         Trust {
-            roots: vec![pem(ROOT), pem(ROOT_2023)],
-            authorities: vec![pem(PRODUCTION_CA), pem(PRODUCTION_CA_2023)],
+            roots: vec![pem(PUBLIC_ROOT_2015), pem(PUBLIC_ROOT_2023)],
+            authorities: vec![pem(PUBLIC_CA_2019), pem(PUBLIC_CA_2023)],
         }
     }
 
@@ -509,9 +511,11 @@ mod tests {
     #[test]
     fn the_2023_production_ca_is_trusted_and_was_refused_under_the_2015_root_alone() {
         // What 0.1.0 did: a callsign certificate issued since mid-2023 was refused, naming the root.
-        let ca = der_of(crate::lotw::arrl::PRODUCTION_CA_2023.as_bytes());
+        let ca = der_of(crate::lotw::arrl::PUBLIC_CA_2023.as_bytes());
         let only_2015 = Trust {
-            roots: vec![X509::from_pem(crate::lotw::arrl::ROOT.as_bytes()).expect("root")],
+            roots: vec![
+                X509::from_pem(crate::lotw::arrl::PUBLIC_ROOT_2015.as_bytes()).expect("root"),
+            ],
             authorities: Vec::new(),
         };
         assert!(matches!(
@@ -520,7 +524,7 @@ mod tests {
         ));
         assert_eq!(verify_imported(&ca, &Trust::lotw(), &[], true), Ok(()));
         // A file bringing the 2023 root does not make it trusted: only the pinned copy does.
-        let root = der_of(crate::lotw::arrl::ROOT_2023.as_bytes());
+        let root = der_of(crate::lotw::arrl::PUBLIC_ROOT_2023.as_bytes());
         assert!(matches!(
             verify_imported(&ca, &only_2015, &[root], true),
             Err(CertificateError::Untrusted { .. })

@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 
-//! LoTW's own certificates, the trust QG Trust pins: a callsign certificate is trusted only if it
-//! chains to [`ROOT`] or [`ROOT_2023`], never to a root a file brings with it.
+//! LoTW's own public certificates, the trust QG Trust pins. They are ARRL's public root and CA
+//! certificates, which ARRL sends to every LoTW user and TQSL installs; they hold public keys
+//! only, and can check a certificate ARRL issued but cannot issue or sign one. No private key is
+//! in QG Trust. A callsign certificate is trusted only if it
+//! chains to [`PUBLIC_ROOT_2015`] or [`PUBLIC_ROOT_2023`], never to a root a file brings with it.
 //!
-//! ARRL issues under two roots with the same name. [`ROOT`] and [`PRODUCTION_CA`] are ARRL's public
+//! ARRL issues under two roots with the same name. [`PUBLIC_ROOT_2015`] and [`PUBLIC_CA_2019`] are ARRL's public
 //! certificates as TQSL 2.8.7 embeds them (`src/location.cpp`, `rootcertpem`
 //! and `cacertpem`, at commit d9e01726e54887f8241e86e789c5b91f02043ebd), the same anchor TQSL loads.
-//! [`ROOT_2023`] and [`PRODUCTION_CA_2023`] are the root and CA every callsign certificate issued
+//! [`PUBLIC_ROOT_2023`] and [`PUBLIC_CA_2023`] are the root and CA every callsign certificate issued
 //! since mid-2023 chains to. TQSL embeds neither, even at its head (8ae195c, 2026-10-29): it takes
-//! them from the `.tq6` ARRL issues with a certificate. These are from ARRL's `.tq6` of 2025-09-26
-//! for KI7MT, byte for byte the same as the copies in his TQSL backup of 2026-11-01. Neither is
+//! them from the `.tq6` ARRL issues with a certificate. These are from a `.tq6` ARRL issued on
+//! 2025-09-26, byte for byte the same as the copies in a TQSL backup of 2026-11-01. Neither is
 //! signed by the older root, and the 2023 CA by the 2023 root only.
 //! TrustedQSL is Copyright (C) 2001-2015 American Radio Relay League, Inc., portions (C) 2003-2026 The
 //! TrustedQSL Developers; what is copied here is redistributed under ARRL's terms in LICENSE-ARRL.md
@@ -20,8 +23,8 @@
 //! force when it signs. If ARRL issues under a root not here, importing such a certificate is refused
 //! naming the root, and the root is added here.
 
-/// "Logbook of the World Root CA", American Radio Relay League; SHA-256 2E:35:F9:6E:F1:86:26:DC:90:1A:2C:F3:1B:FB:56:DA:FA:DC:70:30:D7:33:D9:B3:07:D0:DB:8E:87:C7:9A:0F.
-pub const ROOT: &str = "\
+/// ARRL's public "Logbook of the World Root CA" of 2015, to 2025-06-06; SHA-256 2E:35:F9:6E:F1:86:26:DC:90:1A:2C:F3:1B:FB:56:DA:FA:DC:70:30:D7:33:D9:B3:07:D0:DB:8E:87:C7:9A:0F.
+pub const PUBLIC_ROOT_2015: &str = "\
 -----BEGIN CERTIFICATE-----\n\
 MIIHZzCCBU+gAwIBAgIJAIP/DUvt4MtDMA0GCSqGSIb3DQEBDQUAMIHSMQswCQYD\n\
 VQQGEwJVUzELMAkGA1UECAwCQ1QxEjAQBgNVBAcMCU5ld2luZ3RvbjEkMCIGA1UE\n\
@@ -66,9 +69,9 @@ vbT46W7TQ5zZUgFBeMltaxc2z3UsTiM02nF4K4hmsfD8Equh2fA5msc+p5PuaOJR\n\
 -----END CERTIFICATE-----\n\
 ";
 
-/// "Logbook of the World Root CA" of 2023, American Radio Relay League, serial B6:DC:09:11:16:4D:9C:51, to
+/// ARRL's public "Logbook of the World Root CA" of 2023, serial B6:DC:09:11:16:4D:9C:51, to
 /// 2033-06-25; SHA-256 0F:B9:62:75:EA:CA:03:EF:29:FF:50:9D:9E:54:5B:1F:38:61:F4:46:8F:06:87:BE:CC:59:3E:D0:06:04:B2:E6.
-pub const ROOT_2023: &str = "\
+pub const PUBLIC_ROOT_2023: &str = "\
 -----BEGIN CERTIFICATE-----\n\
 MIIHZzCCBU+gAwIBAgIJALbcCREWTZxRMA0GCSqGSIb3DQEBDQUAMIHSMQswCQYD\n\
 VQQGEwJVUzELMAkGA1UECBMCQ1QxEjAQBgNVBAcTCU5ld2luZ3RvbjEkMCIGA1UE\n\
@@ -113,9 +116,9 @@ XpEKeQDBu2XkTgK8GkeeyYeCEgrS9hGUFeRw\n\
 -----END CERTIFICATE-----\n\
 ";
 
-/// "Logbook of the World Production CA" of 2023, serial 0A, to 2027-06-29, issued by [`ROOT_2023`];
+/// ARRL's public "Logbook of the World Production CA" of 2023, serial 0A, to 2027-06-29, issued by [`PUBLIC_ROOT_2023`];
 /// SHA-256 98:EA:7D:C6:B1:4D:8E:A6:A5:B7:26:83:0D:45:E2:B5:A5:E0:ED:5B:5D:B9:B1:26:E8:AD:13:2D:33:5D:9A:8C.
-pub const PRODUCTION_CA_2023: &str = "\
+pub const PUBLIC_CA_2023: &str = "\
 -----BEGIN CERTIFICATE-----\n\
 MIIGZTCCBE2gAwIBAgIBCjANBgkqhkiG9w0BAQsFADCB0jELMAkGA1UEBhMCVVMx\n\
 CzAJBgNVBAgTAkNUMRIwEAYDVQQHEwlOZXdpbmd0b24xJDAiBgNVBAoTG0FtZXJp\n\
@@ -155,8 +158,9 @@ tBwPJo4njjGW\n\
 -----END CERTIFICATE-----\n\
 ";
 
-/// "Logbook of the World Production CA", issued by the root; SHA-256 A6:89:D0:B4:ED:C4:F1:AF:DD:2C:62:C5:01:C8:13:6E:1F:35:4C:9D:7D:ED:06:4D:91:C9:D6:2A:F8:BD:EC:93.
-pub const PRODUCTION_CA: &str = "\
+/// ARRL's public "Logbook of the World Production CA" of 2019, to 2023-06-19, issued by
+/// [`PUBLIC_ROOT_2015`]; SHA-256 A6:89:D0:B4:ED:C4:F1:AF:DD:2C:62:C5:01:C8:13:6E:1F:35:4C:9D:7D:ED:06:4D:91:C9:D6:2A:F8:BD:EC:93.
+pub const PUBLIC_CA_2019: &str = "\
 -----BEGIN CERTIFICATE-----\n\
 MIIGeDCCBGCgAwIBAgIUV31ApzN0aZACaQt7FGB26Mu5t4kwDQYJKoZIhvcNAQEL\n\
 BQAwgdIxCzAJBgNVBAYTAlVTMQswCQYDVQQIDAJDVDESMBAGA1UEBwwJTmV3aW5n\n\
