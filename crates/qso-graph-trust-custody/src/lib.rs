@@ -4,12 +4,15 @@
 //! What the custody test's programs do: sign the corpus log as a QG Trust program would, from
 //! reading the key file to writing the `.tq8`, then wait while the test reads their memory.
 //!
-//! `qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE P12_PASSWORD_FILE SECRETS_FILE live|done|export-passwords|export-keys|import-secrets`
+//! `qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE P12_PASSWORD_FILE SECRETS_FILE live|done|export-passwords|export-keys|import-secrets|files`
 //!
 //! - `live`: wait with the key unlocked, so the test can prove it finds a key that is there.
 //! - `done`: sign, drop everything, then wait: no key data may be left.
 //! - `export-passwords`: deliberately keep copies of both generated export passwords.
 //! - `export-keys`: after the first scan, accept both derived keys over stdin and keep them.
+//! - `files`: as `done`, but keep what the library writes, for the test that reads every file:
+//!   the store folders, the encrypted export and the `.tq8`, in `qgt-custody-export-<pid>` in the
+//!   temporary folder (`TMPDIR`).
 //!
 //! The password comes from a file, never the command line (AGENTS.md); an empty file means none.
 //! The program prints `ready` when it is waiting and exits when a line arrives on its input.
@@ -45,13 +48,13 @@ pub fn run() -> ExitCode {
     ] = &args[..]
     else {
         eprintln!(
-            "usage: qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE P12_PASSWORD_FILE SECRETS_FILE live|done|export-passwords|export-keys|import-secrets"
+            "usage: qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE P12_PASSWORD_FILE SECRETS_FILE live|done|export-passwords|export-keys|import-secrets|files"
         );
         return ExitCode::from(2);
     };
     if !matches!(
         mode.as_str(),
-        "live" | "done" | "export-passwords" | "export-keys" | "import-secrets"
+        "live" | "done" | "export-passwords" | "export-keys" | "import-secrets" | "files"
     ) {
         return ExitCode::from(2);
     }
@@ -113,6 +116,12 @@ fn sign(
     let log =
         sign_log(&cert, &signer, &station, &qsos, SystemTime::now()).map_err(|e| e.to_string())?;
     let gz = tq8(&log);
+    let keep = mode == "files";
+    if keep {
+        let folder = export_folder();
+        std::fs::create_dir(&folder).map_err(|e| e.to_string())?;
+        std::fs::write(folder.join("qg0test-small.tq8"), &gz).map_err(|e| e.to_string())?;
+    }
 
     // Exercise the backup's derived keys, plaintext, provider contexts and restored credential
     // buffers too. They must leave no private values behind when the external memory scan runs.
@@ -123,6 +132,7 @@ fn sign(
         import_password_file,
         secrets_file,
         mode == "export-passwords",
+        keep,
     )?;
 
     if mode == "live" {
@@ -161,11 +171,18 @@ fn sign(
     Ok(())
 }
 
-struct ExportFolder(std::path::PathBuf);
+/// Where the library's files go: removed when done with, or kept for the test that reads them.
+struct ExportFolder(std::path::PathBuf, bool);
 impl Drop for ExportFolder {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        if !self.1 {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
+}
+
+fn export_folder() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("qgt-custody-export-{}", std::process::id()))
 }
 
 fn exercise_export(
@@ -175,10 +192,13 @@ fn exercise_export(
     import_password_file: &str,
     secrets_file: &str,
     leak_passwords: bool,
+    keep: bool,
 ) -> Result<Vec<Zeroizing<Vec<u8>>>, String> {
-    let path = std::env::temp_dir().join(format!("qgt-custody-export-{}", std::process::id()));
-    std::fs::create_dir(&path).map_err(|e| e.to_string())?;
-    let folder = ExportFolder(path);
+    let path = export_folder();
+    if !keep {
+        std::fs::create_dir(&path).map_err(|e| e.to_string())?;
+    }
+    let folder = ExportFolder(path, keep);
     let read = |p: &std::path::Path| std::fs::read(p).map_err(|e| e.to_string());
     let certificate = Certificate::from_pem_or_der(&read(std::path::Path::new(cert_file))?)
         .map_err(|e| e.to_string())?;
@@ -203,6 +223,10 @@ fn exercise_export(
     let part = store
         .export_part(&export_password)
         .map_err(|e| e.to_string())?;
+    if keep {
+        // As QSO Graph Desktop writes it: the encrypted part, in a file of its own.
+        std::fs::write(folder.0.join("export.qgt"), &part).map_err(|e| e.to_string())?;
+    }
     // The corpus's immediate issuer is a generated test CA, explicitly trusted by this test only.
     let issuer =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus/tqsl/pki/ca.pem");

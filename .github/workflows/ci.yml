@@ -58,16 +58,18 @@ jobs:
       # (found in review).
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --all-features --locked
-      - name: cargo test
-        run: cargo test --workspace --all-features --locked
-      # The OS credential store itself, under the test service only: what keyring writes must be
-      # what presence and listing find. Linux gets a Secret Service of its own (gnome-keyring,
-      # unlocked with a throwaway password); macOS and Windows use the runner's own store.
+      # Linux gets a Secret Service of its own (gnome-keyring, unlocked with a throwaway password)
+      # before the tests: the custody test runs qg-trust against one to search all it writes, and
+      # the round trip below uses one. macOS and Windows use the runner's own store.
       - name: Secret Service (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q gnome-keyring dbus-x11
+      - name: cargo test
+        run: cargo test --workspace --all-features --locked
+      # The OS credential store itself, under the test service only: what keyring writes must be
+      # what presence and listing find.
       - name: OS credential store round trip
         shell: bash
         env:
@@ -105,6 +107,11 @@ jobs:
         run: cargo xtask policy
       # The custody test optimised: optimisation is what removes a wipe, and the
       # check jobs run it in debug (Linux only: it reads a child's memory through /proc).
+      # Its search of what qg-trust writes starts a Secret Service of its own (gnome-keyring).
+      - name: Secret Service for the custody test
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gnome-keyring dbus-x11
       - name: custody test, release
         run: cargo test -p qso-graph-trust-custody --release --locked
       # LoTW's tables are generated from ARRL's configuration, never edited by hand, and the crate
@@ -114,6 +121,13 @@ jobs:
       # Each published crate carries the GPL's text and the notices, as the repository has them.
       - name: Package files match the repository's
         run: python3 scripts/package-files.py --check
+      # docs/TQSLLIB-MAP.md: each of tqsllib 2.8.7's 215 names mapped to Rust, a command and a test
+      # that exist, or given a reason. tqsllib's source is ARRL's and never here, so the names are
+      # held by their pinned SHA-256; --tqsl-src compares them with the headers where it is at hand.
+      - name: tqsllib map
+        run: |
+          python3 scripts/tqsllib-map.py --check
+          python3 scripts/tqsllib-map.py --self-test
       # The release's decisions, each with the cases it must refuse.
       - name: Release checks
         run: python3 scripts/test_release_check.py

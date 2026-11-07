@@ -11,4 +11,6 @@
   - [0009](decisions/0009-encrypted-export-parts.md): encrypted LoTW export parts, generated passwords and validation before restore.
 - [FEATURE-PARITY.md](FEATURE-PARITY.md): every TQSL 2.8.7 feature and option, app and command line,
   with QG Trust's status and the decision on each.
+- [TQSLLIB-MAP.md](TQSLLIB-MAP.md): each of tqsllib 2.8.7's 204 functions and 11 variables, with QG
+  Trust's Rust or command and its test, or why it needs none.
 - The plan, its phases and their gates: [qso-graph-desktop#169](https://github.com/qso-graph/qso-graph-desktop/issues/169).
