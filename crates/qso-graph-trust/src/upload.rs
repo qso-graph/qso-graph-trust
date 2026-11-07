@@ -271,8 +271,8 @@ pub struct UploadRequest {
 impl UploadRequest {
     /// Prepare a log with a fresh random multipart boundary, checked absent from the payload.
     /// The `upfile` part has type `application/octet-stream`, as in TQSL's curl MIME post.
-    /// Its filename follows TQSL's `<TQSLUpl YYYYMMDD-HHMM> basename.tq8` UTC format;
-    /// this byte-only API uses `log.tq8` as its basename. No path is read or disclosed.
+    /// Its filename follows TQSL's `<TQSLUpl YYYYMMDD-HHMM> basename.tq8` UTC format, with `log.tq8`
+    /// as the basename; [`Self::try_named`] names the file. No path is read or disclosed.
     /// An unrepresentable system clock uses the Unix epoch for the filename timestamp.
     ///
     /// # Panics
@@ -283,8 +283,16 @@ impl UploadRequest {
 
     /// Fallible form of [`Self::new`]; returns the binding's randomness error without a request.
     pub fn try_new(tq8: &[u8]) -> Result<Self, Error> {
+        Self::try_named(tq8, "log.tq8")
+    }
+
+    /// [`Self::try_new`], with `basename` as the file's name in TQSL's filename format, so LoTW's
+    /// activity list tells uploads apart. Only the name is sent, never a folder: it is cut at the
+    /// last `/` or `\`, every character but ASCII letters, digits, `.`, `-` and `_` becomes `_`,
+    /// it is cut to 64 characters, and `.tq8` is added unless it ends so. An empty name is `log.tq8`.
+    pub fn try_named(tq8: &[u8], basename: &str) -> Result<Self, Error> {
         let boundary = boundary_with(tq8, random)?;
-        let filename = filename(SystemTime::now());
+        let filename = filename(SystemTime::now(), &upload_name(basename));
         let mut body = format!(
             "--{boundary}\r\nContent-Disposition: form-data; name=\"upfile\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
         ).into_bytes();
@@ -344,14 +352,37 @@ fn boundary_with(
     }
 }
 
-fn filename(now: SystemTime) -> String {
+/// A basename as [`UploadRequest::try_named`] sends it.
+fn upload_name(basename: &str) -> String {
+    let name = basename.rsplit(['/', '\\']).next().unwrap_or("");
+    let mut name: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(64)
+        .collect();
+    if name.trim_matches(['.', '_']).is_empty() {
+        name = "log.tq8".to_string();
+    }
+    if !name.to_ascii_lowercase().ends_with(".tq8") {
+        name.push_str(".tq8");
+    }
+    name
+}
+
+fn filename(now: SystemTime, basename: &str) -> String {
     let date = now
         .duration_since(UNIX_EPOCH)
         .ok()
         .and_then(|d| DateTime::from_unix_duration(d).ok())
         .unwrap_or(DateTime::from_unix_duration(std::time::Duration::ZERO).expect("Unix epoch"));
     format!(
-        "<TQSLUpl {:04}{:02}{:02}-{:02}{:02}> log.tq8",
+        "<TQSLUpl {:04}{:02}{:02}-{:02}{:02}> {basename}",
         date.year(),
         date.month(),
         date.day(),

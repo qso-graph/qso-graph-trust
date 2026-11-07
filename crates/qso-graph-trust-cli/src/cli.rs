@@ -481,7 +481,13 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
         match written {
             // The bytes just signed, not the file reread: another run may have replaced it.
             Some(tq8) if options.upload => {
-                match crate::commands::upload_bytes(&tq8, "the signed log", env) {
+                // Named as the signed log is written: -o's file, or the log's with .tq8.
+                let name = options
+                    .output
+                    .clone()
+                    .or_else(|| options.input.as_ref().map(|i| i.with_extension("tq8")))
+                    .unwrap_or_default();
+                match crate::commands::upload_bytes(&tq8, "the signed log", &name, env) {
                     Ok(_) => Some(code),
                     Err(e) => Some(e),
                 }

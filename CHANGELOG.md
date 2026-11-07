@@ -27,6 +27,9 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 - `qg-trust location list` lines its columns up whatever the names' lengths; a name longer than
   20 characters pushed the call, entity and grid columns along on its line.
+- An upload is named by its file in LoTW's activity list (`us12223.tq8`), not `log.tq8` for
+  every upload. Only the file's name is sent, never its folder, with any character but letters,
+  digits, `.`, `-` and `_` replaced. Library: `UploadRequest::try_named`.
 
 ## [0.1.1] - 2026-11-07
 

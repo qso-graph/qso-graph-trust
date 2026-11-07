@@ -981,7 +981,12 @@ pub(crate) fn check_output(path: &Path) -> Result<(), String> {
 
 fn send(a: &SignArgs, env: &mut Env<'_>) -> Done {
     let signed = sign(a, env)?;
-    let code = upload_bytes(&signed.tq8, &signed.path.display().to_string(), env)?;
+    let code = upload_bytes(
+        &signed.tq8,
+        &signed.path.display().to_string(),
+        &signed.path,
+        env,
+    )?;
     Ok(if signed.suppressed {
         Exit::QsosSuppressed
     } else {
@@ -1051,7 +1056,12 @@ pub(crate) fn sign_for_logger(call: &LoggerCall<'_>, env: &mut Env<'_>) -> Exit 
     if !upload {
         return status;
     }
-    match upload_bytes(&signed.tq8, &signed.path.display().to_string(), env) {
+    match upload_bytes(
+        &signed.tq8,
+        &signed.path.display().to_string(),
+        &signed.path,
+        env,
+    ) {
         Ok(_) => status,
         Err(code) => code,
     }
@@ -1070,11 +1080,12 @@ fn upload_file(path: &Path, env: &mut Env<'_>) -> Done {
             return Err(Exit::InputError);
         }
     };
-    upload_bytes(&bytes, &path.display().to_string(), env)
+    upload_bytes(&bytes, &path.display().to_string(), path, env)
 }
 
-/// Uploads a signed log, named `what` in messages, after checking it is one.
-pub(crate) fn upload_bytes(bytes: &[u8], what: &str, env: &mut Env<'_>) -> Done {
+/// Uploads a signed log, named `what` in messages, after checking it is one. LoTW is sent the
+/// file name of `name`, never its folder, so its activity list tells uploads apart.
+pub(crate) fn upload_bytes(bytes: &[u8], what: &str, name: &Path, env: &mut Env<'_>) -> Done {
     // What is sent is what was checked, gzipped afresh: never the bytes as given.
     let Ok(bytes) = qso_graph_trust::upload::check_signed_log(bytes) else {
         env.message(
@@ -1083,7 +1094,11 @@ pub(crate) fn upload_bytes(bytes: &[u8], what: &str, env: &mut Env<'_>) -> Done 
         );
         return Err(Exit::InputError);
     };
-    let request = match UploadRequest::try_new(&bytes) {
+    let basename = name
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let request = match UploadRequest::try_named(&bytes, &basename) {
         Ok(r) => r,
         Err(_) => {
             env.message(
