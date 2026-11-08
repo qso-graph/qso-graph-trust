@@ -15,10 +15,13 @@
 
 # QSO Graph Trust
 
-QSO Graph Trust is the part of the QSO Graph Project that signs your logs for ARRL's
-[Logbook of The World](https://lotw.arrl.org) (LoTW). It's a ground-up rewrite in Rust, not a
-method-by-method port of TQSL. What it does was decided from the sources below, and how it does it is
-its own.
+**QSO Graph Trust signs and uploads your QSOs to ARRL's [Logbook of The World](https://lotw.arrl.org)
+(LoTW).** It's a security-hardened library and command-line tool written in Rust: your key stays in
+your computer's credential store, every file it reads is fuzzed, and no key data is left in memory it
+frees.
+
+It's part of the QSO Graph Project, and a ground-up rewrite, not a method-by-method port of TQSL. What
+it does was decided from the sources below, and how it does it is its own.
 
 ## Sources
 
