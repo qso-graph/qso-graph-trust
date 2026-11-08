@@ -705,6 +705,81 @@ fn a_logger_signs_from_the_store_with_tqsls_options_and_codes() {
     }
 }
 
+/// fldigi 4.2.13's own call (`src/logger/logger.cxx`, `send_to_lotw`), in its order: `-q` after
+/// the log. fldigi ignores the exit code and reads the `-t` trace instead, counting the upload
+/// done only if it holds `Final Status: Success` (or tqsllib's `UploadFile returns 0`).
+#[test]
+fn fldigis_call_signs_uploads_and_leaves_final_status_in_the_trace() {
+    let mut ham = Ham::unsigned();
+    let dir = scratch();
+    let adi = dir.join("fldigi_lotw_20261108_030000.adi");
+    let trace = dir.join("lotw_trace.txt");
+    std::fs::copy(set("adif/KN4YU-CLUB.adi"), &adi).expect("copy");
+    let fldigi = |ham: &Ham| {
+        ham.run(&[
+            "-d",
+            "-u",
+            "-a",
+            "compliant",
+            "-l",
+            "KN4YU-CLUB",
+            "-t",
+            path(&trace),
+            path(&adi),
+            "-q",
+        ])
+    };
+    let read_trace = || std::fs::read_to_string(&trace).expect("fldigi waits for this file");
+
+    let ran = fldigi(&ham);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        read_trace().contains("Final Status: Success"),
+        "{}",
+        read_trace()
+    );
+    assert_eq!(ham.sent.borrow().len(), 1);
+
+    // fldigi sends again only what it has not sent; the same log again is all signed before,
+    // which TQSL calls 8 and fldigi, finding no Success, reports as an error.
+    let again = fldigi(&ham);
+    assert_eq!(again.code, 8, "{}", again.err);
+    assert!(
+        !read_trace().contains("Final Status: Success"),
+        "{}",
+        read_trace()
+    );
+    assert_eq!(ham.sent.borrow().len(), 1);
+
+    // fldigi's "submit password" puts the key's password on the command line, where every
+    // program on the computer can read it. qg-trust refuses it, sends nothing, and says why in
+    // the trace fldigi shows.
+    ham.lotw = Lotw::Accepts;
+    let ran = ham.run(&[
+        "-d",
+        "-u",
+        "-a",
+        "compliant",
+        "-p",
+        "secret",
+        "-l",
+        "KN4YU-CLUB",
+        "-t",
+        path(&trace),
+        path(&adi),
+        "-q",
+    ]);
+    assert_eq!(ran.code, 10, "{}", ran.err);
+    let text = read_trace();
+    assert!(
+        text.contains("a password is never given on the command line"),
+        "{text}"
+    );
+    assert!(!text.contains("Final Status: Success"), "{text}");
+    assert!(!text.contains("secret"), "{text}");
+    assert_eq!(ham.sent.borrow().len(), 1);
+}
+
 #[test]
 fn a_logger_uploads_with_u_and_gets_lotws_answer_as_tqsls_code() {
     let mut ham = Ham::unsigned();
