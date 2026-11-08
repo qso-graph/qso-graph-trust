@@ -7,6 +7,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- README: American spelling, as the QSO Graph style guide asks.
+
 - README: style fixes for the QSO Graph style guide (Google Developer Documentation Style Guide, American English).
 
 ## [0.1.5] - 2026-11-08
