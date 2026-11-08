@@ -45,7 +45,7 @@ body:
   - type: checkboxes
     id: secrets
     attributes:
-      label: Credentials and keys
+      label: Credentials
       options:
         - label: No real certificate, private key, password, token or real QSO log appears in this issue or its evidence.
           required: true
