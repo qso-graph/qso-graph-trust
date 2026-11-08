@@ -23,7 +23,7 @@ frees.
 It's part of the QSO Graph Project, and a ground-up rewrite, not a method-by-method port of TQSL. What
 it does was decided from the sources below, and how it does it is its own.
 
-## Security: our #1 priority
+## Security — Our #1 Priority
 
 **Your key stays in your computer's credential store,** leaving it only to sign or into a backup QSO
 Graph Trust encrypts itself. QSO Graph Trust is built to the standard of enterprise security software, and every point below is a test or a check that runs on every
