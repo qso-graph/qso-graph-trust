@@ -32,9 +32,6 @@ use qso_graph_trust::upload::UploadRequest;
 use qso_graph_trust::{VERSION, records};
 use zeroize::Zeroizing;
 
-/// The TQSL command-line version understood by compatible loggers.
-const TQSL_VERSION: &str = "2.8.7";
-
 pub(crate) mod trace;
 pub(crate) use trace::Trace;
 
@@ -441,10 +438,7 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
                 return None;
             }
             "version" => {
-                let _ = writeln!(
-                    env.out,
-                    "qg-trust {VERSION} (compatible with TQSL Version {TQSL_VERSION})"
-                );
+                let _ = writeln!(env.out, "qg-trust {VERSION}");
                 return None;
             }
             _ => {

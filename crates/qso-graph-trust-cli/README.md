@@ -91,7 +91,7 @@ signs with the keys in the store and uploads. `-i FILE` instead reads a TQSL bac
 | `-x`, `-q`, `-d` | accepted and ignored; `qg-trust` always exits when done |
 | `-n`, `--updates` | update through your package manager or installer |
 | `-s`, `--editlocation` | use `qg-trust location add` or `qg-trust location edit` |
-| `-h`, `-v` | help, version (including the compatible TQSL version) |
+| `-h`, `-v` | help, version |
 | `--completions SHELL` | write shell completions (bash, zsh, fish, powershell, elvish) |
 
 As in TQSL, `-z` has no effect when `-u` is given: the log is signed, recorded and uploaded as usual, and the diagnostic log (`-t`) says so.

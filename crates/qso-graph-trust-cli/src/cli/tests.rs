@@ -534,29 +534,11 @@ fn long_options_take_tqsls_names_with_a_space_or_an_equals_sign() {
 
 #[test]
 fn help_and_version_print_and_exit_zero() {
-    // QLog 0.54.2 also calls --version (service/lotw/Lotw.cpp).
     let ran = qg_trust(&["--version"], None);
     assert_eq!(
         (ran.code, ran.out.trim()),
-        (
-            0,
-            format!(
-                "qg-trust {} (compatible with TQSL Version 2.8.7)",
-                qso_graph_trust::VERSION
-            )
-            .as_str()
-        )
+        (0, format!("qg-trust {}", qso_graph_trust::VERSION).as_str())
     );
-    let marker = "TQSL Version ";
-    let version = ran
-        .out
-        .split_once(marker)
-        .expect("QLog pattern")
-        .1
-        .split(|c: char| !(c.is_ascii_digit() || c == '.'))
-        .next()
-        .unwrap();
-    assert_eq!(version, "2.8.7");
     let short = qg_trust(&["-v"], None);
     assert_eq!(short.out, ran.out);
     let ran = qg_trust(&["-h"], None);

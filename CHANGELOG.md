@@ -30,7 +30,7 @@ versions follow [Semantic Versioning](https://semver.org/).
   calls it a password; it is the key's passphrase. A key in the store needs none, so it is ignored
   there, with a warning that a passphrase on a command line can be read by other programs; it
   unlocks a key read with `-i` that has one, in place of asking. It is never written anywhere.
-- `-v` names the compatible TQSL version for loggers; `-n` and `-s` explain how to update or edit locations.
+- `-n` and `-s` explain how to update or edit locations.
 - `qg-trust sign` and `send` sign the whole log as it is, QSOs signed before included: LoTW takes a
   QSO it already has without harm, and a contest log's repeat contacts are QSOs. `-d`/`--dedupe`
   leaves QSOs signed before out and says how many. `--again` is still accepted, and does what every
