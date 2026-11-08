@@ -1732,3 +1732,22 @@ fn a_loggers_diagnostic_log_names_each_step_from_the_store_to_the_upload() {
         &[&pw, "-----BEGIN", "PRIVATE"]
     ));
 }
+
+#[test]
+fn sign_adx_from_the_store() {
+    let ham = Ham::imported();
+    let dir = scratch();
+    let input = dir.join("log.adx");
+    let output = dir.join("log.tq8");
+    std::fs::write(&input, b"<ADX><HEADER/><RECORDS><RECORD><CALL>KN4YU</CALL><QSO_DATE>20261103</QSO_DATE><TIME_ON>183055</TIME_ON><BAND>20m</BAND><MODE>CW</MODE></RECORD></RECORDS></ADX>").expect("test log");
+    let ran = ham.run(&[
+        "sign",
+        path(&input),
+        "-l",
+        "KC4QPQ-HOME",
+        "-o",
+        path(&output),
+    ]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(!signed(&output).is_empty());
+}

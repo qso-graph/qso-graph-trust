@@ -50,3 +50,10 @@ path = "fuzz_targets/tbk.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "adx"
+path = "fuzz_targets/adx.rs"
+test = false
+doc = false
+bench = false

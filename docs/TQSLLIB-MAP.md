@@ -233,7 +233,7 @@ source with `--tqsl-src`), and every Rust path, `qg-trust` command and test name
 | `tqsl_getCabrilloField` | The record's next field | Not needed: Cabrillo is not read; most loggers export ADIF (FEATURE-PARITY.md, Nice to have) |  |
 | `tqsl_endCabrillo` | Close the Cabrillo file | Not needed: Cabrillo is not read; most loggers export ADIF (FEATURE-PARITY.md, Nice to have) |  |
 | `tqsl_adifGetError` | An ADIF error, in words | `qso_graph_trust::records::RecordError`'s `Display`, which says where | `qso-graph-trust/src/records.rs::malformed_input_is_refused_and_says_where` |
-| `tqsl_beginADIF` | Open an ADIF file | `qso_graph_trust::records::parse` | `qso-graph-trust/src/records.rs::fields_records_and_types_are_read_exactly` |
+| `tqsl_beginADIF` | Open an ADI or ADX file | `qso_graph_trust::records::parse` | `qso-graph-trust/src/adx.rs::equivalent_fields_and_detection` |
 | `tqsl_getADIFField` | The next field | `qso_graph_trust::records::Record::get`, `qso_graph_trust::records::Record::text` | `qso-graph-trust/src/records.rs::fields_records_and_types_are_read_exactly` |
 | `tqsl_getADIFLine` | The line being read | `qso_graph_trust::records::RecordError` names where the input is wrong | `qso-graph-trust/src/records.rs::malformed_input_is_refused_and_says_where` |
 | `tqsl_endADIF` | Close the ADIF file | Not applicable: Rust frees a value when it is dropped; there is nothing to free by hand |  |

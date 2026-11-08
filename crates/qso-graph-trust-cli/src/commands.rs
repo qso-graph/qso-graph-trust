@@ -125,8 +125,8 @@ struct RootRemoveArgs {
 
 #[derive(Debug, Args)]
 struct SignArgs {
-    /// The ADIF log.
-    #[arg(value_name = "LOG.adi")]
+    /// The ADIF log (.adi or .adx).
+    #[arg(value_name = "LOG.adi|adx")]
     log: PathBuf,
     /// The station location to sign for, by name (qg-trust location list).
     #[arg(short = 'l', long, value_name = "NAME")]

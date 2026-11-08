@@ -284,6 +284,15 @@ pub fn parse(input: &str) -> Result<Element<'_>, XmlError> {
 /// Read with format-specific limits, refusing an element or value before retaining it. The
 /// existing depth, attribute-count and element-count ceilings still apply.
 pub fn parse_with_limits<'a>(input: &'a str, limits: &Limits<'_>) -> Result<Element<'a>, XmlError> {
+    parse_with_processing_instructions(input, limits, false)
+}
+
+/// Read ADX with bounded, ignored processing instructions.
+pub(crate) fn parse_with_processing_instructions<'a>(
+    input: &'a str,
+    limits: &Limits<'_>,
+    allow_pi: bool,
+) -> Result<Element<'a>, XmlError> {
     let mut r = Reader { input, at: 0 };
     // Every character first: XML forbids control characters but tab and line ends (found in
     // review: NUL and U+0001 were read).
@@ -294,7 +303,9 @@ pub fn parse_with_limits<'a>(input: &'a str, limits: &Limits<'_>) -> Result<Elem
     if r.rest().starts_with('\u{feff}') {
         r.at += '\u{feff}'.len_utf8();
     }
-    if r.rest().starts_with("<?xml") {
+    if r.rest().starts_with("<?xml")
+        && (!allow_pi || r.rest()[5..].starts_with([' ', '\t', '\r', '\n', '?']))
+    {
         r.past("?>", "the XML declaration does not end")?;
     }
     // Open elements, innermost last; the root is taken out when it closes.
@@ -341,7 +352,25 @@ pub fn parse_with_limits<'a>(input: &'a str, limits: &Limits<'_>) -> Result<Elem
         } else if rest.starts_with("<!") {
             return Err(r.error("a DTD or CDATA, which TQSL does not write"));
         } else if rest.starts_with("<?") {
-            return Err(r.error("a processing instruction"));
+            if !allow_pi {
+                return Err(r.error("a processing instruction"));
+            }
+            r.at += 2;
+            let target = r.name()?;
+            if target.eq_ignore_ascii_case("xml") {
+                return Err(r.error("an XML processing instruction"));
+            }
+            if !r.rest().starts_with("?>") && !r.rest().starts_with([' ', '\t', '\r', '\n']) {
+                return Err(r.error("a malformed processing instruction"));
+            }
+            let body = r.past("?>", "a processing instruction does not end")?;
+            if target.len().saturating_add(body.len()) > 64 * 1024 {
+                return Err(r.error("a processing instruction is too long"));
+            }
+            elements += 1;
+            if elements > limits.elements.min(MAX_ELEMENTS) {
+                return Err(r.error("too many elements"));
+            }
         } else if rest.starts_with("</") {
             r.at += 2;
             let name = r.name()?;

@@ -48,7 +48,7 @@ One target per reader, each driving the library's public entry points the way `q
 inputs bounded below the library's own limits (`MAX_INPUT`, 256 KiB; CI passes 16 KiB for logs and
 64 KiB for the rest):
 
-- **`adif`**: the log is read as records; every record the library accepts becomes a QSO, every one it
+- **`adif`** and **`adx`**: the log is read as records; every record the library accepts becomes a QSO, every one it
   refuses is left out; QSOs outside the certificate's dates are left out; then the store prepares the
   log, the new QSOs are chosen and signed with the store's key, and each QSO the signer names is left
   out and the rest tried again, as `qg-trust sign` does. The signer is the standard set's KC4QPQ
@@ -70,12 +70,12 @@ inputs bounded below the library's own limits (`MAX_INPUT`, 256 KiB; CI passes 1
   every station location reads again as itself.
 
 Every target also fails on a panic, a hang (20 seconds an input) and memory use past libFuzzer's
-limit. Seeds are copied from `tests/corpus` by `fuzz/seed.sh` (a gzipped `.tq6` or `.tbk` also
+limit. Seeds are copied from `tests/corpus` or generated as synthetic ADX by `fuzz/seed.sh` (a gzipped `.tq6` or `.tbk` also
 decompressed, since a mutated gzip stream mostly fails its checksum before the XML), so the test
 corpus stays the one copy of each file.
 
-**Readers not fuzzed yet, because QG Trust has none:** ADX and Cabrillo, which Gate C names, are not
-read by QG Trust today ([FEATURE-PARITY](../FEATURE-PARITY.md): "Later"). Each comes with its target
+**Readers not fuzzed yet, because QG Trust has none:** Cabrillo, which Gate C names, is not
+read by QG Trust today ([FEATURE-PARITY](../FEATURE-PARITY.md): "Later"). It comes with its target
 when it is written.
 
 **What a fuzzer cannot reach:** a `.p12`'s contents past its MAC, which a mutated file fails before
