@@ -34,7 +34,7 @@ uploads one later. A key that TQSL protected with a password is asked for once, 
 
 | Command | |
 |---|---|
-| `qg-trust sign LOG -l NAME` | sign a log; `-b`/`-e` choose dates, `--again` signs QSOs signed before, `--cert ID` picks the certificate when you have more than one for the call |
+| `qg-trust sign LOG -l NAME` | sign a log; `-b`/`-e` choose dates, `-d` leaves out QSOs signed before (by default the whole log is signed, as it is), `--cert ID` picks the certificate when you have more than one for the call |
 | `qg-trust send LOG -l NAME` | sign and upload, keeping the `.tq8` beside the log |
 | `qg-trust upload LOG.tq8` | upload a signed log |
 | `qg-trust import FILE` | a TQSL backup (`.tbk`), ARRL's answer to a request (`.tq6`) or a `.p12`; `--trust-root FINGERPRINT` trusts a new ARRL root the `.tq6` or `.p12` brings, once `import` has named it |

@@ -249,7 +249,7 @@ source with `--tqsl-src`), and every Rust path, `qg-trust` command and test name
 | `tqsl_endConverter` | Finish signing | Not applicable: Rust frees a value when it is dropped; there is nothing to free by hand |  |
 | `tqsl_setConverterAllowBadCall` | Sign calls that are not amateur calls | `qso_graph_trust::options::SigningOptions::allow_bad_calls`; `qg-trust sign --allow-bad-calls` | `qso-graph-trust/tests/signing_options.rs::calls_refuse_controls_and_xml_forbidden_characters_with_any_options` |
 | `tqsl_setConverterQTHDetails` | What the log's own location details do | `qso_graph_trust::options::SigningOptions::qth`; `qg-trust -f`, `qg-trust sign --qth` | `qso-graph-trust/tests/signing_options.rs::settings_sign_and_record_exactly_as_tqsllib` `qso-graph-trust-cli/src/commands/tests.rs::a_logger_chooses_what_the_logs_own_location_details_do_with_f` |
-| `tqsl_setConverterAllowDuplicates` | Sign QSOs signed before | `qso_graph_trust::store::DuplicateChoice::SignAgain`; `qg-trust sign --again` | `qso-graph-trust/src/store/tests/signed.rs::choices_write_only_the_selected_qsos_and_record_only_after_success` |
+| `tqsl_setConverterAllowDuplicates` | Sign QSOs signed before | `qso_graph_trust::store::DuplicateChoice::SignAgain`; `qg-trust sign` (the default; `-d` leaves them out) | `qso-graph-trust/src/store/tests/signed.rs::choices_write_only_the_selected_qsos_and_record_only_after_success` |
 | `tqsl_setConverterIgnoreSeconds` | Leave seconds out | `qso_graph_trust::options::SigningOptions::ignore_seconds` | `qso-graph-trust/tests/signing_options.rs::settings_sign_and_record_exactly_as_tqsllib` |
 
 ## `adif.h`

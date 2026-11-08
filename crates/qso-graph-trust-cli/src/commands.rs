@@ -66,13 +66,22 @@ struct People {
     command: Command,
 }
 
+/// Whether QSOs signed before are signed again. A logger's -a decides as TQSL does; otherwise
+/// every QSO is signed unless -d asks to leave those out.
+fn signs_again(a: &SignArgs) -> bool {
+    match a.action {
+        Some(action) => action == Action::All,
+        None => a.again || !a.dedupe,
+    }
+}
+
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Sign an ADIF log for a station location, into a .tq8 for LoTW.
     #[command(
         after_help = "Example:\n  qg-trust sign log.adi -l Home -b 2026-01-01\n\n\
-        QSOs signed before are left out unless you give --again. A QSO LoTW would refuse is \
-        named, with the reason, and the rest are signed."
+        Every QSO in the log is signed, as it is, including any signed before; -d leaves those \
+        out. A QSO LoTW would refuse is named, with the reason, and the rest are signed."
     )]
     Sign(SignArgs),
     /// Upload a signed log (.tq8) to LoTW.
@@ -140,8 +149,12 @@ struct SignArgs {
     /// Where to write the signed log (default: the log's name with .tq8).
     #[arg(short = 'o', long, value_name = "FILE")]
     output: Option<PathBuf>,
-    /// Sign QSOs signed before as well.
-    #[arg(long)]
+    /// Leave out QSOs signed before. Without it, every QSO in the log is signed as it is: LoTW
+    /// takes a QSO it already has without harm, and a contest log's repeat contacts are QSOs.
+    #[arg(short = 'd', long)]
+    dedupe: bool,
+    /// What every run does now; kept so scripts written for 0.1 still run.
+    #[arg(long, hide = true, conflicts_with = "dedupe")]
     again: bool,
     /// The certificate to sign with, by ID (qg-trust cert list), when you have more than one in
     /// force for the call; otherwise the one covering most of the log's QSOs.
@@ -733,7 +746,7 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         refused += 1;
         left_out.outside_certificate += 1;
     }
-    let again = a.again || a.action == Some(Action::All);
+    let again = signs_again(a);
     let choice = if again {
         DuplicateChoice::SignAgain
     } else {
@@ -810,7 +823,7 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
                 env.message(
                     Tone::Error,
                     format_args!(
-                        "all {before} QSO{} were signed before; --again signs them again",
+                        "all {before} QSO{} were signed before; without -d they are signed again",
                         plural(before)
                     ),
                 );
@@ -902,7 +915,7 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         );
         return Err(Exit::OutputError);
     }
-    let again = a.again || a.action == Some(Action::All);
+    let again = signs_again(a);
     if !again {
         left_out.signed_before = before;
     }
@@ -922,10 +935,7 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         location.name
     );
     if before > 0 && !again {
-        let _ = write!(
-            summary,
-            "; {before} signed before, skipped (--again signs them)"
-        );
+        let _ = write!(summary, "; {before} signed before, left out by -d");
     }
     if refused > 0 {
         let _ = write!(summary, "; {refused} not signed, named above");
@@ -1101,6 +1111,7 @@ pub(crate) fn sign_for_logger(call: &LoggerCall<'_>, env: &mut Env<'_>) -> Exit 
         begin,
         end,
         output: output.map(Path::to_path_buf),
+        dedupe: false,
         again: false,
         cert: None,
         force: true,

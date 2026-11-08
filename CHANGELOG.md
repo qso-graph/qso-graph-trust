@@ -20,6 +20,13 @@ versions follow [Semantic Versioning](https://semver.org/).
 - `docs/TQSLLIB-MAP.md` maps every function and variable tqsllib 2.8.7 publishes to QG Trust, with a
   test or a stated reason, kept true by `scripts/tqsllib-map.py --check` in CI.
 
+### Changed
+
+- `qg-trust sign` and `send` sign the whole log as it is, QSOs signed before included: LoTW takes a
+  QSO it already has without harm, and a contest log's repeat contacts are QSOs. `-d`/`--dedupe`
+  leaves QSOs signed before out and says how many. `--again` is still accepted, and does what every
+  run now does. The form loggers call in place of `tqsl` keeps TQSL's `-a`.
+
 ## [0.1.4] - 2026-11-07
 
 ### Added

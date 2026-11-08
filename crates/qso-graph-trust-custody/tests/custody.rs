@@ -929,7 +929,7 @@ fn what_qg_trust_writes(plant: bool) -> Vec<String> {
     );
     runs.qg_trust(
         "sign with the backup's key",
-        &["sign", &kc4qpq_log, "-l", "KC4QPQ-HOME", "--again"]
+        &["sign", &kc4qpq_log, "-l", "KC4QPQ-HOME"]
             .into_iter()
             .chain(["-o", &out("kc4qpq.tq8")])
             .collect::<Vec<_>>(),
