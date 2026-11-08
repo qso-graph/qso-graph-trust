@@ -48,6 +48,7 @@ uploads one later. A key that TQSL protected with a password is asked for once, 
 | `qg-trust cert renew CALL` | renew one, with a new key, for the QSO dates it has (`--to DATE` or `--no-end-date` to change the last) |
 | `qg-trust cert delete ID --force` | delete a certificate and its key |
 | `qg-trust location list` / `show NAME` | your station locations |
+| `qg-trust location default NAME` | set your default station location |
 | `qg-trust location add NAME --call CALL --dxcc N --grid GRID FIELD=VALUE…` | add one |
 | `qg-trust location edit NAME …` / `delete NAME --force` | change or delete one |
 | `qg-trust location fields N` | the fields a DXCC entity's locations take |
@@ -90,7 +91,7 @@ signs with the keys in the store and uploads. `-i FILE` instead reads a TQSL bac
 | `-x`, `-q`, `-d` | accepted and ignored; `qg-trust` always exits when done |
 | `-n`, `--updates` | update through your package manager or installer |
 | `-s`, `--editlocation` | use `qg-trust location add` or `qg-trust location edit` |
-| `-h`, `-v` | help, version (including the compatible TQSL version) |
+| `-h`, `-v` | help, version |
 | `--completions SHELL` | write shell completions (bash, zsh, fish, powershell, elvish) |
 
 As in TQSL, `-z` has no effect when `-u` is given: the log is signed, recorded and uploaded as usual, and the diagnostic log (`-t`) says so.

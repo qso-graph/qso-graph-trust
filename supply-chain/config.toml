@@ -512,6 +512,11 @@ version = "3.27.0"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): credential backend support and build-time helpers. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
+[[exemptions.terminal_size]]
+version = "0.4.4"
+criteria = "safe-to-deploy"
+notes = "Not audited yet (decision 0004): reads the terminal's width so qg-trust's help wraps to it. Command line only, never in the library; pulled in by clap's wrap_help feature. Its OS calls go through rustix and windows-sys, already in the tree."
+
 [[exemptions.tls_codec]]
 version = "0.4.2"
 criteria = "safe-to-deploy"

@@ -394,7 +394,6 @@ fn the_command_line_is_refused_with_tqsls_syntax_code() {
     let log = path(&set("adif/KN4YU-CLUB.adi")).to_string();
     for args in [
         vec![],
-        vec![log.as_str()],
         vec!["-i", &tbk, log.as_str()],
         vec!["-i", &tbk, "-l", "KN4YU-CLUB"],
         vec!["-i", &tbk, "-l", "KN4YU-CLUB", log.as_str(), log.as_str()],
@@ -430,6 +429,24 @@ fn the_command_line_is_refused_with_tqsls_syntax_code() {
             "{args:?}"
         );
     }
+}
+
+#[test]
+fn backup_without_location_names_the_files_locations() {
+    let ran = qg_trust(
+        &[
+            "-i",
+            path(&set("standard.tbk")),
+            path(&set("adif/KN4YU-CLUB.adi")),
+        ],
+        None,
+    );
+    assert_eq!(ran.code, 10, "{}", ran.err);
+    assert!(
+        ran.err.contains("KN4YU-CLUB") && ran.err.contains("W4W-EVENT"),
+        "{}",
+        ran.err
+    );
 }
 
 #[test]
@@ -520,25 +537,8 @@ fn help_and_version_print_and_exit_zero() {
     let ran = qg_trust(&["--version"], None);
     assert_eq!(
         (ran.code, ran.out.trim()),
-        (
-            0,
-            format!(
-                "qg-trust {} (compatible with TQSL Version 2.8.7)",
-                qso_graph_trust::VERSION
-            )
-            .as_str()
-        )
+        (0, format!("qg-trust {}", qso_graph_trust::VERSION).as_str())
     );
-    let marker = "TQSL Version ";
-    let version = ran
-        .out
-        .split_once(marker)
-        .expect("QLog pattern")
-        .1
-        .split(|c: char| !(c.is_ascii_digit() || c == '.'))
-        .next()
-        .unwrap();
-    assert_eq!(version, "2.8.7");
     let short = qg_trust(&["-v"], None);
     assert_eq!(short.out, ran.out);
     let ran = qg_trust(&["-h"], None);

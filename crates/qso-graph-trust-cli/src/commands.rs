@@ -98,7 +98,7 @@ enum Command {
         qg-trust import KI7MT.p12\n  qg-trust import KI7MT.tq6 --trust-root 1A:2B:3C:4D:...:9F\n\n\
         When ARRL starts issuing under a new root, its .tq6 brings the root with it, and qg-trust \
         names the root and its SHA-256 fingerprint before trusting it; run again with --trust-root \
-        and that fingerprint once you know it is ARRL's. A new root in your own TQSL backup is \
+        and that fingerprint once you know it is ARRL's. A new root in your own .tbk backup is \
         trusted, and named."
     )]
     Import(ImportArgs),
@@ -152,7 +152,7 @@ struct SignArgs {
     log: PathBuf,
     /// The station location to sign for, by name (qg-trust location list).
     #[arg(short = 'l', long, value_name = "NAME")]
-    location: String,
+    location: Option<String>,
     /// Sign only QSOs on or after DATE (YYYY-MM-DD or YYYYMMDD).
     #[arg(short = 'b', long = "from", value_name = "DATE", value_parser = date)]
     begin: Option<Date>,
@@ -188,7 +188,7 @@ struct SignArgs {
 
 /// TQSL's settings that change what is signed, each off by default as in TQSL.
 #[derive(Debug, Args)]
-#[command(next_help_heading = "TQSL's signing settings")]
+#[command(next_help_heading = "Signing settings")]
 struct OptionArgs {
     /// Sign QSO times without their seconds.
     #[arg(long)]
@@ -199,11 +199,11 @@ struct OptionArgs {
     /// Don't check the log's STATION_CALLSIGN and OPERATOR against the certificate.
     #[arg(long)]
     ignore_log_callsigns: bool,
-    /// What the log's own MY_ fields do: refuse a QSO that disagrees (TQSL's default), ignore them,
+    /// What the log's own MY_ fields do: refuse a QSO that disagrees (the default), ignore them,
     /// or take them in place of the location's.
     #[arg(long, value_enum, value_name = "HOW", default_value_t = Qth::Refuse)]
     qth: Qth,
-    /// Sign an ADIF mode as a LoTW mode, as TQSL's custom mode mappings do (repeatable).
+    /// Sign an ADIF mode as a LoTW mode (repeatable).
     #[arg(long = "mode", value_name = "ADIF=LOTW", value_parser = pair)]
     modes: Vec<(String, String)>,
 }
@@ -375,6 +375,9 @@ enum Location {
     /// List your station locations.
     #[command(after_help = "Example:\n  qg-trust location list")]
     List(ListArgs),
+    /// Set your default station location.
+    #[command(after_help = "Example:\n  qg-trust location default Home")]
+    Default(DefaultLocationArgs),
     /// Show one station location's fields.
     #[command(after_help = "Example:\n  qg-trust location show Home")]
     Show(ShowArgs),
@@ -394,6 +397,12 @@ enum Location {
     /// The fields a DXCC entity's station locations take.
     #[command(after_help = "Example:\n  qg-trust location fields 291")]
     Fields(FieldsArgs),
+}
+
+#[derive(Debug, Args)]
+struct DefaultLocationArgs {
+    /// The location's name.
+    name: String,
 }
 
 #[derive(Debug, Args)]
@@ -622,13 +631,43 @@ fn sign_inner(a: &SignArgs, env: &mut Env<'_>, test_sign: bool) -> Result<Signed
     let locations = store
         .locations()
         .map_err(|e| store_error(env, "the station locations", &e))?;
-    let Some(location) = locations.iter().find(|l| l.name == a.location) else {
+    let default = store
+        .default_location()
+        .map_err(|e| store_error(env, "the default station location", &e))?;
+    let name = match a.location.as_deref().or(default.as_deref()) {
+        Some(name) => name,
+        None => {
+            let names: Vec<&str> = locations.iter().map(|l| l.name.as_str()).collect();
+            let message = if names.is_empty() {
+                "You have no station locations: qg-trust location add or qg-trust import from TQSL"
+                    .to_string()
+            } else {
+                format!(
+                    "No default station location; you have: {}. Use qg-trust location default <NAME> or choose a location in the logger",
+                    names.join(", ")
+                )
+            };
+            env.message(Tone::Error, format_args!("{message}"));
+            env.trace.line(format_args!("Refused: {message}"));
+            return Err(Exit::CommandError);
+        }
+    };
+    if a.location.is_none() {
+        env.message(
+            Tone::Warning,
+            format_args!("No -l given: signing for the default station location {name:?}"),
+        );
+        env.trace.line(format_args!(
+            "No -l given: signing for the default station location {name:?}"
+        ));
+    }
+    let Some(location) = locations.iter().find(|l| l.name == name) else {
         let names: Vec<&str> = locations.iter().map(|l| l.name.as_str()).collect();
         env.message(
             Tone::Error,
             format_args!(
                 "there is no station location called {:?}; {}",
-                a.location,
+                name,
                 if names.is_empty() {
                     "you have none yet: qg-trust import your TQSL backup, or qg-trust location add"
                         .to_string()
@@ -1180,7 +1219,11 @@ pub(crate) fn sign_for_logger(call: &LoggerCall<'_>, env: &mut Env<'_>) -> Exit 
     } = *call;
     let args = SignArgs {
         log: log.to_path_buf(),
-        location: location.to_string(),
+        location: if location.is_empty() {
+            None
+        } else {
+            Some(location.to_string())
+        },
         begin,
         end,
         output: output.map(Path::to_path_buf),
@@ -1527,6 +1570,16 @@ fn import_tbk(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit>
                 failed = true;
             }
         }
+    }
+    if existing.is_empty() && locs > 1 {
+        store
+            .clear_default_location()
+            .map_err(|e| store_error(env, "the default station location", &e))?;
+        let _ = writeln!(
+            env.out,
+            "  No default station location yet: qg-trust location default NAME sets the one used \
+             when no -l is given"
+        );
     }
     let signed = match store.import_signed_qsos(&backup) {
         Ok(n) => n,
@@ -2286,6 +2339,9 @@ fn location(l: Location, env: &mut Env<'_>) -> Done {
     let locations = store
         .locations()
         .map_err(|e| store_error(env, "the station locations", &e))?;
+    let default = store
+        .default_location()
+        .map_err(|e| store_error(env, "the default station location", &e))?;
     let find = |name: &str| locations.iter().find(|l| l.name == name);
     match l {
         Location::Fields(_) => unreachable!("answered above"),
@@ -2296,7 +2352,11 @@ fn location(l: Location, env: &mut Env<'_>) -> Done {
                     if i > 0 {
                         s.push(',');
                     }
-                    s.push_str(&location_json(&l.name, &l.station));
+                    s.push_str(&location_json(
+                        &l.name,
+                        &l.station,
+                        default.as_deref() == Some(&l.name),
+                    ));
                 }
                 s.push(']');
                 let _ = writeln!(env.out, "{s}");
@@ -2317,14 +2377,19 @@ fn location(l: Location, env: &mut Env<'_>) -> Done {
                 for l in &locations {
                     let _ = writeln!(
                         env.out,
-                        "{:<width$} {:<10} {}{}",
+                        "{:<width$} {:<10} {}{}{}",
                         l.name,
                         l.station.call(),
                         entity(l.station.dxcc()),
                         l.station
                             .get("GRIDSQUARE")
                             .map(|g| format!("  {g}"))
-                            .unwrap_or_default()
+                            .unwrap_or_default(),
+                        if default.as_deref() == Some(&l.name) {
+                            "  (default)"
+                        } else {
+                            ""
+                        }
                     );
                 }
             }
@@ -2335,19 +2400,47 @@ fn location(l: Location, env: &mut Env<'_>) -> Done {
                 return Err(no_location(env, &a.name));
             };
             if a.json {
-                let _ = writeln!(env.out, "{}", location_json(&l.name, &l.station));
+                let _ = writeln!(
+                    env.out,
+                    "{}",
+                    location_json(&l.name, &l.station, default.as_deref() == Some(&l.name))
+                );
             } else {
                 let _ = writeln!(
                     env.out,
-                    "{}: {} ({})",
+                    "{}: {} ({}){}",
                     l.name,
                     l.station.call(),
-                    entity(l.station.dxcc())
+                    entity(l.station.dxcc()),
+                    if default.as_deref() == Some(&l.name) {
+                        " (default)"
+                    } else {
+                        ""
+                    }
                 );
                 for (k, v) in l.station.fields() {
                     let _ = writeln!(env.out, "  {k}={v}");
                 }
             }
+            Ok(Exit::Success)
+        }
+        Location::Default(a) => {
+            if find(&a.name).is_none() {
+                let names: Vec<&str> = locations.iter().map(|l| l.name.as_str()).collect();
+                env.message(
+                    Tone::Error,
+                    format_args!(
+                        "there is no station location called {:?}; you have: {}",
+                        a.name,
+                        names.join(", ")
+                    ),
+                );
+                return Err(Exit::CommandError);
+            }
+            store
+                .set_default_location(&a.name)
+                .map_err(|e| store_error(env, "the default station location", &e))?;
+            let _ = writeln!(env.out, "Default station location: {}", a.name);
             Ok(Exit::Success)
         }
         Location::Add(a) => {
@@ -2463,8 +2556,12 @@ fn no_location(env: &mut Env<'_>, name: &str) -> Exit {
     Exit::CommandError
 }
 
-fn location_json(name: &str, station: &StationLocation) -> String {
-    let mut s = format!("{{\"name\":{},\"fields\":{{", json_str(name));
+fn location_json(name: &str, station: &StationLocation, default: bool) -> String {
+    let mut s = format!(
+        "{{\"name\":{},\"default\":{},\"fields\":{{",
+        json_str(name),
+        default
+    );
     for (i, (k, v)) in station.fields().enumerate() {
         if i > 0 {
             s.push(',');

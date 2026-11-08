@@ -244,12 +244,25 @@ fn a_tqsl_backup_imports_certificates_keys_locations_and_the_signed_record() {
         ham.store.locations().expect("locations").len(),
         LOCATIONS.len()
     );
+    assert_eq!(ham.store.default_location().expect("default"), None);
+    assert!(
+        ran.out.contains("qg-trust location default NAME"),
+        "{}",
+        ran.out
+    );
     assert!(!ham.store.signed_qsos().expect("record").is_empty());
 
-    // Importing it again changes nothing and says so.
+    // Importing it again keeps an explicitly chosen default.
+    ham.store
+        .set_default_location("KN4YU-CLUB")
+        .expect("default");
     let again = ham.run(&["import", path(&set("standard.tbk"))]);
     assert_eq!(again.code, 0, "{}", again.err);
     assert!(again.out.contains("already here"), "{}", again.out);
+    assert_eq!(
+        ham.store.default_location().expect("default").as_deref(),
+        Some("KN4YU-CLUB")
+    );
     assert_eq!(ham.store.certificates().expect("certificates").len(), 3);
 }
 
@@ -760,6 +773,69 @@ fn fldigis_call_signs_uploads_and_leaves_final_status_in_the_trace() {
     assert!(!text.contains("secret"), "{text}");
     assert!(!again.out.contains("secret") && !again.err.contains("secret"));
     assert_eq!(ham.sent.borrow().len(), 1);
+}
+
+/// QLog 0.54.2 calls TQSL with these options (`service/lotw/Lotw.cpp`, line 317).
+#[test]
+fn qlogs_calls_use_the_default_or_explicit_location() {
+    let ham = Ham::unsigned();
+    let dir = scratch();
+    let adi = dir.join("qlog.adi");
+    let trace = dir.join("qlog-trace.txt");
+    std::fs::copy(set("adif/KN4YU-CLUB.adi"), &adi).expect("copy");
+    ham.store
+        .set_default_location("KN4YU-CLUB")
+        .expect("default");
+    let ran = ham.run(&["-d", "-q", "-u", "-t", path(&trace), path(&adi)]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        ran.err.contains("default station location \"KN4YU-CLUB\""),
+        "{}",
+        ran.err
+    );
+    assert_eq!(ham.sent.borrow().len(), 1);
+    assert!(
+        std::fs::read_to_string(&trace)
+            .expect("trace")
+            .contains("default station location \"KN4YU-CLUB\"")
+    );
+
+    let ham = Ham::unsigned();
+    ham.store
+        .set_default_location("W4W-EVENT")
+        .expect("other default");
+    let ran = ham.run(&["-d", "-q", "-u", path(&adi), "-l", "KN4YU-CLUB"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(ham.sent.borrow().len(), 1);
+    ham.store.clear_default_location().expect("clear");
+    let ran = ham.run(&["-d", "-q", "-u", path(&adi)]);
+    assert_eq!(ran.code, 10, "{}", ran.err);
+    assert!(
+        ran.err.contains("KN4YU-CLUB") && ran.err.contains("W4W-EVENT"),
+        "{}",
+        ran.err
+    );
+    assert_eq!(ham.sent.borrow().len(), 1);
+}
+
+#[test]
+fn location_default_sets_and_refuses_unknown_names() {
+    let ham = Ham::unsigned();
+    let ran = ham.run(&["location", "default", "KN4YU-CLUB"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        ham.run(&["location", "list", "--json"])
+            .out
+            .contains("\"default\":true")
+    );
+    assert!(
+        ham.run(&["location", "show", "KN4YU-CLUB"])
+            .out
+            .contains("default")
+    );
+    let ran = ham.run(&["location", "default", "missing"]);
+    assert_eq!(ran.code, 10, "{}", ran.err);
+    assert!(ran.err.contains("KN4YU-CLUB") && ran.err.contains("W4W-EVENT"));
 }
 
 #[test]

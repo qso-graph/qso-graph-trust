@@ -32,9 +32,6 @@ use qso_graph_trust::upload::UploadRequest;
 use qso_graph_trust::{VERSION, records};
 use zeroize::Zeroizing;
 
-/// The TQSL command-line version understood by compatible loggers.
-const TQSL_VERSION: &str = "2.8.7";
-
 pub(crate) mod trace;
 pub(crate) use trace::Trace;
 
@@ -119,18 +116,19 @@ pub(crate) struct Env<'a> {
 
 const AFTER_HELP: &str = "\
 Commands:
-  qg-trust import FILE      certificates, keys and locations from TQSL (.tbk), ARRL (.tq6) or a .p12
-  qg-trust cert list        your certificates; cert request, renew, delete
-  qg-trust location list    your station locations; location add, edit, delete
-  qg-trust root list        the LoTW roots QG Trust trusts; root remove
-  qg-trust sign LOG -l NAME sign a log;  qg-trust send LOG -l NAME  signs and uploads it
-  qg-trust upload LOG.tq8   upload a signed log
-qg-trust <command> --help says more, with an example.
+  qg-trust import FILE         from a .tbk backup, a .tq6 or a .p12
+  qg-trust cert list           your certificates; request, renew, delete
+  qg-trust location list       your locations; add, edit, default, delete
+  qg-trust root list           the LoTW roots QG Trust trusts; remove
+  qg-trust sign LOG [-l NAME]  sign a log
+  qg-trust send LOG [-l NAME]  sign a log and upload it
+  qg-trust upload LOG.tq8      upload a signed log
+  qg-trust <command> --help    more about a command, with an example
 
-The options above are TQSL's, for loggers: without -i, keys and locations come from the store.
-With -i, the key's password is asked for when it is needed, with what you type hidden, or read as one line
-from standard input when a logger runs qg-trust. The last line on standard error is
-\"Final Status: <name>(<code>)\", as loggers expect.";
+The options above sign a log in one call, as loggers use them. Keys and locations come from the \
+store, and without -l the default location is used. With -i, the key's password is asked for when \
+it is needed, with what you type hidden, or read as one line from standard input when a logger runs \
+qg-trust. The last line on standard error is \"Final Status: <name>(<code>)\", for loggers to read.";
 
 /// The option names and letters stay in step with TQSL so loggers can call either program.
 #[derive(Debug, Parser)]
@@ -140,15 +138,15 @@ from standard input when a logger runs qg-trust. The last line on standard error
     about = "Sign your log for ARRL's Logbook of The World (LoTW) and upload it, with your key kept in \
              your computer's credential store.",
     after_help = AFTER_HELP,
-    override_usage = "qg-trust <COMMAND> [ARGS]     (import, cert, location, sign, send, upload: below)\n       \
-                      qg-trust -l <NAME> [OPTIONS] <LOG.adi|adx>     (as loggers call tqsl)\n       \
+    override_usage = "qg-trust <COMMAND> [ARGS]                      (Commands, below)\n       \
+                      qg-trust [-l <NAME>] [OPTIONS] <LOG.adi|adx>   (for loggers)\n       \
                       qg-trust --completions <SHELL>",
     disable_version_flag = true,
     disable_help_flag = true,
     args_override_self = true
 )]
 struct Options {
-    /// The file with your certificate (the .tbk TQSL saves).
+    /// The file with your certificate (a .tbk backup).
     #[arg(
         short = 'i',
         long = "import",
@@ -212,7 +210,7 @@ struct Options {
     )]
     action: Option<Action>,
     /// The log's own location details (its MY_ fields): ignore them, report a QSO that disagrees
-    /// (TQSL's default) or update the location from them.
+    /// (the default) or update the location from them.
     #[arg(
         short = 'f',
         long,
@@ -431,18 +429,16 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
         match arg.get_id().as_str() {
             "help" => {
                 let rendered = command.render_help();
+                // A blank line above and below, so the help stands apart from the prompt.
                 if env.color_out {
-                    let _ = write!(env.out, "{}", rendered.ansi());
+                    let _ = write!(env.out, "\n{}\n", rendered.ansi());
                 } else {
-                    let _ = write!(env.out, "{rendered}");
+                    let _ = write!(env.out, "\n{rendered}\n");
                 }
                 return None;
             }
             "version" => {
-                let _ = writeln!(
-                    env.out,
-                    "qg-trust {VERSION} (compatible with TQSL Version {TQSL_VERSION})"
-                );
+                let _ = writeln!(env.out, "qg-trust {VERSION}");
                 return None;
             }
             _ => {
@@ -497,8 +493,6 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
     }
     let missing = if options.input.is_none() {
         Some("give the log to sign")
-    } else if options.location.is_none() {
-        Some("-l names the station location to sign for")
     } else {
         None
     };
@@ -780,9 +774,7 @@ impl LeftOut {
 }
 
 fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> Exit {
-    let (Some(backup_path), Some(name), Some(input)) =
-        (&options.backup, &options.location, &options.input)
-    else {
+    let (Some(backup_path), Some(input)) = (&options.backup, &options.input) else {
         return Exit::CommandError;
     };
     if let Err(e) = crate::commands::check_output(
@@ -822,6 +814,19 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
         backup.certificates.len(),
         backup.locations.len()
     ));
+    let Some(name) = &options.location else {
+        let names: Vec<&str> = backup.locations.iter().map(|l| l.name.as_str()).collect();
+        let message = format!(
+            "-l names the station location to sign for; certificate file locations: {}",
+            if names.is_empty() {
+                "none".to_string()
+            } else {
+                names.join(", ")
+            }
+        );
+        env.trace.line(format_args!("Refused: {message}"));
+        return syntax_error(env, &message);
+    };
     let Some(location) = backup.locations.iter().find(|l| l.name == *name) else {
         let names: Vec<&str> = backup.locations.iter().map(|l| l.name.as_str()).collect();
         env.message(
