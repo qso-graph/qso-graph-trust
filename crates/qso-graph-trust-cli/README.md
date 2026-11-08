@@ -19,7 +19,8 @@ cargo install qso-graph-trust-cli
 - **Your key stays yours:** it leaves the credential store only to sign, no passphrase is needed to
   sign, nothing `qg-trust` writes holds a key or password, and everything the program frees is wiped.
   The custody test proves each of these on every change.
-- **Every file it reads is fuzzed,** with every length and count capped.
+- **Every file it reads is tested against millions of broken and malicious files** (fuzz testing),
+  with every length and count capped.
 - **The upload is HTTPS to LoTW only,** its certificate always checked against Mozilla's roots.
 
 More on how each of these is tested: [SECURITY.md](https://github.com/qso-graph/qso-graph-trust/blob/main/SECURITY.md).
