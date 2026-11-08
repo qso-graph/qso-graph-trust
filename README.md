@@ -183,5 +183,5 @@ OpenSSL, without TQSL, and uploads it to LoTW, showing that LoTW accepts a log s
 GPL-3.0-or-later ([LICENSE](LICENSE)); see [NOTICE](NOTICE).
 
 QSO Graph Trust is not made, affiliated with or endorsed by ARRL.
-"Logbook of The World", "LoTW" and "TQSL" are ARRL's names, used here only to say what it works
-with.
+"Logbook of The World," "LoTW," and "TQSL" are ARRL's names, used here only to say what it
+works with.
