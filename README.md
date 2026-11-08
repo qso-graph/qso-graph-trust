@@ -26,8 +26,8 @@ it does was decided from the sources below, and how it does it is its own.
 ## Security — Our #1 Priority
 
 **Your key stays in your computer's credential store,** leaving it only to sign or into a backup QSO
-Graph Trust encrypts itself. QSO Graph Trust is built to the standard of enterprise security software, and every point below is a test or a check that runs on every
-change:
+Graph Trust encrypts itself. QSO Graph Trust is built to the standard of enterprise security
+software, and every point below is a test or a check that runs on every change:
 
 - **OS credential stores only:** the macOS Keychain, Windows Credential Manager or the Secret Service
   on Linux. Never a key file, and never a password or passphrase needed on the command line.
