@@ -13,6 +13,9 @@ has, so every feature is placed in one of three lists, in priority order:
 (`qso-graph-trust-awslc`) and the command line (`qso-graph-trust-cli`, the `qg-trust` command).
 **0.1.0** adds the store-backed `qg-trust` commands and the upload.
 
+tqsllib's own interface, function by function, is mapped to QG Trust's Rust, command line and tests
+in [TQSLLIB-MAP.md](TQSLLIB-MAP.md).
+
 This is the library's list. The command line (`qg-trust`) and QSO Graph Desktop are built on the
 library, so their lists follow from it: the command line is at the end, and Desktop's screens are
 in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).

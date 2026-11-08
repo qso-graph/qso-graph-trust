@@ -64,6 +64,7 @@ fn main() -> ExitCode {
         ("no lint overrides", xtask::no_lint_overrides(&root_dir)),
         ("the pinned compiler", xtask::pinned_compiler(&root_dir)),
         ("the wiping allocator", xtask::wiping_allocator(&meta)),
+        ("the fuzzers", xtask::fuzzers(&root_dir)),
     ] {
         if problems.is_empty() {
             println!("policy: {check}: pass");

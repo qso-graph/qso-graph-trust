@@ -391,6 +391,153 @@ fn every_planted_way_to_override_the_lints_is_caught() {
     assert_eq!(got, want);
 }
 
+/// A planted repository that passes the lint-override check, for the fuzzers' cases.
+fn clean_repository(name: &str) -> PathBuf {
+    let root = xtask::fresh_temp_dir(name).expect("a fresh directory");
+    let write = |rel: &str, text: &str| {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().expect("a parent")).expect("mkdir");
+        std::fs::write(path, text).expect("write");
+    };
+    write(
+        ".cargo/config.toml",
+        &format!("[alias]\nxtask = \"{}\"\n", xtask::XTASK_ALIAS),
+    );
+    write("rust-toolchain.toml", "[toolchain]\nchannel = \"1.99.1\"\n");
+    write("Cargo.toml", "[workspace]\n");
+    root
+}
+
+#[test]
+fn the_fuzzers_toolchain_is_allowed_at_exactly_fuzz_and_nowhere_else() {
+    let root = clean_repository("qso-graph-trust-planted-fuzz-toolchain");
+    let write = |rel: &str, text: &str| {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().expect("a parent")).expect("mkdir");
+        std::fs::write(path, text).expect("write");
+    };
+    let nightly = "[toolchain]\nchannel = \"nightly-2026-10-30\"\n";
+    // The one exception, and Cargo's output for its workspace, which is not walked.
+    write("fuzz/rust-toolchain.toml", nightly);
+    write("fuzz/target/rust-toolchain.toml", nightly);
+    assert_eq!(xtask::no_lint_overrides(&root), Vec::<String>::new());
+    // A name that merely begins with fuzz, a folder inside fuzz, a fuzz folder inside a crate,
+    // another folder's target, and a Cargo configuration in fuzz: each still caught.
+    write("fuzzx/rust-toolchain.toml", nightly);
+    write("fuzz/sub/rust-toolchain.toml", nightly);
+    write("crates/lib/fuzz/rust-toolchain.toml", nightly);
+    write("fuzzx/target/rust-toolchain.toml", nightly);
+    write("fuzz/rust-toolchain", "nightly\n");
+    write("fuzz/.cargo/config.toml", "[build]\nrustflags = []\n");
+    let toolchain = |rel: &[&str]| {
+        let mut path = root.clone();
+        for part in rel {
+            path = path.join(part);
+        }
+        path.display().to_string()
+    };
+    let mut want = vec![
+        format!(
+            "{} is a toolchain file",
+            toolchain(&["fuzzx", "rust-toolchain.toml"])
+        ),
+        format!(
+            "{} is a toolchain file",
+            toolchain(&["fuzz", "sub", "rust-toolchain.toml"])
+        ),
+        format!(
+            "{} is a toolchain file",
+            toolchain(&["crates", "lib", "fuzz", "rust-toolchain.toml"])
+        ),
+        format!(
+            "{} is a toolchain file",
+            toolchain(&["fuzzx", "target", "rust-toolchain.toml"])
+        ),
+        format!(
+            "{} is a toolchain file",
+            toolchain(&["fuzz", "rust-toolchain"])
+        ),
+        format!(
+            "{} is a Cargo configuration file",
+            toolchain(&["fuzz", ".cargo", "config.toml"])
+        ),
+    ];
+    want.sort();
+    let got = xtask::no_lint_overrides(&root);
+    let _ = std::fs::remove_dir_all(&root);
+    assert_eq!(got, want);
+}
+
+#[test]
+fn every_planted_way_to_stretch_the_fuzzers_exception_is_caught() {
+    let root = clean_repository("qso-graph-trust-planted-fuzzers");
+    let write = |rel: &str, text: &str| {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().expect("a parent")).expect("mkdir");
+        std::fs::write(path, text).expect("write");
+    };
+    let manifest = "[package]\nname = \"f\"\npublish = false\n\n[package.metadata]\n\
+                    cargo-fuzz = true\n\n[workspace]\nmembers = [\".\"]\n\n[dependencies]\n\
+                    libfuzzer-sys = \"=0.4.13\"\nqso-graph-trust = { path = \"../crates/lib\" }\n";
+    let target = "#![no_main]\n#![forbid(unsafe_code)]\nfuzz_target!(|d: &[u8]| { let _ = d; });\n";
+    write(
+        "fuzz/rust-toolchain.toml",
+        "[toolchain]\nchannel = \"nightly-2026-10-30\"\n",
+    );
+    write("fuzz/Cargo.toml", manifest);
+    write(
+        "fuzz/src/lib.rs",
+        "#![forbid(unsafe_code)]\npub fn f() {}\n",
+    );
+    write("fuzz/fuzz_targets/a.rs", target);
+    assert_eq!(xtask::fuzzers(&root), Vec::<String>::new());
+    // A floating nightly; a manifest published, in the root's workspace, not cargo-fuzz's, with a
+    // floating dependency; unsafe code in a target and in the shared code; a target that does not
+    // forbid it.
+    write(
+        "fuzz/rust-toolchain.toml",
+        "[toolchain]\nchannel = \"nightly\"\n",
+    );
+    write(
+        "fuzz/Cargo.toml",
+        "[package]\nname = \"f\"\n\n[dependencies]\nlibfuzzer-sys = \"0.4\"\n",
+    );
+    write(
+        "fuzz/fuzz_targets/b.rs",
+        "#![no_main]\n#![forbid(unsafe_code)]\nfn f() { unsafe {} }\n",
+    );
+    write("fuzz/fuzz_targets/c.rs", "#![no_main]\nfn f() {}\n");
+    write(
+        "fuzz/src/lib.rs",
+        "#![forbid(unsafe_code)]\n#[path = \"x.txt\"] mod x;\n",
+    );
+    let file = |rel: &[&str]| {
+        let mut path = root.join("fuzz");
+        for part in rel {
+            path = path.join(part);
+        }
+        path.display().to_string()
+    };
+    let mut want = vec![
+        "fuzz/rust-toolchain.toml must name a dated nightly, not Some(\"nightly\")".to_string(),
+        "fuzz/Cargo.toml is not a workspace of its own".to_string(),
+        "fuzz/Cargo.toml does not say publish = false".to_string(),
+        "fuzz/Cargo.toml is not a cargo-fuzz crate".to_string(),
+        "fuzz/Cargo.toml: libfuzzer-sys is not pinned with = or a path in this repository"
+            .to_string(),
+        format!("{} uses unsafe", file(&["fuzz_targets", "b.rs"])),
+        format!(
+            "{} does not say #![forbid(unsafe_code)]",
+            file(&["fuzz_targets", "c.rs"])
+        ),
+        format!("{} uses #[path]", file(&["src", "lib.rs"])),
+    ];
+    want.sort();
+    let got = xtask::fuzzers(&root);
+    let _ = std::fs::remove_dir_all(&root);
+    assert_eq!(got, want);
+}
+
 #[test]
 fn the_canary_is_refused_here_and_compiles_under_a_lint_cap() {
     let root = here("..");
@@ -548,4 +695,5 @@ fn this_repository_passes() {
     assert_eq!(xtask::no_lint_overrides(&here("..")), Vec::<String>::new());
     assert_eq!(xtask::pinned_compiler(&here("..")), Vec::<String>::new());
     assert_eq!(xtask::wiping_allocator(&meta), Vec::<String>::new());
+    assert_eq!(xtask::fuzzers(&here("..")), Vec::<String>::new());
 }

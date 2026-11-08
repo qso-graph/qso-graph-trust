@@ -1,6 +1,8 @@
 # 0002: No C or C++ in the library; TLS is the one place C is allowed
 
 > The signing provider is decided again in [0006](0006-aws-lc-signs.md): AWS-LC signs through one binding, and RustCrypto's `rsa` is a test tool only.
+>
+> The fuzzers are the one exception to the toolchain and no-C rules below, in `fuzz/` only and never shipped: libFuzzer (C++) on a pinned nightly ([0012](0012-fuzzing.md)).
 
 Decided 2026-11-02 by KI7MT.
 

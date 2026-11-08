@@ -5,6 +5,19 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The file readers are fuzzed: cargo-fuzz and libFuzzer, with a target for ADIF logs, `.tq6`, `.p12`
+  and `.tbk` files, each driving the library as `qg-trust` does and checking that no record the
+  library refuses is ever signed and that everything imported hangs together. In CI on every pull
+  request and longer each week. In `fuzz/` only, on a pinned nightly, and never shipped
+  (decision 0012); `cargo xtask policy` holds it to that.
+- The custody test searches everything `qg-trust` writes, as well as memory, for a key or password:
+  every file a run leaves and every run's output, through import, signing, the diagnostic log,
+  certificate requests and deletion, and the encrypted export.
+- `docs/TQSLLIB-MAP.md` maps every function and variable tqsllib 2.8.7 publishes to QG Trust, with a
+  test or a stated reason, kept true by `scripts/tqsllib-map.py --check` in CI.
+
 ## [0.1.4] - 2026-11-07
 
 ### Added
@@ -18,6 +31,8 @@ versions follow [Semantic Versioning](https://semver.org/).
   carries no credential name.
 
 ## [0.1.3] - 2026-11-07
+
+0.1.2 was not released; its changes are in 0.1.3.
 
 ### Added
 
@@ -34,11 +49,6 @@ versions follow [Semantic Versioning](https://semver.org/).
   anything decrypted: in the command line, any value that could be a password is written
   `<redacted>`. The file is its owner's alone on Unix. A file that cannot be opened is said on
   standard error, in TQSL's words, and the run goes on.
-
-## [0.1.2] - 2026-11-07
-
-### Added
-
 - A new ARRL root can be trusted without a new QG Trust release. ARRL delivers a new root only
   inside the `.tq6` it issues; `qg-trust import` now names a root a `.tq6` or `.p12` brings, with its
   SHA-256 fingerprint, and trusts it when run again with `--trust-root <fingerprint>`. A root in

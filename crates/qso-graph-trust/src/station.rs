@@ -423,6 +423,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_entitys_name_is_arrls_and_a_number_it_does_not_list_has_none() {
+        assert_eq!(dxcc_name(291), Some("UNITED STATES OF AMERICA"));
+        assert_eq!(dxcc_name(1), Some("CANADA"));
+        // A number ARRL does not list has no name, and no fields.
+        assert_eq!(dxcc_name(100_000), None);
+        assert!(fields_for(100_000).is_empty());
+    }
+
+    #[test]
     fn a_qsos_word_about_its_station_must_agree_with_the_location() {
         let loc = StationLocation::new(KANSAS).expect("location");
         for (adif, value) in [

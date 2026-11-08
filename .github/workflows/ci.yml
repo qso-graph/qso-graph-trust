@@ -58,16 +58,18 @@ jobs:
       # (found in review).
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --all-features --locked
-      - name: cargo test
-        run: cargo test --workspace --all-features --locked
-      # The OS credential store itself, under the test service only: what keyring writes must be
-      # what presence and listing find. Linux gets a Secret Service of its own (gnome-keyring,
-      # unlocked with a throwaway password); macOS and Windows use the runner's own store.
+      # Linux gets a Secret Service of its own (gnome-keyring, unlocked with a throwaway password)
+      # before the tests: the custody test runs qg-trust against one to search all it writes, and
+      # the round trip below uses one. macOS and Windows use the runner's own store.
       - name: Secret Service (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q gnome-keyring dbus-x11
+      - name: cargo test
+        run: cargo test --workspace --all-features --locked
+      # The OS credential store itself, under the test service only: what keyring writes must be
+      # what presence and listing find.
       - name: OS credential store round trip
         shell: bash
         env:
@@ -105,6 +107,11 @@ jobs:
         run: cargo xtask policy
       # The custody test optimised: optimisation is what removes a wipe, and the
       # check jobs run it in debug (Linux only: it reads a child's memory through /proc).
+      # Its search of what qg-trust writes starts a Secret Service of its own (gnome-keyring).
+      - name: Secret Service for the custody test
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gnome-keyring dbus-x11
       - name: custody test, release
         run: cargo test -p qso-graph-trust-custody --release --locked
       # LoTW's tables are generated from ARRL's configuration, never edited by hand, and the crate
@@ -114,6 +121,13 @@ jobs:
       # Each published crate carries the GPL's text and the notices, as the repository has them.
       - name: Package files match the repository's
         run: python3 scripts/package-files.py --check
+      # docs/TQSLLIB-MAP.md: each of tqsllib 2.8.7's 215 names mapped to Rust, a command and a test
+      # that exist, or given a reason. tqsllib's source is ARRL's and never here, so the names are
+      # held by their pinned SHA-256; --tqsl-src compares them with the headers where it is at hand.
+      - name: tqsllib map
+        run: |
+          python3 scripts/tqsllib-map.py --check
+          python3 scripts/tqsllib-map.py --self-test
       # The release's decisions, each with the cases it must refuse.
       - name: Release checks
         run: python3 scripts/test_release_check.py
@@ -152,6 +166,57 @@ jobs:
           fi
           echo "RUSTSEC-2023-0071: still no fixed release; the exception stands"
 
+  # Coverage-guided fuzzing of the file readers (docs/decisions/0012-fuzzing.md): cargo fuzz and
+  # libFuzzer, on the dated nightly fuzz/rust-toolchain.toml names, for the fuzz binaries alone;
+  # everything that ships is built by the pinned stable in the jobs above. Each target runs 60
+  # seconds on a pull request and 10 minutes on the weekly run, from seeds copied out of
+  # tests/corpus. A crash, a hang or a broken invariant fails the job, and its input is kept.
+  fuzz:
+    name: fuzz
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      # fuzz/rust-toolchain.toml names the nightly; rustup installs it here. An exact cargo-fuzz:
+      # --locked pins its dependencies, --version which release runs.
+      - name: Rust nightly and cargo-fuzz
+        working-directory: fuzz
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          cargo install cargo-fuzz --version 0.13.2 --locked --quiet
+      # The fuzzers' own Rust is formatted and linted like the workspace's. --locked here also holds
+      # cargo fuzz, which has no such flag, to fuzz/Cargo.lock: a change to it fails this step first.
+      - name: cargo fmt and clippy (fuzz)
+        working-directory: fuzz
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets --locked
+      - name: Seed the corpora from tests/corpus
+        run: fuzz/seed.sh
+      - name: Build every target
+        working-directory: fuzz
+        run: cargo fuzz build
+      - name: Fuzz every target
+        working-directory: fuzz
+        env:
+          SECONDS_EACH: ${{ github.event_name == 'schedule' && '600' || '60' }}
+        run: |
+          for target in $(cargo fuzz list); do
+            case "$target" in adif) len=16384 ;; *) len=65536 ;; esac
+            cargo fuzz run "$target" -- -max_total_time="$SECONDS_EACH" -max_len="$len" \
+              -timeout=20 -rss_limit_mb=4096 -print_final_stats=1
+          done
+      - name: Keep what was found
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts
+          if-no-files-found: ignore
+
   # Exercise the exact release build and archive steps before merging. No signing environments
   # or secrets are passed; the reusable workflow signs only when its sign input is true.
   binaries:
@@ -168,7 +233,7 @@ jobs:
 
   ci-all-green:
     name: ci-all-green
-    needs: [check, policy, binaries]
+    needs: [check, policy, fuzz, binaries]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
