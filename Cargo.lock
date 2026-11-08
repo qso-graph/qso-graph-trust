@@ -1275,7 +1275,7 @@ dependencies = [
 
 [[package]]
 name = "qso-graph-trust"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64ct",
  "keyring",
@@ -1296,7 +1296,7 @@ dependencies = [
 
 [[package]]
 name = "qso-graph-trust-awslc"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "aws-lc-rs",
  "aws-lc-sys",
@@ -1305,7 +1305,7 @@ dependencies = [
 
 [[package]]
 name = "qso-graph-trust-cli"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1321,7 +1321,7 @@ dependencies = [
 
 [[package]]
 name = "qso-graph-trust-custody"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "pkcs8",
  "qso-graph-trust",
@@ -2160,7 +2160,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "proc-macro2",
  "serde_json",

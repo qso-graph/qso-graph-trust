@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-08
+
 ### Added
 
 - A default station location for logger calls and `sign` / `send`, managed with `qg-trust location default NAME`.
@@ -31,6 +33,8 @@ versions follow [Semantic Versioning](https://semver.org/).
   there, with a warning that a passphrase on a command line can be read by other programs; it
   unlocks a key read with `-i` that has one, in place of asking. It is never written anywhere.
 - `-n` and `-s` explain how to update or edit locations.
+- `qg-trust -h` wraps to the terminal's width, lists the commands in one column, and names
+  qg-trust's own options; `--version` prints `qg-trust` and its version only.
 - `qg-trust sign` and `send` sign the whole log as it is, QSOs signed before included: LoTW takes a
   QSO it already has without harm, and a contest log's repeat contacts are QSOs. `-d`/`--dedupe`
   leaves QSOs signed before out and says how many. `--again` is still accepted, and does what every
