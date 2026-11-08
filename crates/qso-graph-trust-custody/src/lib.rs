@@ -4,7 +4,7 @@
 //! What the custody test's programs do: sign the corpus log as a QG Trust program would, from
 //! reading the key file to writing the `.tq8`, then wait while the test reads their memory.
 //!
-//! `qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE P12_PASSWORD_FILE SECRETS_FILE live|done|export-passwords|export-keys|import-secrets|files`
+//! `qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE P12_PASSWORD_FILE SECRETS_FILE live|done|export-passwords|export-keys|import-secrets|inspect-drop|inspect-commit|files`
 //!
 //! - `live`: wait with the key unlocked, so the test can prove it finds a key that is there.
 //! - `done`: sign, drop everything, then wait: no key data may be left.
@@ -48,13 +48,20 @@ pub fn run() -> ExitCode {
     ] = &args[..]
     else {
         eprintln!(
-            "usage: qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE P12_PASSWORD_FILE SECRETS_FILE live|done|export-passwords|export-keys|import-secrets|files"
+            "usage: qgt-custody KEY_FILE CERTIFICATE ADIF PASSWORD_FILE P12_PASSWORD_FILE SECRETS_FILE live|done|export-passwords|export-keys|import-secrets|inspect-drop|inspect-commit|files"
         );
         return ExitCode::from(2);
     };
     if !matches!(
         mode.as_str(),
-        "live" | "done" | "export-passwords" | "export-keys" | "import-secrets" | "files"
+        "live"
+            | "done"
+            | "export-passwords"
+            | "export-keys"
+            | "import-secrets"
+            | "inspect-drop"
+            | "inspect-commit"
+            | "files"
     ) {
         return ExitCode::from(2);
     }
@@ -131,7 +138,7 @@ fn sign(
         password,
         import_password_file,
         secrets_file,
-        mode == "export-passwords",
+        mode,
         keep,
     )?;
 
@@ -191,7 +198,7 @@ fn exercise_export(
     password: Option<&[u8]>,
     import_password_file: &str,
     secrets_file: &str,
-    leak_passwords: bool,
+    mode: &str,
     keep: bool,
 ) -> Result<Vec<Zeroizing<Vec<u8>>>, String> {
     let path = export_folder();
@@ -246,13 +253,50 @@ fn exercise_export(
     let (imports, _) =
         Store::open(folder.0.join("imports"), KeyBackend::Memory).map_err(|e| e.to_string())?;
     let p12 = Zeroizing::new(read(&case.join("QG0TEST.p12"))?);
-    let imported = imports
-        .import_pkcs12(&p12, &import_password, &import_trust, None)
+    let pending = imports
+        .inspect_pkcs12(&p12, &import_password, &import_trust)
         .map_err(|e| e.to_string())?;
-    imports
-        .with_key(&imported.id, |key| key.sign(b"custody"))
-        .map_err(|e| e.to_string())?
+    if mode == "inspect-drop" {
+        drop(pending);
+    } else {
+        let report = imports
+            .commit(pending, Default::default())
+            .map_err(|e| e.to_string())?;
+        imports
+            .with_key(&report.certificates[0].id, |key| key.sign(b"custody"))
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+    }
+    // The standard backup has three different test keys, two with different passwords. Scan
+    // cancellation and commit separately after every pending key and password buffer is dropped.
+    let standard =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus/standard");
+    let backup_trust =
+        Trust::with_roots(&[&read(&standard.join("pki/root.pem"))?]).map_err(|e| e.to_string())?;
+    let bytes = Zeroizing::new(read(&standard.join("standard.tbk"))?);
+    let mut pending = imports
+        .inspect_tbk(&bytes, &backup_trust)
         .map_err(|e| e.to_string())?;
+    for index in 0..pending.preview().certificates.len() {
+        let entry = &pending.preview().certificates[index];
+        if entry.needs_password {
+            let password = Zeroizing::new(read(
+                &standard
+                    .join("keys")
+                    .join(format!("{}.password", entry.callsign)),
+            )?);
+            pending
+                .unlock_key(index, &password)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    if mode == "inspect-drop" {
+        drop(pending);
+    } else {
+        imports
+            .commit(pending, Default::default())
+            .map_err(|e| e.to_string())?;
+    }
     let wrong = Password::generate().map_err(|e| e.to_string())?;
     if imports
         .import_pkcs12(&p12, wrong.expose_secret().as_bytes(), &import_trust, None)
@@ -276,7 +320,7 @@ fn exercise_export(
         .and_then(|()| file.write_all(wrong.expose_secret().as_bytes()))
         .and_then(|()| file.write_all(&part[13..29]))
         .map_err(|e| e.to_string())?;
-    if leak_passwords {
+    if mode == "export-passwords" {
         Ok(vec![
             import_password.clone(),
             Zeroizing::new(export_password.expose_secret().as_bytes().to_vec()),

@@ -5,7 +5,18 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Inspect `.tq6`, `.p12`, and TQSL backup imports before committing them: public certificate and
+  key details, per-key backup passwords, root fingerprints, locations, and signed-QSO record size.
+  Commit uses the inspected data under one lock, refuses conflicting store changes, and rolls
+  back staged credentials if publication fails (decision 0014).
+- Memory-custody checks for canceling and committing inspected protected imports, including
+  backup keys with different passwords.
+
 ### Changed
+
+- `qg-trust import` uses the same inspection and commit path for all three file formats.
 
 
 

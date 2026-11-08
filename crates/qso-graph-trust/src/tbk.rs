@@ -262,7 +262,7 @@ impl From<GzipError> for TbkError {
 /// certificate checked against `trust`: [`Trust::lotw`], or the store's trust
 /// (`Store::trust_with`). The roots the backup carries establish nothing here.
 pub fn read(bytes: &[u8], trust: &Trust) -> Result<Backup, TbkError> {
-    read_with(bytes, trust, false)
+    read_with(bytes, trust, false, true)
 }
 
 /// A TQSL backup read as [`read`] reads one, but as the operator's own: a root it carries is
@@ -271,10 +271,19 @@ pub fn read(bytes: &[u8], trust: &Trust) -> Result<Backup, TbkError> {
 /// to it through the backup's CAs). `Store::trust_backup_roots` then keeps those roots, and says
 /// which are new.
 pub fn read_trusting_roots(bytes: &[u8], trust: &Trust) -> Result<Backup, TbkError> {
-    read_with(bytes, trust, true)
+    read_with(bytes, trust, true, true)
 }
 
-fn read_with(bytes: &[u8], trust: &Trust, own_roots: bool) -> Result<Backup, TbkError> {
+pub(crate) fn inspect(bytes: &[u8], trust: &Trust) -> Result<Backup, TbkError> {
+    read_with(bytes, trust, true, false)
+}
+
+fn read_with(
+    bytes: &[u8],
+    trust: &Trust,
+    own_roots: bool,
+    verify: bool,
+) -> Result<Backup, TbkError> {
     let plain;
     let text: &[u8] = if gzip::is_gzip(bytes) {
         plain = gzip::decompress(bytes, MAX_TBK_LEN)?;
@@ -321,7 +330,9 @@ fn read_with(bytes: &[u8], trust: &Trust, own_roots: bool) -> Result<Backup, Tbk
         trust.clone()
     };
     for entry in &backup.certificates {
-        if let Some(cert) = &entry.certificate {
+        if let Some(cert) = &entry.certificate
+            && verify
+        {
             cert.verify(&trust, &backup.authorities)
                 .map_err(|error| TbkError::Certificate {
                     callsign: entry.callsign.clone(),

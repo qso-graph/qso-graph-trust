@@ -22,7 +22,8 @@ use qso_graph_trust::request::{Authorization, CallKind, CertificateRequest};
 use qso_graph_trust::signed_log::LogError;
 use qso_graph_trust::station::{self, StationLocation};
 use qso_graph_trust::store::{
-    DuplicateChoice, RootKind, RootSource, Store, StoreError, StoredCertificate, TrustedRoot,
+    DuplicateChoice, ImportChoices, ImportDisposition, RootKind, RootSource, Store, StoreError,
+    StoredCertificate, TrustedRoot,
 };
 use qso_graph_trust::upload::{UploadOutcome, UploadRequest};
 use qso_graph_trust::{VERSION, records, tbk};
@@ -1464,131 +1465,127 @@ fn untrusted_root(path: &Path, subject: &str, fingerprint: &str, env: &mut Env<'
 
 fn import_tbk(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit> {
     let trust = store_trust(store, env)?;
-    let backup = read_file(path, tbk::MAX_TBK_LEN)
-        .map_err(|e| e.to_string())
-        .and_then(|b| tbk::read_trusting_roots(&b, &trust).map_err(|e| e.to_string()));
-    let backup = match backup {
-        Ok(b) => b,
-        Err(e) => {
-            env.message(Tone::Error, format_args!("{}: {e}", path.display()));
-            return Err(Exit::InputError);
+    let bytes = read_file(path, tbk::MAX_TBK_LEN).map_err(|e| {
+        env.message(Tone::Error, format_args!("{}: {e}", path.display()));
+        Exit::InputError
+    })?;
+    let mut pending = store.inspect_tbk(&bytes, &trust).map_err(|e| {
+        env.message(Tone::Error, format_args!("{}: {e}", path.display()));
+        Exit::InputError
+    })?;
+    let entries = pending.preview().certificates.clone();
+    for (index, entry) in entries.iter().enumerate() {
+        if let ImportDisposition::Refused { reason } = &entry.disposition
+            && entry.qso_dates.is_some()
+        {
+            env.message(Tone::Error, format_args!("{}: {reason}", entry.callsign));
+            return Err(Exit::TqslError);
         }
-    };
-    // Your own backup's roots are trusted, and named, before its certificates go in.
-    match store.trust_backup_roots(&backup, &trust) {
-        Ok(roots) => report_roots(&roots, "from the backup", env),
-        Err(e) => return Err(store_error(env, "the backup's roots", &e)),
-    }
-    let mut failed = false;
-    let (mut certs, mut locs) = (0usize, 0usize);
-    for entry in &backup.certificates {
-        let Some(cert) = &entry.certificate else {
-            let _ = writeln!(
-                env.out,
-                "  {}: a request still waiting for ARRL in TQSL, not imported; request again with \
-                 qg-trust cert request",
+        if entry.needs_password {
+            let serial = entry
+                .serial
+                .iter()
+                .map(|b| format!("{b:02X}"))
+                .collect::<String>();
+            let password = (env.ask_password)(&format!(
+                "Password for {}'s key (serial {serial}), as set in TQSL: ",
                 entry.callsign
-            );
-            continue;
-        };
-        let added = match &entry.key {
-            None => store.add_certificate(cert),
-            Some(key) => {
-                let password = if key.is_encrypted() {
-                    match (env.ask_password)(&format!(
-                        "Password for {}'s key, as set in TQSL: ",
-                        entry.callsign
-                    )) {
-                        Ok(p) => Some(p),
-                        Err(e) => {
-                            env.message(
-                                Tone::Error,
-                                format_args!("the password could not be read: {e}"),
-                            );
-                            failed = true;
-                            continue;
-                        }
-                    }
-                } else {
-                    None
-                };
-                store.add_certificate_with_key(entry, password.as_deref().map(|p| p.as_slice()))
-            }
-        };
-        match added {
-            Ok(_) => {
-                certs += 1;
-                let _ = writeln!(
-                    env.out,
-                    "  {} ({}): certificate{} imported",
-                    entry.callsign,
-                    entity(entry.dxcc),
-                    if entry.key.is_some() {
-                        " and key"
-                    } else {
-                        ", without a key,"
-                    }
+            ))
+            .map_err(|e| {
+                env.message(
+                    Tone::Error,
+                    format_args!("the password could not be read: {e}"),
                 );
-            }
-            Err(StoreError::AlreadyExists) => {
-                let _ = writeln!(
-                    env.out,
-                    "  {} ({}): already here",
-                    entry.callsign,
-                    entity(entry.dxcc)
-                );
-            }
-            Err(StoreError::Key(e)) => {
+                Exit::TqslError
+            })?;
+            pending.unlock_key(index, &password).map_err(|e| {
                 env.message(Tone::Error, format_args!("{}'s key: {e}", entry.callsign));
-                failed = true;
-            }
-            Err(e) => {
-                env.message(Tone::Error, format_args!("{}: {e}", entry.callsign));
-                failed = true;
-            }
+                Exit::TqslError
+            })?;
         }
     }
     let existing = store
         .locations()
         .map_err(|e| store_error(env, "the station locations", &e))?;
-    for loc in &backup.locations {
-        if existing.iter().any(|l| l.name == loc.name) {
+    let prefs = pending.preview().preferences.clone();
+    // Preserve the command's own-backup policy. The library still requires explicit fingerprints.
+    let fingerprints: Vec<String> = pending
+        .preview()
+        .roots
+        .iter()
+        .map(|r| r.fingerprint.clone())
+        .collect();
+    let accepted: Vec<&str> = fingerprints.iter().map(String::as_str).collect();
+    let report = store
+        .commit(
+            pending,
+            ImportChoices {
+                accept_roots: &accepted,
+                store_locations: true,
+                skip_refused: true,
+            },
+        )
+        .map_err(|e| {
+            env.message(Tone::Error, format_args!("{}: {e}", path.display()));
+            Exit::TqslError
+        })?;
+    report_roots(&report.roots, "from the backup", env);
+    let mut installed = report.certificates.iter();
+    let mut certs = 0;
+    for entry in &entries {
+        if entry.qso_dates.is_none() {
             let _ = writeln!(
                 env.out,
-                "  location {}: already here, kept as it is",
-                loc.name
+                "  {}: a request still waiting for ARRL in TQSL, not imported; request again with qg-trust cert request",
+                entry.callsign
             );
             continue;
         }
-        match store.add_location(&loc.name, &loc.station) {
-            Ok(()) => {
-                locs += 1;
-                let _ = writeln!(env.out, "  location {}: imported", loc.name);
-            }
-            Err(e) => {
-                env.message(Tone::Error, format_args!("location {}: {e}", loc.name));
-                failed = true;
-            }
+        let item = installed
+            .next()
+            .expect("one report per accepted certificate");
+        if item.already_here {
+            let _ = writeln!(
+                env.out,
+                "  {} ({}): already here",
+                entry.callsign,
+                entity(entry.dxcc)
+            );
+        } else {
+            certs += 1;
+            let _ = writeln!(
+                env.out,
+                "  {} ({}): certificate{} imported",
+                entry.callsign,
+                entity(entry.dxcc),
+                if item.has_key {
+                    " and key"
+                } else {
+                    ", without a key,"
+                }
+            );
         }
     }
-    if existing.is_empty() && locs > 1 {
-        store
-            .clear_default_location()
-            .map_err(|e| store_error(env, "the default station location", &e))?;
+    for loc in &report.locations {
         let _ = writeln!(
             env.out,
-            "  No default station location yet: qg-trust location default NAME sets the one used \
-             when no -l is given"
+            "  location {}: {}",
+            loc.name,
+            if existing.iter().any(|l| l.name == loc.name) {
+                "already here, kept as it is"
+            } else {
+                "imported"
+            }
         );
     }
-    let signed = match store.import_signed_qsos(&backup) {
-        Ok(n) => n,
-        Err(e) => {
-            env.message(Tone::Error, format_args!("the record of signed QSOs: {e}"));
-            failed = true;
-            0
-        }
-    };
+    let locs = report.locations_added;
+    if existing.is_empty() && locs > 1 {
+        let _ = writeln!(
+            env.out,
+            "  No default station location yet: qg-trust location default NAME sets the one used when no -l is given"
+        );
+    }
+    let signed = report.signed_qsos_added;
     let _ = writeln!(
         env.out,
         "Imported {certs} certificate{}, {locs} location{} and {signed} signed QSO{} from {}.",
@@ -1597,7 +1594,6 @@ fn import_tbk(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit>
         plural(signed),
         path.display()
     );
-    let prefs = &backup.preferences;
     let mut settings = Vec::new();
     if prefs.ignore_seconds {
         settings.push("--ignore-seconds");
@@ -1626,7 +1622,7 @@ fn import_tbk(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit>
             let _ = writeln!(env.out, "  --mode {adif}={lotw}");
         }
     }
-    if failed { Err(Exit::TqslError) } else { Ok(()) }
+    Ok(())
 }
 
 /// The root `accept` names, if this store did not trust it before: for saying it now does.
@@ -1684,7 +1680,16 @@ fn import_tq6(
     let before = store
         .trusted_roots()
         .map_err(|e| store_error(env, "the trusted roots", &e))?;
-    match store.import_tq6(&bytes, &trust, accept) {
+    let imported = store.inspect_tq6(&bytes, &trust).and_then(|pending| {
+        store.commit(
+            pending,
+            ImportChoices {
+                accept_roots: &accept.into_iter().collect::<Vec<_>>(),
+                ..Default::default()
+            },
+        )
+    });
+    match imported.map(|report| report.certificates) {
         Ok(imported) => {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
             report_roots(
@@ -1762,7 +1767,30 @@ fn import_p12(
     let before = store
         .trusted_roots()
         .map_err(|e| store_error(env, "the trusted roots", &e))?;
-    match store.import_pkcs12(&bytes, &password, &trust, accept) {
+    let imported = store
+        .inspect_pkcs12(&bytes, &password, &trust)
+        .and_then(|pending| {
+            store.commit(
+                pending,
+                ImportChoices {
+                    accept_roots: &accept.into_iter().collect::<Vec<_>>(),
+                    ..Default::default()
+                },
+            )
+        })
+        .and_then(|report| {
+            let imported = report
+                .certificates
+                .into_iter()
+                .next()
+                .ok_or(ImportError::Malformed)?;
+            if imported.already_here {
+                Err(ImportError::Store(StoreError::AlreadyExists))
+            } else {
+                Ok(imported)
+            }
+        });
+    match imported {
         Ok(c) => {
             report_roots(
                 &newly_trusted(store, &before, accept),

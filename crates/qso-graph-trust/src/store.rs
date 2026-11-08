@@ -16,6 +16,12 @@ mod import;
 mod keys;
 mod listing;
 mod part;
+mod pending;
+
+pub use pending::{
+    ImportCertificate, ImportChoices, ImportDisposition, ImportLocation, ImportPreview,
+    ImportReport, ImportRoot, PendingImport,
+};
 mod roots;
 mod signed;
 
@@ -270,6 +276,9 @@ struct Data {
 pub struct Store {
     dir: PathBuf,
     keys: Box<dyn KeyStore>,
+    // An owned pending import can span UI commands without borrowing the Store. Its token also
+    // prevents a different backend, or a reopened store, from committing this instance's plan.
+    import_identity: std::sync::Arc<()>,
     // Exercise failures after rename without depending on host permissions or filesystem faults.
     #[cfg(test)]
     fail_sync: std::sync::atomic::AtomicBool,
@@ -300,6 +309,7 @@ impl Store {
         let store = Self {
             dir: dir.to_path_buf(),
             keys,
+            import_identity: std::sync::Arc::new(()),
             #[cfg(test)]
             fail_sync: std::sync::atomic::AtomicBool::new(false),
         };

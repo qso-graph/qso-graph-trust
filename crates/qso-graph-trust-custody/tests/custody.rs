@@ -371,6 +371,7 @@ fn found_with_cpu(program: &str, case: &str, mode: &str, disable_aesni: bool) ->
     assert!(child.wait().expect("exits").success());
 
     let mut needles = needles(case);
+    needles.extend(written_key_needles());
     needles.push(("PKCS#12 password".into(), p12_password()));
     needles.extend(export_needles);
     needles.extend(import_needles);
@@ -414,6 +415,22 @@ fn no_key_data_or_password_is_left_from_a_protected_key() {
         found_in(WIPED, "1024-password", "done"),
         Vec::<String>::new()
     );
+}
+
+#[test]
+fn inspected_protected_p12_and_backup_leave_no_secrets_after_cancellation_or_commit() {
+    for mode in ["inspect-drop", "inspect-commit"] {
+        for disabled in [false, true] {
+            if disabled && !cfg!(target_arch = "x86_64") {
+                continue;
+            }
+            assert_eq!(
+                found_with_cpu(WIPED, "1024-password", mode, disabled),
+                Vec::<String>::new(),
+                "{mode}, AES-NI disabled={disabled}"
+            );
+        }
+    }
 }
 
 #[test]

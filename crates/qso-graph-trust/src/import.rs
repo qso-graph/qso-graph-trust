@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 
-//! Bounded certificate import. Use `Store::import_tq6` or `Store::import_pkcs12`; decrypted keys
-//! stay inside the library. The whole file is validated before any store mutation. Errors contain
+//! Bounded certificate import. Inspect with `Store::inspect_tq6`, `Store::inspect_pkcs12` or
+//! `Store::inspect_tbk`, review the public preview, then consume it with `Store::commit`. Decrypted
+//! keys stay inside the pending value and are wiped on drop. The one-step convenience methods
+//! use this same path. The whole file is validated before any store mutation. Errors contain
 //! categories and public certificate details only.
 //!
 //! A root the file brings is trusted only by [`crate::certificate`]'s rules: it is in the file,
@@ -14,7 +16,7 @@
 
 use crate::certificate::{
     Certificate, CertificateError, FoundRoot, MAX_CERTIFICATE_LEN, Trust, file_roots,
-    parse_fingerprint, verify_imported,
+    verify_imported,
 };
 use crate::gzip::{self, GzipError};
 use crate::signing::KeyError;
@@ -65,6 +67,17 @@ pub enum ImportError {
     Authentication,
     /// Unsupported encryption, MAC, KDF, content or bag type (RC2-40 included).
     UnsupportedProtection,
+    /// The store or a referenced credential changed after inspection. Inspect again.
+    Conflict,
+    /// The backup could not be read.
+    Backup(crate::tbk::TbkError),
+    /// This key could not be checked. The index identifies its preview entry.
+    KeyAt {
+        /// Index in `ImportPreview::certificates`.
+        index: usize,
+        /// Fixed key error category.
+        error: KeyError,
+    },
     /// Publication or credential storage failed; see `StoreError` for durability semantics.
     Store(StoreError),
 }
@@ -95,6 +108,11 @@ impl fmt::Display for ImportError {
             Self::UnsupportedProtection => {
                 f.write_str("unsupported certificate import protection or bag type")
             }
+            Self::Conflict => {
+                f.write_str("the store changed after inspection; inspect the import again")
+            }
+            Self::Backup(e) => e.fmt(f),
+            Self::KeyAt { index, error } => write!(f, "import key {index}: {error}"),
             Self::Store(e) => e.fmt(f),
         }
     }
@@ -129,75 +147,38 @@ pub struct ImportedCertificate {
     pub already_here: bool,
 }
 
-/// A file's certificates, checked, and the root the operator confirmed for them, if one was given.
-pub(crate) struct Checked {
-    pub certificates: Vec<Certificate>,
-    pub root: Option<FoundRoot>,
-}
+type InspectedCertificates = (Vec<(Certificate, Option<CertificateError>)>, Vec<FoundRoot>);
 
-/// Checks every certificate of a `.tq6` or `.p12` against `trust`, with the root `accept_root`
-/// confirms, which must be one the file brings and its certificates chain to. When the file fails
-/// only for want of a root it brings that may be accepted and was not confirmed, that root is named.
-pub(crate) fn check_certificates(
+/// Verification failures keep the parsed public identity available for a refusal preview.
+pub(crate) fn inspect_certificates(
     users: &[Vec<u8>],
     authorities: &[Vec<u8>],
     trust: &Trust,
-    accept_root: Option<&str>,
-) -> Result<Checked, ImportError> {
+) -> Result<InspectedCertificates, ImportError> {
     if users.is_empty() {
         return Err(ImportError::Malformed);
     }
-    let found = file_roots(users, authorities, trust);
-    let root = match accept_root {
-        None => None,
-        Some(given) => {
-            let canonical = parse_fingerprint(given);
-            let Some(f) = found
-                .iter()
-                .find(|f| canonical.as_deref() == Some(f.fingerprint.as_str()))
-            else {
-                return Err(ImportError::RootMismatch {
-                    given: canonical.unwrap_or_default(),
-                });
-            };
-            Some(f.clone())
-        }
-    };
-    let under = |trust: &Trust| -> Result<Vec<Certificate>, ImportError> {
-        for authority in authorities {
-            verify_imported(authority, trust, authorities, true)?;
-        }
-        users
-            .iter()
-            .map(|der| {
-                let cert = Certificate::from_pem_or_der(der)?;
-                cert.verify(trust, authorities)?;
-                Ok(cert)
-            })
-            .collect()
-    };
-    match under(&trust.with_found(root.as_slice())) {
-        Ok(certificates) => Ok(Checked { certificates, root }),
-        Err(e) => {
-            // Refused only for want of a root the file brings: name it, so it can be confirmed.
-            if let Some(f) = found.iter().find(|f| Some(*f) != root.as_ref())
-                && under(&trust.with_found(&found)).is_ok()
-            {
-                return Err(ImportError::UntrustedRoot {
-                    subject: f.subject.clone(),
-                    fingerprint: f.fingerprint.clone(),
-                });
-            }
-            Err(e)
-        }
-    }
+    let roots = file_roots(users, authorities, trust);
+    let trust = trust.with_found(&roots);
+    let authority_error = authorities
+        .iter()
+        .find_map(|a| verify_imported(a, &trust, authorities, true).err());
+    let certificates = users
+        .iter()
+        .map(|der| {
+            let certificate = Certificate::from_pem_or_der(der)?;
+            let refusal = authority_error
+                .clone()
+                .or_else(|| certificate.verify(&trust, authorities).err());
+            Ok((certificate, refusal))
+        })
+        .collect::<Result<_, ImportError>>()?;
+    Ok((certificates, roots))
 }
 
-pub(crate) fn tq6(
-    bytes: &[u8],
-    trust: &Trust,
-    accept_root: Option<&str>,
-) -> Result<Checked, ImportError> {
+type CertificateContents = (Vec<Vec<u8>>, Vec<Vec<u8>>);
+
+pub(crate) fn tq6_contents(bytes: &[u8]) -> Result<CertificateContents, ImportError> {
     if bytes.len() > MAX_IMPORT_LEN {
         return Err(ImportError::Limit);
     }
@@ -241,7 +222,7 @@ pub(crate) fn tq6(
             _ => return Err(ImportError::Malformed),
         }
     }
-    check_certificates(&users, &authorities, trust, accept_root)
+    Ok((users, authorities))
 }
 
 pub(crate) fn is_authority(der: &[u8]) -> Result<bool, ImportError> {

@@ -608,7 +608,7 @@ mod validation_tests {
         ));
         // The XML failure is checked before certificate validation.
         assert!(matches!(
-            import::tq6(b"<tqsldata><?p x?><tqslcerts/></tqsldata>", &trust, None),
+            import::tq6_contents(b"<tqsldata><?p x?><tqslcerts/></tqsldata>"),
             Err(import::ImportError::Malformed)
         ));
         assert!(crate::xml::parse("<tqsldata><tqslcerts/></tqsldata>").is_ok());
