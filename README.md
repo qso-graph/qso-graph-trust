@@ -40,7 +40,7 @@ software, and every point below is a test or a check that runs on every change:
 - **Only LoTW, only HTTPS, only ARRL's roots,** with the server's certificate always checked.
 - **A locked supply chain:** pinned dependencies, policy checks and CodeQL on every pull request, and
   signed, notarized and attested releases.
-- **Nothing merges until it passes:** nearly 400 tests, about 1.8 million broken and malicious
+- **Nothing merges until it passes:** nearly 400 tests, over 2 million broken and malicious
   test files, eight security policy checks, a search of memory and every file written for any trace of
   a key, and GitHub's CodeQL code scanning, on every change.
 
