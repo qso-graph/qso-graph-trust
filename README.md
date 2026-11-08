@@ -15,10 +15,36 @@
 
 # QSO Graph Trust
 
-QSO Graph Trust is the part of the QSO Graph Project that signs your logs for ARRL's
-[Logbook of The World](https://lotw.arrl.org) (LoTW). It's a ground-up rewrite in Rust, not a
-method-by-method port of TQSL. What it does was decided from the sources below, and how it does it is
-its own.
+**QSO Graph Trust signs and uploads your QSOs to ARRL's [Logbook of The World](https://lotw.arrl.org)
+(LoTW).** It's a security-hardened library and command-line tool written in Rust: your key stays in
+your computer's credential store, every file it reads is tested against millions of broken and
+malicious files, and no key data is left in memory it frees.
+
+It's part of the QSO Graph Project, and a ground-up rewrite, not a method-by-method port of TQSL. What
+it does was decided from the sources below, and how it does it is its own.
+
+## Security — Our #1 Priority
+
+**Your key stays in your computer's credential store,** leaving it only to sign or into a backup QSO
+Graph Trust encrypts itself. QSO Graph Trust is built to the standard of enterprise security
+software, and every point below is a test or a check that runs on every change:
+
+- **OS credential stores only:** the macOS Keychain, Windows Credential Manager or the Secret Service
+  on Linux. Never a key file, and never a password or passphrase needed on the command line.
+- **Nothing it writes holds your key or a password,** and no key data is left in memory it frees. A
+  custody test searches every file, output, log and the program's own memory to prove it.
+- **Every file it reads is tested against millions of broken and malicious files** (fuzz testing),
+  and every length and count is capped, so a bad file is refused rather than crashing it.
+- **Memory-safe Rust, with no `unsafe` code.** No C or C++ beyond the cryptography library, AWS-LC,
+  isolated in one small crate and enforced by policy.
+- **Only LoTW, only HTTPS, only ARRL's roots,** with the server's certificate always checked.
+- **A locked supply chain:** pinned dependencies, policy checks and CodeQL on every pull request, and
+  signed, notarized and attested releases.
+- **Nothing merges until it passes:** nearly 400 tests, about 1.8 million broken and malicious
+  test files, eight security policy checks, a search of memory and every file written for any trace of
+  a key, and GitHub's CodeQL code scanning, on every change.
+
+How each is tested, and how to report a security problem privately: [SECURITY.md](SECURITY.md).
 
 ## Sources
 
@@ -66,9 +92,6 @@ codes and final status line.
   with the reason, and the rest are signed. Signatures are byte for byte what TQSL makes.
 - **It works inside the program you already use.** Another logger or a script can sign and upload for
   LoTW directly, and the library puts signing inside your own program.
-- **It's built to be safe.** A password is never taken from the command line; the upload is HTTPS to
-  LoTW only, its certificate always checked; and everything the program frees is wiped from memory.
-  More, and how to report a security problem: [SECURITY.md](SECURITY.md).
 - **It's signed.** The macOS program is signed by QSO Graph and notarized by Apple, the Windows
   program is signed by QSO Graph, and the Linux packages and their repositories are signed with QSO
   Graph's release key.

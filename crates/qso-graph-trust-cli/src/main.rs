@@ -95,6 +95,7 @@ fn ask_password(prompt: &str) -> std::io::Result<Zeroizing<Vec<u8>>> {
     }
     let mut line = Zeroizing::new(String::new());
     std::io::stdin().lock().read_line(&mut line)?;
-    let trimmed = line.trim_end_matches(['\n', '\r']);
+    let trimmed = line.strip_suffix('\n').unwrap_or(&line);
+    let trimmed = trimmed.strip_suffix('\r').unwrap_or(trimmed);
     Ok(Zeroizing::new(trimmed.as_bytes().to_vec()))
 }

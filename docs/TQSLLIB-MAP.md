@@ -220,7 +220,7 @@ source with `--tqsl-src`), and every Rust path, `qg-trust` command and test name
 | `tqsl_closeDiagFile` | Close the diagnostic log | Not applicable: `qg-trust -t`'s log is closed when the program ends |  |
 | `tqsl_diagFileOpen` | Whether the diagnostic log is open | Not applicable: `qg-trust -t` is given or not, for the whole run |  |
 | `tqsl_openDiagFile` | Open the diagnostic log | `qg-trust -t` | `qso-graph-trust-cli/src/cli/tests.rs::t_writes_a_diagnostic_log_with_no_password_or_key_in_it` `qso-graph-trust-cli/src/cli/trace.rs::the_log_is_its_owners_alone_even_over_a_file_there_before` |
-| `tqsl_removeUploadDatabase` | Delete the record of QSOs signed | `qso_graph_trust::store::Store::wipe_signed_qsos` | `qso-graph-trust/src/store/tests/signed.rs::large_record_is_compact_bounded_and_roundtrips` |
+| `tqsl_removeUploadDatabase` | Delete the record of QSOs signed | `qso_graph_trust::store::Store::wipe_signed_qsos`; CLI `-w` and `signed clear` | `qso-graph-trust/src/store/tests/signed.rs::large_record_is_compact_bounded_and_roundtrips` |
 | `utf8_to_wchar` | UTF-8 to Windows' wide characters | Not applicable: Rust strings are UTF-8, and its standard library converts at the operating system's boundary |  |
 | `wchar_to_utf8` | Windows' wide characters to UTF-8 | Not applicable: as `utf8_to_wchar` |  |
 | `free_wchar` | Free a wide-character string | Not applicable: Rust frees a value when it is dropped; there is nothing to free by hand |  |
@@ -259,7 +259,7 @@ source with `--tqsl-src`), and every Rust path, `qg-trust` command and test name
 | `tqsl_setConverterIgnoreCallsigns` | Do not check the log's own calls | `qso_graph_trust::options::SigningOptions::ignore_log_callsigns` | `qso-graph-trust/tests/signing_options.rs::settings_sign_and_record_exactly_as_tqsllib` `qso-graph-trust/tests/signing_options.rs::preferences_are_explicit_and_do_not_change_other_conversions` |
 | `tqsl_setConverterAppName` | Name the program in the signed log | Not needed: the signed log names QG Trust and its version itself, the one line that differs from tqsllib's |  |
 | `tqsl_setConverterDupesOnly` | Record QSOs as signed without signing them | `qso_graph_trust::store::Store::add_signed_qsos` | `qso-graph-trust/src/store/tests/signed.rs::large_record_is_compact_bounded_and_roundtrips` |
-| `tqsl_converterRollBack` | Undo what signing recorded | Not applicable: `qso_graph_trust::store::SignedLog::write_to` records QSOs only once the log is written, so there is nothing to undo | `qso-graph-trust/src/store/tests/signed.rs::choices_write_only_the_selected_qsos_and_record_only_after_success` |
+| `tqsl_converterRollBack` | Undo what signing recorded | `qso_graph_trust::store::SignedLog::write_to` records only once the log is written; CLI `-z` writes without recording, so there is nothing to undo | `qso-graph-trust/src/store/tests/signed.rs::choices_write_only_the_selected_qsos_and_record_only_after_success` |
 | `tqsl_converterCommit` | Keep what signing recorded | `qso_graph_trust::store::SignedLog::write_to` | `qso-graph-trust/src/store/tests/signed.rs::choices_write_only_the_selected_qsos_and_record_only_after_success` |
 | `tqsl_getDuplicateRecords` | Read the record of QSOs signed | `qso_graph_trust::store::Store::signed_qsos` | `qso-graph-trust/src/store/tests/signed.rs::large_record_is_compact_bounded_and_roundtrips` `qso-graph-trust/src/store/part/tests.rs::complete_roundtrip_replaces_existing_content_and_preserves_signatures` |
 

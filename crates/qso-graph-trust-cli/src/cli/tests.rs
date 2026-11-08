@@ -433,27 +433,65 @@ fn the_command_line_is_refused_with_tqsls_syntax_code() {
 }
 
 #[test]
-fn a_password_on_the_command_line_is_refused_and_never_echoed() {
+fn a_passphrase_with_p_unlocks_a_protected_key_says_it_is_not_needed_and_is_never_echoed() {
+    let dir = scratch();
+    let right = String::from_utf8(password("KC4QPQ")).expect("the test passphrase is text");
+    assert!(!right.is_empty(), "KC4QPQ's test key has a passphrase");
+    for (given, code) in [(right.as_str(), 0), ("hunter2", Exit::BadPassphrase as u8)] {
+        let out = dir.join(format!("{code}.tq8"));
+        let ran = qg_trust(
+            &[
+                "-x",
+                "-i",
+                path(&set("standard.tbk")),
+                "-l",
+                "KC4QPQ-HOME",
+                "-p",
+                given,
+                "-o",
+                path(&out),
+                path(&set("adif/KC4QPQ-HOME.adi")),
+            ],
+            None,
+        );
+        assert_eq!(ran.code, code, "{}", ran.err);
+        // -p takes the place of asking, as in TQSL.
+        assert!(ran.prompts.is_empty());
+        assert!(
+            ran.err.contains("-p is TQSL's key passphrase"),
+            "{}",
+            ran.err
+        );
+        assert!(!ran.out.contains(given) && !ran.err.contains(given));
+    }
+}
+
+#[test]
+fn a_passphrase_with_p_is_accepted_and_ignored_for_a_key_with_none() {
+    let dir = scratch();
+    let out = dir.join("club.tq8");
     let ran = qg_trust(
         &[
+            "-x",
             "-i",
             path(&set("standard.tbk")),
             "-l",
-            "KC4QPQ-HOME",
+            "KN4YU-CLUB",
             "-p",
-            "hunter2",
-            path(&set("adif/KC4QPQ-HOME.adi")),
+            "",
+            "-o",
+            path(&out),
+            path(&set("adif/KN4YU-CLUB.adi")),
         ],
-        None,
+        Some(&password("KN4YU")),
     );
-    assert_eq!(ran.code, Exit::CommandError as u8);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(final_status(&ran), "Final Status: Success(0)");
     assert!(
-        ran.err.contains("never given on the command line"),
+        ran.err.contains("-p is TQSL's key passphrase"),
         "{}",
         ran.err
     );
-    assert!(!ran.err.contains("hunter2"));
-    assert!(ran.prompts.is_empty());
 }
 
 #[test]
@@ -482,8 +520,27 @@ fn help_and_version_print_and_exit_zero() {
     let ran = qg_trust(&["--version"], None);
     assert_eq!(
         (ran.code, ran.out.trim()),
-        (0, format!("qg-trust {}", qso_graph_trust::VERSION).as_str())
+        (
+            0,
+            format!(
+                "qg-trust {} (compatible with TQSL Version 2.8.7)",
+                qso_graph_trust::VERSION
+            )
+            .as_str()
+        )
     );
+    let marker = "TQSL Version ";
+    let version = ran
+        .out
+        .split_once(marker)
+        .expect("QLog pattern")
+        .1
+        .split(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .next()
+        .unwrap();
+    assert_eq!(version, "2.8.7");
+    let short = qg_trust(&["-v"], None);
+    assert_eq!(short.out, ran.out);
     let ran = qg_trust(&["-h"], None);
     assert_eq!(ran.code, 0);
     assert!(ran.out.contains("Usage: qg-trust"), "{}", ran.out);
@@ -641,27 +698,29 @@ fn signing_messages_follow_the_color_choice_and_leave_the_status_plain() {
 
 #[test]
 fn unsupported_tqsl_options_are_refused_on_sight() {
-    for flag in [
-        "-n",
-        "--updates",
-        "-s",
-        "--editlocation",
-        "-w",
-        "--wipe",
-        "-z",
-        "--test-sign",
+    for (flag, message) in [
+        (
+            "-n",
+            "qg-trust does not update itself: it is updated by your package manager (apt, dnf, Homebrew) or its installer",
+        ),
+        (
+            "--updates",
+            "qg-trust does not update itself: it is updated by your package manager (apt, dnf, Homebrew) or its installer",
+        ),
+        (
+            "-s",
+            "qg-trust has no location editor window: use qg-trust location add or qg-trust location edit",
+        ),
+        (
+            "--editlocation",
+            "qg-trust has no location editor window: use qg-trust location add or qg-trust location edit",
+        ),
     ] {
         for args in [vec![flag], vec![flag, "unused-value"]] {
             let ran = qg_trust(&args, None);
-            assert_eq!(ran.code, Exit::CommandError as u8);
-            assert_eq!(
-                ran.err,
-                format!(
-                    "qg-trust: {flag} is not supported yet; qg-trust --help says how it is used\n\
-                 Final Status: Command Syntax Error(10)\n"
-                )
-            );
-            assert!(ran.prompts.is_empty());
+            assert_eq!(ran.code, 10);
+            assert!(ran.err.contains(message), "{}", ran.err);
+            assert_eq!(final_status(&ran), "Final Status: Command Syntax Error(10)");
         }
     }
 }
@@ -677,20 +736,8 @@ fn password_options_are_never_echoed_even_beside_a_parse_error() {
         vec!["-i", "--password=hunter2"],
     ] {
         let ran = qg_trust(&args, None);
-        assert_eq!(ran.code, Exit::CommandError as u8);
-        // A value consumed by -i is a filename, so missing signing arguments decide this case.
-        let message = if args.first() == Some(&"-i") {
-            "give the log to sign"
-        } else {
-            super::PASSWORD_MESSAGE
-        };
-        assert_eq!(
-            ran.err,
-            format!(
-                "qg-trust: {message}; qg-trust --help says how it is used\n\
-                 Final Status: Command Syntax Error(10)\n"
-            )
-        );
+        assert_eq!(ran.code, Exit::CommandError as u8, "{args:?}: {}", ran.err);
+        assert_eq!(final_status(&ran), "Final Status: Command Syntax Error(10)");
         assert!(!ran.out.contains("hunter2") && !ran.err.contains("hunter2"));
         assert!(ran.prompts.is_empty());
     }
@@ -731,9 +778,7 @@ fn round_two_parse_errors_never_echo_arguments() {
 #[test]
 fn help_does_not_bypass_clap_parse_errors_or_an_earlier_refusal() {
     for args in [
-        vec!["--wipe", "--help"],
         vec!["--SECRET", "--help"],
-        vec!["-pSECRET", "--help"],
         vec!["--completions", "SECRET", "-h"],
     ] {
         let ran = qg_trust(&args, None);
@@ -879,18 +924,7 @@ fn round_two_hidden_options_are_refused_after_a_successful_parse() {
     use clap::Parser;
 
     let trust = Trust::lotw();
-    for flag in [
-        "-p",
-        "--password",
-        "-n",
-        "--updates",
-        "-s",
-        "--editlocation",
-        "-w",
-        "--wipe",
-        "-z",
-        "--test-sign",
-    ] {
+    for flag in ["-n", "--updates", "-s", "--editlocation"] {
         for value in [None, Some("-SECRET")] {
             let mut args = vec!["--completions", "bash", flag];
             args.extend(value);
@@ -898,27 +932,21 @@ fn round_two_hidden_options_are_refused_after_a_successful_parse() {
                 std::iter::once("qg-trust").chain(args.iter().copied()),
             )
             .expect("hidden options accept an optional hyphen-leading value");
-            assert_eq!(
-                options.rejected.password.is_some(),
-                matches!(flag, "-p" | "--password")
-            );
+            assert!(options.rejected.updates.is_some() || options.rejected.editlocation.is_some());
             let ran = run_with_color(&args, None, &trust, SystemTime::now(), false);
             assert_eq!(ran.code, Exit::CommandError as u8);
             assert!(ran.out.is_empty());
             assert!(!ran.err.contains("SECRET"));
             assert_eq!(final_status(&ran), "Final Status: Command Syntax Error(10)");
-            if matches!(flag, "-p" | "--password") {
-                assert!(
-                    ran.err
-                        .contains("a password is never given on the command line")
-                );
+            assert!(ran.err.contains(if matches!(flag, "-n" | "--updates") {
+                "does not update itself"
             } else {
-                assert!(ran.err.contains(&format!("{flag} is not supported yet")));
-            }
+                "has no location editor window"
+            }));
         }
     }
     let help = run_with_color(&["--help"], None, &trust, SystemTime::now(), false);
-    for flag in ["--password", "--test-sign"] {
+    for flag in ["--password", "--updates", "--editlocation"] {
         assert!(!help.out.contains(flag));
     }
 }
@@ -963,23 +991,14 @@ fn round_two_date_parser_and_diagnostics_use_only_fixed_text() {
 /// version otherwise follow the order they are given in.
 fn round_three_control_options_follow_parser_order() {
     for (args, code, message) in [
-        (
-            vec!["-p", "SECRET", "--version"],
-            10,
-            "a password is never given",
-        ),
-        (
-            vec!["--version", "-p", "SECRET"],
-            10,
-            "a password is never given",
-        ),
+        // -p is accepted, so -v prints the version and ends the run, as in TQSL.
+        (vec!["-p", "SECRET", "--version"], 0, "qg-trust "),
+        (vec!["--version", "-p", "SECRET"], 0, "qg-trust "),
         (
             vec!["-p", "SECRET", "--version", "-p", "SECRET2"],
-            10,
-            "a password is never given",
+            0,
+            "qg-trust ",
         ),
-        (vec!["--help", "--wipe"], 10, "--wipe is not supported yet"),
-        (vec!["--wipe", "--help"], 10, "--wipe is not supported yet"),
         (vec!["-b", "--help"], 10, "--begindate needs a date"),
         (
             vec!["-i", "--help", "-l", "home", "log.adi"],
@@ -989,16 +1008,6 @@ fn round_three_control_options_follow_parser_order() {
         (vec!["--help"], 0, "Usage: qg-trust"),
         (vec!["--version", "--help"], 0, "qg-trust "),
         (vec!["--help", "--version"], 0, "Usage: qg-trust"),
-        (
-            vec!["--wipe", "unused", "-p", "SECRET"],
-            10,
-            "--wipe is not supported yet",
-        ),
-        (
-            vec!["-w", "unused", "--action", "unused"],
-            10,
-            "-w is not supported yet",
-        ),
     ] {
         let ran = qg_trust(&args, None);
         assert_eq!(ran.code, code, "{args:?}: {}", ran.err);
@@ -1373,7 +1382,7 @@ fn t_writes_a_diagnostic_log_with_no_password_or_key_in_it() {
 }
 
 #[test]
-fn t_writes_a_password_given_on_the_command_line_only_redacted() {
+fn t_writes_a_passphrase_given_with_p_only_redacted() {
     let dir = scratch();
     let diag = dir.join("diag.txt");
     let ran = qg_trust(
@@ -1390,13 +1399,14 @@ fn t_writes_a_password_given_on_the_command_line_only_redacted() {
         ],
         None,
     );
-    assert_eq!(ran.code, Exit::CommandError as u8, "{}", ran.err);
+    // A wrong passphrase: it is used, does not unlock the key, and is never written.
+    assert_eq!(ran.code, Exit::BadPassphrase as u8, "{}", ran.err);
     assert!(!ran.err.contains("hunter2"));
     let log = std::fs::read_to_string(&diag).expect("the diagnostic log");
     assert!(log.contains(" -p <redacted> "), "{log}");
-    assert!(log.contains("Refused: a password is never given"), "{log}");
+    assert!(log.contains("-p is TQSL's key passphrase"), "{log}");
     assert!(
-        log.contains("Final Status: Command Syntax Error(10)\n"),
+        log.contains("Key: the password given does not unlock it"),
         "{log}"
     );
     assert!(super::trace::holds_none_of(&log, &["hunter2"]), "{log}");
@@ -1508,4 +1518,38 @@ fn logger_signs_adx_by_content_even_with_adi_extension() {
     );
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(!signed(&output).is_empty());
+}
+
+#[test]
+fn test_signing_from_a_backup_writes_the_uncompressed_log() {
+    let dir = scratch();
+    let output = dir.join("test.tq8");
+    let trace = dir.join("trace");
+    let pw = password("W4W");
+    let ran = qg_trust(
+        &[
+            "--test-sign",
+            "-i",
+            path(&set("standard.tbk")),
+            "-l",
+            "W4W-EVENT",
+            "-o",
+            path(&output),
+            "-t",
+            path(&trace),
+            path(&set("adif/W4W-EVENT.adi")),
+        ],
+        (!pw.is_empty()).then_some(pw.as_slice()),
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        body(&std::fs::read(output).unwrap()),
+        body(&read("signed/W4W-EVENT.tq7"))
+    );
+    assert!(ran.out.contains("these QSOs were not recorded as signed"));
+    assert!(
+        std::fs::read_to_string(trace)
+            .unwrap()
+            .contains("these QSOs were not recorded as signed")
+    );
 }

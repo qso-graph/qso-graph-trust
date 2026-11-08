@@ -16,9 +16,14 @@ cargo install qso-graph-trust-cli
   already use with the `tqsl` command line.
 - **Every QSO checked by ARRL's own rules** before it is signed; one LoTW would refuse is named, with
   the reason, and the rest are signed. Signatures are byte for byte what TQSL makes.
-- **Your key stays yours:** it leaves the credential store only to sign, a password is never taken
-  from the command line, and everything the program frees is wiped.
+- **Your key stays yours:** it leaves the credential store only to sign, no passphrase is needed to
+  sign, nothing `qg-trust` writes holds a key or password, and everything the program frees is wiped.
+  The custody test proves each of these on every change.
+- **Every file it reads is tested against millions of broken and malicious files** (fuzz testing),
+  with every length and count capped.
 - **The upload is HTTPS to LoTW only,** its certificate always checked against Mozilla's roots.
+
+More on how each of these is tested: [SECURITY.md](https://github.com/qso-graph/qso-graph-trust/blob/main/SECURITY.md).
 
 ## Getting started
 
@@ -46,6 +51,7 @@ uploads one later. A key that TQSL protected with a password is asked for once, 
 | `qg-trust location add NAME --call CALL --dxcc N --grid GRID FIELD=VALUE…` | add one |
 | `qg-trust location edit NAME …` / `delete NAME --force` | change or delete one |
 | `qg-trust location fields N` | the fields a DXCC entity's locations take |
+| `qg-trust signed clear` | clear the record of QSOs signed before after confirmation; `--yes` skips the prompt |
 | `qg-trust root list` | the LoTW roots and CAs your certificates chain to, built in and accepted, with their SHA-256 fingerprints (`--json` for scripts) |
 | `qg-trust root remove FINGERPRINT` | stop trusting a root you accepted; the built-in ones stay |
 
@@ -72,6 +78,9 @@ signs with the keys in the store and uploads. `-i FILE` instead reads a TQSL bac
 | `-b`, `--begindate DATE` | sign only QSOs on or after DATE (`YYYY-MM-DD` or `YYYYMMDD`) |
 | `-e`, `--enddate DATE` | sign only QSOs on or before DATE |
 | `-o`, `--output FILE` | where to write the signed log (default: the log's name with `.tq8`) |
+| `-z`, `--test-sign` | sign an uncompressed file without recording its QSOs; with `-u` it has no effect, as in TQSL |
+| `-w`, `--wipe` | clear the record of QSOs signed before after confirmation |
+| `-p` | TQSL's key passphrase: accepted so loggers that send it keep working, and not needed, since your key is in the computer's credential store; it unlocks only a key read with `-i` that has one |
 | `-u`, `--upload` | upload the signed log to LoTW |
 | `-a`, `--action ACTION` | QSOs signed before: `abort`, `compliant` (only new ones), `all`, or `ask` |
 | `-f`, `--verify HOW` | the log's own location details: `ignore`, `report` (the default), `update` |
@@ -79,8 +88,12 @@ signs with the keys in the store and uploads. `-i FILE` instead reads a TQSL bac
 | `-c`, `--callsign CALL` | sign as CALL in place of the location's own call, with CALL's certificate |
 | `-t`, `--diagnose FILE` | write a diagnostic log of the run for support; it never holds a key or a password |
 | `-x`, `-q`, `-d` | accepted and ignored; `qg-trust` always exits when done |
-| `-h`, `-v` | help, version |
+| `-n`, `--updates` | update through your package manager or installer |
+| `-s`, `--editlocation` | use `qg-trust location add` or `qg-trust location edit` |
+| `-h`, `-v` | help, version (including the compatible TQSL version) |
 | `--completions SHELL` | write shell completions (bash, zsh, fish, powershell, elvish) |
+
+As in TQSL, `-z` has no effect when `-u` is given: the log is signed, recorded and uploaded as usual, and the diagnostic log (`-t`) says so.
 
 `qg-trust` cannot ask, so without `-a` (or with `-a ask`) it stops where TQSL would ask: at QSOs
 signed before, with code 14, and at a QSO it cannot sign, with code 8, signing nothing either

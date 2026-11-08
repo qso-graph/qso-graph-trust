@@ -100,10 +100,17 @@ impl Ham {
     /// Runs `qg-trust args`, answering each password prompt with the test password of the call
     /// it names.
     fn run(&self, args: &[&str]) -> Ran {
+        self.run_answer(args, None)
+    }
+
+    fn run_answer(&self, args: &[&str], answer: Option<&str>) -> Ran {
         let args: Vec<OsString> = args.iter().map(OsString::from).collect();
         let mut prompts = Vec::new();
         let mut ask = |prompt: &str| -> io::Result<Zeroizing<Vec<u8>>> {
             prompts.push(prompt.to_string());
+            if prompt.is_empty() {
+                return Ok(Zeroizing::new(answer.unwrap_or("").as_bytes().to_vec()));
+            }
             for call in ["KC4QPQ", "KN4YU", "W4W"] {
                 if prompt.contains(call) {
                     return Ok(Zeroizing::new(read(&format!("keys/{call}.password"))));
@@ -703,6 +710,56 @@ fn a_logger_signs_from_the_store_with_tqsls_options_and_codes() {
         assert_eq!(ran.code, code, "{action}: {}", ran.err);
         assert_eq!(final_status(&ran), status, "{action}");
     }
+}
+
+/// fldigi 4.2.13's own call (`src/logger/logger.cxx`, `send_to_lotw`), in its order: `-q` after
+/// the log. Its "submit password" setting is on by default (`SUBMIT_LOTW_PASSWORD`,
+/// `src/include/configuration.h`), so out of the box it sends `-p ""`, and `-p "<passphrase>"` once
+/// one is saved. fldigi ignores the exit code and reads the `-t` trace instead, counting the
+/// upload done only if it holds `Final Status: Success` (or tqsllib's `UploadFile returns 0`).
+#[test]
+fn fldigis_call_signs_uploads_and_leaves_final_status_in_the_trace() {
+    let ham = Ham::unsigned();
+    let dir = scratch();
+    let adi = dir.join("fldigi_lotw_20261108_030000.adi");
+    let trace = dir.join("lotw_trace.txt");
+    std::fs::copy(set("adif/KN4YU-CLUB.adi"), &adi).expect("copy");
+    let fldigi = |ham: &Ham, passphrase: &str| {
+        ham.run(&[
+            "-d",
+            "-u",
+            "-a",
+            "compliant",
+            "-p",
+            passphrase,
+            "-l",
+            "KN4YU-CLUB",
+            "-t",
+            path(&trace),
+            path(&adi),
+            "-q",
+        ])
+    };
+    let read_trace = || std::fs::read_to_string(&trace).expect("fldigi waits for this file");
+
+    // fldigi out of the box: -p "". The key is in the store and needs no passphrase; the run says
+    // -p is not needed, signs and uploads.
+    let ran = fldigi(&ham, "");
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let text = read_trace();
+    assert!(text.contains("Final Status: Success"), "{text}");
+    assert!(text.contains("-p is TQSL's key passphrase"), "{text}");
+    assert_eq!(ham.sent.borrow().len(), 1);
+
+    // With a saved passphrase, and the same log again: all signed before, which TQSL calls 8 and
+    // fldigi, finding no Success, reports as an error. The passphrase is never written anywhere.
+    let again = fldigi(&ham, "secret");
+    assert_eq!(again.code, 8, "{}", again.err);
+    let text = read_trace();
+    assert!(!text.contains("Final Status: Success"), "{text}");
+    assert!(!text.contains("secret"), "{text}");
+    assert!(!again.out.contains("secret") && !again.err.contains("secret"));
+    assert_eq!(ham.sent.borrow().len(), 1);
 }
 
 #[test]
@@ -1756,4 +1813,109 @@ fn sign_adx_from_the_store() {
     ]);
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(!signed(&output).is_empty());
+}
+
+#[test]
+fn test_signing_writes_without_recording_and_with_u_signs_and_uploads_as_tqsl() {
+    let ham = Ham::unsigned();
+    let dir = scratch();
+    let log = dir.join("event.adi");
+    std::fs::copy(set("adif/W4W-EVENT.adi"), &log).unwrap();
+    let output = dir.join("event.tq8");
+    let trace = dir.join("trace");
+    let ran = ham.run(&["-z", "-l", "W4W-EVENT", "-t", path(&trace), path(&log)]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let text = "Test signing: these QSOs were not recorded as signed. You can upload this file to LoTW or discard it.";
+    assert!(ran.out.contains(text));
+    assert!(std::fs::read_to_string(trace).unwrap().contains(text));
+    let test_body = std::fs::read(&output).unwrap();
+    assert_eq!(body(&test_body), body(&read("signed/W4W-EVENT.tq7")));
+    let ran = ham.run(&["-l", "W4W-EVENT", "-a", "compliant", path(&log)]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(body(&test_body), body(&signed(&output)));
+    // Test output may not replace the store or use a reserved store filename.
+    for forbidden in [
+        ham.dir.join("store.xml"),
+        ham.dir.join("output.tq8"),
+        dir.join("store.xml"),
+    ] {
+        let ran = ham.run(&[
+            "-z",
+            "-a",
+            "all",
+            "-l",
+            "W4W-EVENT",
+            "-o",
+            path(&forbidden),
+            path(&log),
+        ]);
+        assert_eq!(ran.code, 7, "{}", ran.err);
+    }
+    // As in TQSL, -u takes the upload path, where -z has no effect: signed, recorded and sent.
+    let utrace = dir.join("utrace");
+    let ran = ham.run(&[
+        "-z",
+        "-u",
+        "-a",
+        "all",
+        "-l",
+        "W4W-EVENT",
+        "-t",
+        path(&utrace),
+        path(&log),
+    ]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(ham.sent.borrow().len(), 1);
+    assert!(!ran.out.contains("not recorded as signed"), "{}", ran.out);
+    assert!(
+        std::fs::read_to_string(&utrace)
+            .unwrap()
+            .contains("-z has no effect with -u"),
+        "the diagnostic log says -z was not applied"
+    );
+    let again = ham.run(&["-z", "-u", "-a", "compliant", "-l", "W4W-EVENT", path(&log)]);
+    assert_eq!(again.code, 8, "recorded as signed: {}", again.err);
+    // As in TQSL, -w is handled first and ends the run: nothing is signed or sent.
+    let ran = ham.run_answer(&["-w", "-z", "-u"], Some("no"));
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("Aborted."), "{}", ran.out);
+    assert_eq!(ham.sent.borrow().len(), 1);
+}
+
+#[test]
+fn clearing_signed_records_needs_approval_or_yes() {
+    for mode in ["-w", "native", "yes"] {
+        let ham = Ham::unsigned();
+        let dir = scratch();
+        let log = dir.join("event.adi");
+        std::fs::copy(set("adif/W4W-EVENT.adi"), &log).unwrap();
+        let sign = ["-l", "W4W-EVENT", "-a", "compliant", path(&log)];
+        assert_eq!(ham.run(&sign).code, 0);
+        for answer in ["no", "", "APPROVE "] {
+            let args: &[&str] = if mode == "-w" {
+                &["-w"]
+            } else {
+                &["signed", "clear"]
+            };
+            let ran = ham.run_answer(args, Some(answer));
+            assert_eq!(ran.code, 0);
+            assert!(ran.out.contains("Aborted."));
+            assert_ne!(ham.run(&sign).code, 0);
+        }
+        let ran = match mode {
+            "-w" => ham.run_answer(&["-w"], Some("APPROVE")),
+            "native" => ham.run_answer(&["signed", "clear"], Some("APPROVE")),
+            _ => ham.run(&["signed", "clear", "--yes"]),
+        };
+        assert_eq!(ran.code, 0, "{}", ran.err);
+        assert!(
+            ran.out.contains("Wiped 3 signed QSO records."),
+            "{}",
+            ran.out
+        );
+        if mode == "-w" {
+            assert_eq!(final_status(&ran), "Final Status: Success(0)");
+        }
+        assert_eq!(ham.run(&sign).code, 0);
+    }
 }

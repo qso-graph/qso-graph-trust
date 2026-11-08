@@ -31,7 +31,7 @@ use crate::cli::{Action, Env, Exit, LeftOut, Tone, UploadFailure, Verify, read_f
 
 /// The words that start a command. Anything else is the TQSL-style command line loggers use.
 pub(crate) const COMMANDS: &[&str] = &[
-    "sign", "upload", "send", "import", "cert", "location", "root",
+    "sign", "upload", "send", "import", "cert", "location", "root", "signed",
 ];
 
 /// The largest log or signed log read.
@@ -108,9 +108,22 @@ enum Command {
     /// Your station locations: list, show, add, edit, delete.
     #[command(subcommand)]
     Location(Location),
+    /// Manage the record of QSOs signed before.
+    #[command(subcommand)]
+    Signed(SignedCommand),
     /// The LoTW roots and CAs QG Trust trusts: list, remove.
     #[command(subcommand)]
     Root(Root),
+}
+
+#[derive(Debug, Subcommand)]
+enum SignedCommand {
+    /// Clear the record of QSOs signed before.
+    Clear {
+        /// Clear without asking, for scripts.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -512,6 +525,7 @@ pub(crate) fn run(args: &[&str], env: &mut Env<'_>) -> u8 {
         Command::Cert(c) => cert(c, env),
         Command::Location(l) => location(l, env),
         Command::Root(r) => root(r, env),
+        Command::Signed(SignedCommand::Clear { yes }) => Ok(clear_signed(yes, env)),
     };
     match code {
         Ok(code) | Err(code) => code as u8,
@@ -531,6 +545,31 @@ fn open<'a>(env: &mut Env<'a>) -> Result<&'a Store, Exit> {
             );
             Err(Exit::TqslError)
         }
+    }
+}
+
+pub(crate) fn clear_signed(yes: bool, env: &mut Env<'_>) -> Exit {
+    if !yes {
+        let _ = write!(
+            env.out,
+            "Do you really want to wipe the record of QSOs signed before? Enter APPROVE to allow: "
+        );
+        let _ = env.out.flush();
+        if !(env.ask_password)("").is_ok_and(|answer| answer.as_slice() == b"APPROVE") {
+            let _ = writeln!(env.out, "Aborted.");
+            return Exit::Success;
+        }
+    }
+    let store = match open(env) {
+        Ok(store) => store,
+        Err(code) => return code,
+    };
+    match store.wipe_signed_qsos() {
+        Ok(count) => {
+            let _ = writeln!(env.out, "Wiped {count} signed QSO record{}.", plural(count));
+            Exit::Success
+        }
+        Err(e) => store_error(env, "the record of signed QSOs", &e),
     }
 }
 
@@ -565,6 +604,10 @@ fn signing_options(a: &OptionArgs) -> SigningOptions {
 }
 
 fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
+    sign_inner(a, env, false)
+}
+
+fn sign_inner(a: &SignArgs, env: &mut Env<'_>, test_sign: bool) -> Result<Signed, Exit> {
     if let (Some(b), Some(e)) = (a.begin, a.end)
         && b > e
     {
@@ -746,6 +789,9 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         refused += 1;
         left_out.outside_certificate += 1;
     }
+    if test_sign {
+        crate::cli::test_sign_message(env);
+    }
     let again = signs_again(a);
     let choice = if again {
         DuplicateChoice::SignAgain
@@ -900,7 +946,24 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         env.message(Tone::Error, format_args!("{UNUPLOADABLE}"));
         return Err(Exit::TqslError);
     }
-    if let Err(e) = signed.write_to(store, &target) {
+    if test_sign {
+        signed.check_output_path(store, &output).map_err(|e| {
+            env.message(Tone::Error, format_args!("{}: {e}", output.display()));
+            Exit::OutputError
+        })?;
+    }
+    let write_result = if test_sign {
+        let tq7 =
+            qso_graph_trust::gzip::decompress(&tq8, qso_graph_trust::upload::MAX_SIGNED_LOG_BYTES)
+                .map_err(|_| {
+                    env.message(Tone::Error, format_args!("{UNUPLOADABLE}"));
+                    Exit::TqslError
+                })?;
+        write_new(&target, &tq7, false).map_err(StoreError::from)
+    } else {
+        signed.write_to(store, &target)
+    };
+    if let Err(e) = write_result {
         env.message(Tone::Error, format_args!("{}: {e}", output.display()));
         return Err(Exit::OutputError);
     }
@@ -908,12 +971,20 @@ fn sign(a: &SignArgs, env: &mut Env<'_>) -> Result<Signed, Exit> {
         env.message(
             Tone::Error,
             format_args!(
-                "{}: {e}; the signed log is in {}, and its QSOs are recorded as signed",
+                "{}: {e}; the signed log is in {}{}",
                 output.display(),
-                target.display()
+                target.display(),
+                if test_sign {
+                    "; its QSOs were not recorded"
+                } else {
+                    "; its QSOs are recorded as signed"
+                }
             ),
         );
         return Err(Exit::OutputError);
+    }
+    if test_sign {
+        crate::cli::test_sign_message(env);
     }
     let again = signs_again(a);
     if !again {
@@ -1088,6 +1159,7 @@ pub(crate) struct LoggerCall<'a> {
     pub action: Option<Action>,
     pub verify: Option<Verify>,
     pub upload: bool,
+    pub test_sign: bool,
 }
 
 /// A logger's call without -i: TQSL's options, signed from QG Trust's store as TQSL signs from its
@@ -1104,6 +1176,7 @@ pub(crate) fn sign_for_logger(call: &LoggerCall<'_>, env: &mut Env<'_>) -> Exit 
         action,
         verify,
         upload,
+        test_sign,
     } = *call;
     let args = SignArgs {
         log: log.to_path_buf(),
@@ -1130,7 +1203,7 @@ pub(crate) fn sign_for_logger(call: &LoggerCall<'_>, env: &mut Env<'_>) -> Exit 
         action: Some(action.unwrap_or(Action::Ask)),
         callsign: callsign.map(str::to_string),
     };
-    let signed = match sign(&args, env) {
+    let signed = match sign_inner(&args, env, test_sign) {
         Ok(s) => s,
         Err(code) => return code,
     };

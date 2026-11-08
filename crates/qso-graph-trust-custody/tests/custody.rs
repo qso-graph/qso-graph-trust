@@ -953,8 +953,9 @@ fn what_qg_trust_writes(plant: bool) -> Vec<String> {
         "",
         0,
     );
-    // The logger's -i with the key's password on the command line, as TQSL's -p takes it:
-    // refused (10), and the diagnostic log must not keep it.
+    // The logger's -i with the key's passphrase on the command line, as TQSL's -p takes it:
+    // accepted, with a warning; the backup is checked against LoTW's own roots only, so the test
+    // set's backup stops there (6), as the next run does. Nothing written may keep the passphrase.
     runs.qg_trust(
         "the logger's -x -i -p -t",
         &["-x", "-i", &tbk, "-l", "KC4QPQ-HOME", "-p", "qgt-kc4qpq"]
@@ -962,7 +963,7 @@ fn what_qg_trust_writes(plant: bool) -> Vec<String> {
             .chain(["-t", &out("p.trace"), "-o", &out("p.tq8"), &kc4qpq_log])
             .collect::<Vec<_>>(),
         "",
-        10,
+        6,
     );
     // -i without -p: the backup is read for the run, and checked against LoTW's own roots only,
     // so the test set's backup stops there (6), with the passwords waiting on its input.

@@ -10,6 +10,19 @@ PR CI and manually started **Binaries** runs produce unsigned test artifacts. Me
 nothing. Signing and publishing are separate stages of Release: every binary must build, sign,
 verify and attest successfully before crates or a GitHub release can be published.
 
+## Preparing a release
+
+A release starts with one pull request that:
+
+1. Sets the version in every crate's `Cargo.toml` and in `Cargo.lock`, and turns CHANGELOG's
+   `## [Unreleased]` into the version's heading with the date.
+2. Refreshes the figures in the README's **Security — Our #1 Priority** section, rounded down so
+   they stay true as they grow:
+   - the tests: the passed counts from `cargo test --workspace --all-features --locked`, summed;
+   - the fuzz inputs: the `Done N runs` lines of the latest CI fuzz job, summed, and the number of
+     targets in `fuzz/fuzz_targets/`;
+   - the policy checks: the `pass` lines of `cargo xtask policy`.
+
 ## One release operation, with a dry run
 
 1. Merge the reviewed change after its CI passes.

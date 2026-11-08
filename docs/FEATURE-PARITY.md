@@ -128,7 +128,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Feature | TQSL | Why later | Status |
 |---|---|---|---|
 | Sign a Cabrillo log, read Cabrillo, custom contest definitions | Sign and save; Preferences | Most loggers export ADIF | Later |
-| Test signing: sign, upload nothing | Test Signing | Saving `.tq8` without uploading already does this | Later |
+| Test signing: sign, upload nothing | Test Signing | `-z` writes an uncompressed signed file without recording QSOs | Done |
 | Grid checked against the entity, state or county | warns | TQSL only warns | Later |
 | Continent and WPX prefix in a location | wizard | Not signed | Later |
 | Primary QSL manager call | Preferences | Rarely used | Later |
@@ -138,7 +138,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Rebuild the record of signed QSOs from LoTW | Help: Synchronize | Needs upload first | Later |
 | Ask LoTW whether a certificate is still good (by serial) | | Calls ARRL; needs a decision first | Later |
 | Take a new ARRL configuration (`config.xml`) without a new release | automatic | A release with new tables works meanwhile | Later |
-| Wipe the record of signed QSOs | `-w` | Library: `Store::wipe_signed_qsos`; no command yet | Later |
+| Wipe the record of signed QSOs | `-w` | `-w` and `signed clear` ask for approval; `signed clear --yes` is for scripts | Done |
 | Create a new ADIF file (QSO entry) | Create New ADIF file | A logger's job | Later |
 | Edit an ADIF file | Edit existing ADIF file | A logger's job | Later |
 
@@ -148,7 +148,6 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 |---|---|---|
 | Save one certificate and key (`.p12`) | Save Callsign Certificate | The export moves keys; to move only some, delete the rest first |
 | `.p12` export in Apple Keychain's older format | Preferences | QG Trust saves no `.p12`; the Keychain reads modern AES-256 files from macOS 15 on anyway |
-| Key password on the command line (`-p`) | `-p` | A password never goes on a command line; another way is needed |
 | Choosing the upload server and its answers | Server Setup | Logs go to LoTW only |
 | Settings for upload, server or proxy taken from a `.tbk` file | File menu | A file could send logs elsewhere |
 | A choice to turn off key passwords | Preferences | Handled by the key store (1.2) |
@@ -181,7 +180,7 @@ calls TQSL's command line today should get the same meaning, including exit code
 | `-c` | default call | 1.4 | Done: the location's call is replaced for the run, never in the store, and the certificate is chosen for that call and the location's DXCC entity; `-f` compares the log with the location as `-c` changes it | #173 |
 | `-t` | diagnostic log, with no key or password in it | | Done: TQSL's header, then each step, counts of QSOs signed and left out by reason, the upload's answer and the exit code; any value that could be a password is written `<redacted>`; owner-only on Unix | #173 |
 | Exit codes 0 to 15 | the same numbers TQSL uses, and its `Final Status` line | | Done: 0 to 4, 6 to 11, 14 and 15; 5, 12 and 13 have no cause in `qg-trust` | #173 |
-| `-z` | test signing | 2 | Later | |
+| `-z` | test signing | 2 | Done: no records; no effect with `-u`, as in TQSL | #173 |
 | `-n` | check for updates | 3 | Won't | |
-| `-p` | a password on the command line: refused; the password is asked for at the terminal, hidden, or read from standard input | 3 | Won't | |
+| `-p` | the key's passphrase (TQSL calls it a password) | 3 | Done: accepted, so loggers that always send it (fldigi does by default) keep working, with a warning that a key in the store needs none and that a command line can be read by other programs. It unlocks only a key read with `-i` that has one; it is never written to output or the diagnostic log | #173 |
 | `-d`, `-q`, `-x` | accepted and ignored: there is no window or date dialog | 3 | Done | #173 |
