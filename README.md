@@ -178,7 +178,7 @@ operating systems, library changes and new modes, as volunteers. Thank you.
 **rfrht's [qso-web](https://github.com/rfrht/qso-web)**, a shell script that builds and signs a `.tq8` with
 OpenSSL, without TQSL, and uploads it to LoTW, showing that LoTW accepts a log signed by another program.
 
-## Licence
+## License
 
 GPL-3.0-only ([LICENSE](LICENSE)); see [NOTICE](NOTICE). QSO Graph Trust is not made, affiliated with or
 endorsed by ARRL. "Logbook of The World," "LoTW" and "TQSL" are ARRL's names, used here only to say what it
