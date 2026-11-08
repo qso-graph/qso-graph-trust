@@ -237,6 +237,7 @@ struct Data {
     signed_qsos: std::collections::BTreeMap<String, SignedQso>,
     certificates: Vec<StoredCertificate>,
     locations: Vec<StoredLocation>,
+    default_location: Option<String>,
     pending_requests: Vec<PendingRequest>,
     roots: Vec<roots::AcceptedRoot>,
 }
@@ -355,6 +356,31 @@ impl Store {
     pub fn locations(&self) -> Result<Vec<StoredLocation>, StoreError> {
         let _lock = self.lock()?;
         Ok(self.read()?.locations)
+    }
+
+    /// The default station location, if one is set.
+    pub fn default_location(&self) -> Result<Option<String>, StoreError> {
+        let _lock = self.lock()?;
+        Ok(self.read()?.default_location)
+    }
+
+    /// Set the default to an existing station location.
+    pub fn set_default_location(&self, name: &str) -> Result<(), StoreError> {
+        let _lock = self.lock()?;
+        let mut data = self.read()?;
+        if !data.locations.iter().any(|l| l.name == name) {
+            return Err(StoreError::NotFound);
+        }
+        data.default_location = Some(name.into());
+        self.replace(&format::write(&data)?)
+    }
+
+    /// Clear the default station location.
+    pub fn clear_default_location(&self) -> Result<(), StoreError> {
+        let _lock = self.lock()?;
+        let mut data = self.read()?;
+        data.default_location = None;
+        self.replace(&format::write(&data)?)
     }
 
     /// Add an imported certificate and its key. Unlocks and validates the key with `password`,
@@ -587,6 +613,9 @@ impl Store {
                 if data.locations.len() >= MAX_LOCATIONS {
                     return Err(StoreError::Limit("locations"));
                 }
+                if data.locations.is_empty() {
+                    data.default_location = Some(name.into());
+                }
                 data.locations.push(StoredLocation {
                     name: name.into(),
                     station: station.clone(),
@@ -606,6 +635,9 @@ impl Store {
             .position(|l| l.name == name)
             .ok_or(StoreError::NotFound)?;
         data.locations.remove(i);
+        if data.default_location.as_deref() == Some(name) {
+            data.default_location = None;
+        }
         self.replace(&format::write(&data)?)
     }
 

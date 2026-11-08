@@ -497,8 +497,6 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
     }
     let missing = if options.input.is_none() {
         Some("give the log to sign")
-    } else if options.location.is_none() {
-        Some("-l names the station location to sign for")
     } else {
         None
     };
@@ -780,9 +778,7 @@ impl LeftOut {
 }
 
 fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> Exit {
-    let (Some(backup_path), Some(name), Some(input)) =
-        (&options.backup, &options.location, &options.input)
-    else {
+    let (Some(backup_path), Some(input)) = (&options.backup, &options.input) else {
         return Exit::CommandError;
     };
     if let Err(e) = crate::commands::check_output(
@@ -822,6 +818,19 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
         backup.certificates.len(),
         backup.locations.len()
     ));
+    let Some(name) = &options.location else {
+        let names: Vec<&str> = backup.locations.iter().map(|l| l.name.as_str()).collect();
+        let message = format!(
+            "-l names the station location to sign for; certificate file locations: {}",
+            if names.is_empty() {
+                "none".to_string()
+            } else {
+                names.join(", ")
+            }
+        );
+        env.trace.line(format_args!("Refused: {message}"));
+        return syntax_error(env, &message);
+    };
     let Some(location) = backup.locations.iter().find(|l| l.name == *name) else {
         let names: Vec<&str> = backup.locations.iter().map(|l| l.name.as_str()).collect();
         env.message(

@@ -394,7 +394,6 @@ fn the_command_line_is_refused_with_tqsls_syntax_code() {
     let log = path(&set("adif/KN4YU-CLUB.adi")).to_string();
     for args in [
         vec![],
-        vec![log.as_str()],
         vec!["-i", &tbk, log.as_str()],
         vec!["-i", &tbk, "-l", "KN4YU-CLUB"],
         vec!["-i", &tbk, "-l", "KN4YU-CLUB", log.as_str(), log.as_str()],
@@ -430,6 +429,24 @@ fn the_command_line_is_refused_with_tqsls_syntax_code() {
             "{args:?}"
         );
     }
+}
+
+#[test]
+fn backup_without_location_names_the_files_locations() {
+    let ran = qg_trust(
+        &[
+            "-i",
+            path(&set("standard.tbk")),
+            path(&set("adif/KN4YU-CLUB.adi")),
+        ],
+        None,
+    );
+    assert_eq!(ran.code, 10, "{}", ran.err);
+    assert!(
+        ran.err.contains("KN4YU-CLUB") && ran.err.contains("W4W-EVENT"),
+        "{}",
+        ran.err
+    );
 }
 
 #[test]
@@ -517,6 +534,7 @@ fn long_options_take_tqsls_names_with_a_space_or_an_equals_sign() {
 
 #[test]
 fn help_and_version_print_and_exit_zero() {
+    // QLog 0.54.2 also calls --version (service/lotw/Lotw.cpp).
     let ran = qg_trust(&["--version"], None);
     assert_eq!(
         (ran.code, ran.out.trim()),

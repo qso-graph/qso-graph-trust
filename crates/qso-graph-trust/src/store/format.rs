@@ -121,7 +121,7 @@ fn read_sections(root: &Element<'_>, legacy: bool, roots: bool) -> Result<Data, 
     let locations = section(root, "locations")?;
     let signed = section(root, "signed-qsos")?;
     container(certificates, &[])?;
-    container(locations, &[])?;
+    container(locations, &["default"])?;
     container(signed, &["version"])?;
     if attribute(signed, "version", 10)? != "1" || (legacy && !signed.children.is_empty()) {
         return Err(StoreError::Invalid(
@@ -211,6 +211,18 @@ fn read_sections(root: &Element<'_>, legacy: bool, roots: bool) -> Result<Data, 
             StationLocation::new(&borrowed).map_err(|_| StoreError::Invalid("station location"))?;
         data.locations.push(StoredLocation { name, station });
     }
+    data.default_location = match locations.attribute("default") {
+        Some(value) if value.is_empty() => None,
+        Some(value) => {
+            let name = value.to_string();
+            if !names.contains(&name) {
+                return Err(StoreError::Invalid("default location"));
+            }
+            Some(name)
+        }
+        None if data.locations.len() == 1 => Some(data.locations[0].name.clone()),
+        None => None,
+    };
     // Optional in version 1: stores written before request support remain readable. An older
     // reader refuses the new section rather than silently discarding pending-key custody.
     if root.children.iter().any(|c| c.name == "pending-requests") {
@@ -411,7 +423,9 @@ pub(super) fn write(data: &Data) -> Result<String, StoreError> {
         out.push_str(&Base64::encode_string(c.certificate.der()));
         out.push_str("</certificate>\n");
     }
-    out.push_str("  </certificates>\n  <locations>\n");
+    out.push_str("  </certificates>\n  <locations default=\"");
+    escape(&mut out, data.default_location.as_deref().unwrap_or(""))?;
+    out.push_str("\">\n");
     for l in &data.locations {
         out.push_str("    <location name=\"");
         escape(&mut out, &l.name)?;

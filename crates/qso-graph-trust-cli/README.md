@@ -48,6 +48,7 @@ uploads one later. A key that TQSL protected with a password is asked for once, 
 | `qg-trust cert renew CALL` | renew one, with a new key, for the QSO dates it has (`--to DATE` or `--no-end-date` to change the last) |
 | `qg-trust cert delete ID --force` | delete a certificate and its key |
 | `qg-trust location list` / `show NAME` | your station locations |
+| `qg-trust location default NAME` | set your default station location |
 | `qg-trust location add NAME --call CALL --dxcc N --grid GRID FIELD=VALUE…` | add one |
 | `qg-trust location edit NAME …` / `delete NAME --force` | change or delete one |
 | `qg-trust location fields N` | the fields a DXCC entity's locations take |

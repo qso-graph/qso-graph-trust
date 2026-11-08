@@ -77,7 +77,9 @@ fn station() -> StationLocation {
         .expect("station")
 }
 fn empty_xml() -> String {
-    format::write(&Data::default()).expect("empty store")
+    format::write(&Data::default())
+        .expect("empty store")
+        .replace(" default=\"\"", "")
 }
 
 #[test]
@@ -287,6 +289,44 @@ fn public_certificates_and_location_mutations_preserve_exact_names() {
 }
 
 #[test]
+fn default_location_survives_changes_and_legacy_single_location() {
+    let folder = Folder::new();
+    let keys = Arc::new(MemoryKeyStore::new());
+    let (store, _) = open(&folder.0, &keys).expect("open");
+    store.add_location("Home", &station()).expect("first");
+    assert_eq!(
+        store.default_location().expect("default").as_deref(),
+        Some("Home")
+    );
+    let file = folder.0.join("store.xml");
+    let legacy = fs::read_to_string(&file)
+        .expect("read")
+        .replace(" default=\"Home\"", "");
+    fs::write(&file, legacy).expect("legacy");
+    assert_eq!(
+        store.default_location().expect("legacy default").as_deref(),
+        Some("Home")
+    );
+    store.add_location("Away", &station()).expect("second");
+    assert_eq!(
+        store.default_location().expect("default").as_deref(),
+        Some("Home")
+    );
+    store.replace_location("Home", &station()).expect("edit");
+    store.delete_location("Home").expect("delete");
+    assert_eq!(store.default_location().expect("no default"), None);
+    store.set_default_location("Away").expect("set");
+    assert_eq!(
+        store.default_location().expect("default").as_deref(),
+        Some("Away")
+    );
+    assert!(matches!(
+        store.set_default_location("missing"),
+        Err(StoreError::NotFound)
+    ));
+}
+
+#[test]
 fn newer_versions_are_refused_on_open_and_before_any_mutation() {
     let folder = Folder::new();
     let keys = Arc::new(MemoryKeyStore::new());
@@ -350,6 +390,7 @@ fn planted_bad_files_are_refused_and_not_rewritten() {
             ),
         ),
         valid.replace("<locations>", "<locations surprise=\"1\">"),
+        valid.replace("<locations>", "<locations default=\"missing\">"),
         valid.replace(
             "<signed-qsos version=\"1\"/>",
             "<signed-qsos version=\"1\"><qso/></signed-qsos>",

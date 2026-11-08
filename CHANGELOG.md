@@ -7,6 +7,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A default station location for logger calls and `sign` / `send`, managed with `qg-trust location default NAME`.
+
 - `qg-trust -z` signs a test file without recording QSOs; `-w` and `signed clear` clear the signing record after confirmation, with `signed clear --yes` for scripts.
 
 - Read ADIF logs in ADX XML form as well as ADI, selected by content, for signing through the library and CLI (decision 0013).
