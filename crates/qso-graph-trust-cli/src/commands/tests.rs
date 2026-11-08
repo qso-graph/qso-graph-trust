@@ -259,7 +259,6 @@ fn every_location_signs_from_the_store_as_tqsllib_signs_it() {
             name,
             "-o",
             path(&out),
-            "--again",
         ]);
         assert_eq!(ran.code, 0, "{name}: {}", ran.err);
         assert!(ran.out.starts_with("Signed "), "{}", ran.out);
@@ -274,7 +273,7 @@ fn every_location_signs_from_the_store_as_tqsllib_signs_it() {
 }
 
 #[test]
-fn qsos_signed_before_are_skipped_unless_asked_again() {
+fn qsos_signed_before_are_signed_unless_deduped() {
     let ham = Ham::unsigned();
     let dir = scratch();
     let adi = dir.join("club.adi");
@@ -289,7 +288,8 @@ fn qsos_signed_before_are_skipped_unless_asked_again() {
     );
     assert!(dir.join("club.tq8").exists());
 
-    // The signed log is there: it is never replaced without --force.
+    // The signed log is there: it is never replaced without --force. 0.1's --again is still
+    // accepted, so scripts written for it run.
     let refused = ham.run(&["sign", path(&adi), "-l", "KN4YU-CLUB", "--again"]);
     assert_eq!(refused.code, 7, "{}", refused.err);
     assert!(
@@ -298,18 +298,27 @@ fn qsos_signed_before_are_skipped_unless_asked_again() {
         refused.err
     );
 
+    // By default the log is signed as it is, QSOs signed before included.
     let second = ham.run(&["sign", path(&adi), "-l", "KN4YU-CLUB", "--force"]);
-    assert_eq!(second.code, 8, "{}{}", second.out, second.err);
-    assert!(
-        second
-            .err
-            .contains("signed before; --again signs them again"),
-        "{}",
-        second.err
-    );
+    assert_eq!(second.code, 0, "{}", second.err);
+    assert!(!second.out.contains("signed before"), "{}", second.out);
 
-    let again = ham.run(&["sign", path(&adi), "-l", "KN4YU-CLUB", "--again", "--force"]);
-    assert_eq!(again.code, 0, "{}", again.err);
+    // -d leaves them out: here that is all of them, so nothing is signed, and it says why.
+    for flag in ["-d", "--dedupe"] {
+        let deduped = ham.run(&["sign", path(&adi), "-l", "KN4YU-CLUB", flag, "--force"]);
+        assert_eq!(deduped.code, 8, "{}{}", deduped.out, deduped.err);
+        assert!(
+            deduped
+                .err
+                .contains("were signed before; without -d they are signed again"),
+            "{}",
+            deduped.err
+        );
+    }
+
+    let both = ham.run(&["sign", path(&adi), "-l", "KN4YU-CLUB", "-d", "--again"]);
+    assert_eq!(both.code, 10, "{}", both.err);
+    assert!(both.err.contains("cannot be used with"), "{}", both.err);
 }
 
 #[test]
@@ -319,7 +328,7 @@ fn send_signs_and_uploads_and_reports_lotws_answer_with_tqsls_codes() {
     let adi = dir.join("event.adi");
     std::fs::copy(set("adif/W4W-EVENT.adi"), &adi).expect("copy");
 
-    let ran = ham.run(&["send", path(&adi), "-l", "W4W-EVENT", "--again"]);
+    let ran = ham.run(&["send", path(&adi), "-l", "W4W-EVENT"]);
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(
         ran.out.contains("LoTW accepted the log for processing."),
@@ -791,7 +800,6 @@ fn force_never_touches_the_stores_own_files() {
             path(&set("adif/W4W-EVENT.adi")),
             "-l",
             "W4W-EVENT",
-            "--again",
             "--force",
             "-o",
             path(&store_xml),
@@ -866,7 +874,7 @@ fn a_failure_after_the_log_was_sent_is_not_a_safe_retry() {
     let adi = dir.join("event.adi");
     std::fs::copy(set("adif/W4W-EVENT.adi"), &adi).expect("copy");
     ham.lotw = Lotw::Silent;
-    let ran = ham.run(&["send", path(&adi), "-l", "W4W-EVENT", "--again"]);
+    let ran = ham.run(&["send", path(&adi), "-l", "W4W-EVENT"]);
     assert_eq!(ran.code, 3, "{}", ran.err);
     assert!(
         ran.err.contains("whether LoTW has it is not known"),
@@ -1018,7 +1026,6 @@ fn no_output_may_take_a_store_files_name_in_any_folder() {
                 path(&set("adif/W4W-EVENT.adi")),
                 "-l",
                 "W4W-EVENT",
-                "--again",
                 "--force",
                 "-o",
                 path(out),
@@ -1176,7 +1183,6 @@ fn a_backup_gives_its_key_to_a_certificate_imported_alone_before() {
         path(&set("adif/W4W-EVENT.adi")),
         "-l",
         "W4W-EVENT",
-        "--again",
         "-o",
         path(&out),
     ]);
