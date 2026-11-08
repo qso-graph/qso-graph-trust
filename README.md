@@ -23,6 +23,25 @@ frees.
 It's part of the QSO Graph Project, and a ground-up rewrite, not a method-by-method port of TQSL. What
 it does was decided from the sources below, and how it does it is its own.
 
+## Security: our #1 priority
+
+**Your key stays in your computer's credential store,** leaving it only to sign or into a backup QSO
+Graph Trust encrypts itself. QSO Graph Trust is built to the standard of enterprise security software, and every point below is a test or a check that runs on every
+change:
+
+- **OS credential stores only:** the macOS Keychain, Windows Credential Manager or the Secret Service
+  on Linux. Never a key file, and never a password or passphrase needed on the command line.
+- **Nothing it writes holds your key or a password,** and no key data is left in memory it frees. A
+  custody test searches every file, output, log and the program's own memory to prove it.
+- **Every file it reads is fuzz-tested,** with every length and count capped.
+- **Memory-safe Rust, with no `unsafe` code.** No C or C++ beyond the cryptography library, AWS-LC,
+  isolated in one small crate and enforced by policy.
+- **Only LoTW, only HTTPS, only ARRL's roots,** with the server's certificate always checked.
+- **A locked supply chain:** pinned dependencies, policy checks and CodeQL on every pull request, and
+  signed, notarized and attested releases.
+
+How each is tested, and how to report a security problem privately: [SECURITY.md](SECURITY.md).
+
 ## Sources
 
 - **ARRL's LoTW developer documentation:** [developer information](https://lotw.arrl.org/lotw-help/developer-information/),
@@ -72,35 +91,6 @@ codes and final status line.
 - **It's signed.** The macOS program is signed by QSO Graph and notarized by Apple, the Windows
   program is signed by QSO Graph, and the Linux packages and their repositories are signed with QSO
   Graph's release key.
-
-## Security, tested
-
-QSO Graph Trust holds the key that proves who you are to LoTW, so we go out of our way to show it's
-safe. Each point below is a test or a check that runs on every change, not a promise:
-
-- **Your key stays in your computer's credential store** (the macOS Keychain, Windows Credential
-  Manager, or the Secret Service on Linux), never as a file someone could copy. It leaves only as a
-  signature, or in a backup QSO Graph Trust encrypts itself.
-- **Nothing it writes holds your key or a password.** The custody test runs `qg-trust` through
-  import, signing, certificate requests, export and deletion, and searches every file, every line of
-  output and every diagnostic log it leaves.
-- **No key data is left in memory.** Every QSO Graph Trust program wipes the memory it frees. After
-  signing, the custody test reads the program's whole memory and finds none of the key; run without
-  the wiping, the same search finds it, so the test is known to work.
-- **Every file it reads is fuzzed.** The ADIF, ADX, `.tq6`, `.p12` and `.tbk` readers run under
-  libFuzzer on every change, and longer every week. Every length and count is capped, and input past a
-  limit is refused, never cut short.
-- **Memory-safe Rust, no `unsafe` code.** Cryptography is AWS-LC, Amazon's open-source cryptography
-  library, reached through one small crate whose every call is checked. A policy check proves nothing
-  else leaves Rust.
-- **Only LoTW, only HTTPS.** Logs go to LoTW's fixed address over HTTPS, with its certificate always
-  checked and no redirect followed. The library itself opens no connection at all.
-- **Only ARRL's roots.** A certificate is trusted only if it chains to ARRL's roots. A new root in a
-  `.tq6` or `.p12` is trusted only once you confirm its fingerprint.
-- **A locked supply chain.** Every dependency is pinned to a reviewed version. Eight policy checks and
-  CodeQL run on every pull request, and every release is signed, notarized and attested.
-
-The details, and how to report a security problem privately: [SECURITY.md](SECURITY.md).
 
 ## Install
 
