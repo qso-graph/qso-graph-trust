@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # QG Trust's fuzzers: cargo-fuzz and libFuzzer, on a pinned nightly (docs/decisions/0012-fuzzing.md).
 # Never shipped, never published, and not a member of the repository's workspace: its own workspace,
 # lock file and toolchain, so nothing here reaches the published crates or what QSO Graph Desktop links.
@@ -6,7 +6,7 @@
 name = "qso-graph-trust-fuzz"
 version = "0.0.0"
 edition = "2024"
-license = "GPL-3.0-only"
+license = "GPL-3.0-or-later"
 publish = false
 
 [package.metadata]

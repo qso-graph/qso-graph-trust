@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: a module loaded by #[path] from a file not ending .rs, holding unsafe. The token scan must catch it.
 [package]
 name = "planted-path-module"

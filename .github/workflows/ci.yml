@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # CI for QSO Graph Trust. A pull request's run is the one check of a change,
 # so a merge into main runs nothing. Once a week main is checked again,
 # so a newly published advisory against a locked crate fails even when nothing

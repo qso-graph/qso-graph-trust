@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: unstable features (usable on stable with RUSTC_BOOTSTRAP) and the unstable `macro`, which
 # can assemble unsafe from pieces. Both must be caught.
 [package]

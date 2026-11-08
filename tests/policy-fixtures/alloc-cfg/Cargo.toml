@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: the wiping allocator behind a cfg, so a release build has none. The check must catch it.
 [package]
 name = "planted-alloc-cfg"

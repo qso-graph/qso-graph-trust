@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # Feature parity: TQSL and QG Trust
 
 Everything TQSL 2.8.7 does, and what QG Trust does about each. QG Trust doesn't need everything TQSL

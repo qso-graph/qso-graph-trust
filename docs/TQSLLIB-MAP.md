@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # tqsllib's functions and QG Trust
 
 Every function and variable tqsllib 2.8.7 offers a program that links it, and what QG Trust has for

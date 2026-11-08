@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: its library's source is outside its own directory, where the native search would not look.
 # The no-C check must catch it.
 [package]

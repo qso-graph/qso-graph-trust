@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # Releasing QSO Graph Trust
 
 KI7MT starts **Actions → Release → Run workflow** from **main**. Signing and publishing require

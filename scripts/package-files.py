@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 """Copy the repository's LICENSE, NOTICE and AUTHORS into each crate published on crates.io, so each
 package carries the GPL's text and the notices its source headers point to. A package holds only its

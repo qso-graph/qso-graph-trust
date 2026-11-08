@@ -14,7 +14,7 @@ Decided 2026-11-03 by KI7MT, after review of qso-graph-trust#1.
   listed in the open.
 - **cargo-deny** (`deny.toml`) holds the mechanical rules: crates.io only, no git dependency, no
   crate whose job is building C (`cc`, `cmake`, `bindgen` and the like), and licences compatible
-  with GPL-3.0-only. Advisories stay with `cargo audit`.
+  with GPL-3.0-or-later. Advisories stay with `cargo audit`.
 - Both run in CI, pinned (cargo-vet 0.10.3, cargo-deny 0.20.2), beside `cargo xtask policy`.
   `xtask` keeps the checks only it can make: what consumers of the published crates build
   (`[patch]`, path-and-version), our own build scripts, and the no-C and no-unsafe rules.

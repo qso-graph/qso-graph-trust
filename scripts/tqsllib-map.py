@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 """Check docs/TQSLLIB-MAP.md, the map from each of tqsllib 2.8.7's public functions and variables to
 QG Trust's Rust, its command line and the test proving it, or the reason there is none.

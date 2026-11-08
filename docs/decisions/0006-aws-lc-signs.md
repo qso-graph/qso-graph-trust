@@ -28,7 +28,7 @@ not cover this operation (SHA-1 signing with 1024-bit keys is outside FIPS's app
 is not a reason here.
 
 **The non-FIPS build,** `aws-lc-sys`: its licence is ISC, Apache-2.0, MIT, BSD-3-Clause and MIT-0, all
-compatible with GPL-3.0-only. `aws-lc-fips-sys` also lists the OpenSSL licence, which is not.
+compatible with GPL-3.0-or-later. `aws-lc-fips-sys` also lists the OpenSSL licence, which is not.
 
 ## What stays true
 

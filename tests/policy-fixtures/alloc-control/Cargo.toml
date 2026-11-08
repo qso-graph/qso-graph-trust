@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: the custody control's name is excepted, and only that name: a program named like it
 # must still be caught.
 [package]

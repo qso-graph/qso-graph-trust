@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Binaries: qg-trust built for each platform QSO Graph Desktop ships for, as one self-contained program
 # that needs neither Rust nor anything else installed: macOS (Apple silicon), Linux x86_64 and arm64,
 # and Windows x86_64.

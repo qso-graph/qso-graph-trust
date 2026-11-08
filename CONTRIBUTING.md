@@ -57,12 +57,12 @@ in the library with a regression test there, named for what it checks, never by 
 
 ## Licence
 
-QGT is **GPL-3.0-only** ([LICENSE](LICENSE)), as QSO Graph Desktop is. By contributing, you agree your
+QGT is **GPL-3.0-or-later** ([LICENSE](LICENSE)), as QSO Graph Desktop is. By contributing, you agree your
 contribution is licensed the same way, and you keep the copyright in what you wrote. New files start
 with the licence header in that file's comment style:
 
 ```rust
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) <year> the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 ```
 

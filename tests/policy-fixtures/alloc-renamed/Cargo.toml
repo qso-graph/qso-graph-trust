@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: another crate renamed into the allocator's name, so a correct line names it. The
 # wiping-allocator check must catch it.
 [package]

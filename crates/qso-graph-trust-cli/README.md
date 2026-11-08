@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # qso-graph-trust-cli: `qg-trust`
 
 Sign your log for ARRL's [Logbook of The World](https://lotw.arrl.org) (LoTW) and upload it, from
@@ -127,6 +127,4 @@ commands above use the same codes without that line:
 | 14 | QSOs signed before, with `-a abort`, or no `-a` saying what to do |
 | 15 | The password does not unlock the key: nothing is written |
 
-GPL-3.0-only. QSO Graph Trust is not made, affiliated with or endorsed by ARRL; "Logbook of The World",
-"LoTW" and "TQSL" are ARRL's names, used here only to say what it works with. Credits, sources and the
-source code: <https://github.com/qso-graph/qso-graph-trust>.
+GPL-3.0-or-later. Credits, notices and the source: <https://github.com/qso-graph/qso-graph-trust>.

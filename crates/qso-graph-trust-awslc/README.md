@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # qso-graph-trust-awslc
 
 [`qso-graph-trust`](https://crates.io/crates/qso-graph-trust)'s connection to AWS-LC, Amazon's
@@ -8,4 +8,4 @@ loaded, can only sign: it cannot be read back out.
 
 Use `qso-graph-trust`; this crate is its dependency, not an API of its own.
 
-GPL-3.0-only. Source: <https://github.com/qso-graph/qso-graph-trust>.
+GPL-3.0-or-later. Source: <https://github.com/qso-graph/qso-graph-trust>.

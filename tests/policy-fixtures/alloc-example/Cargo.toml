@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: an example without the wiping allocator, which cargo install --example would install.
 # The wiping-allocator check must catch it.
 [package]

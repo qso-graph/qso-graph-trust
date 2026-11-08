@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 [package]
 name = "xtask"
 description = "QSO Graph Trust's own checks: cargo xtask policy"

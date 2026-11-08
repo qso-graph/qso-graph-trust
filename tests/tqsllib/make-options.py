@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 """Generate signing-option oracles with tqsllib 2.8.7 and existing generated test keys.
 
@@ -18,7 +18,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "tests/corpus/signing-options"
 PREAMBLE = (
-    "SPDX-License-Identifier: GPL-3.0-only\n"
+    "SPDX-License-Identifier: GPL-3.0-or-later\n"
     "Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.\n\n"
 )
 

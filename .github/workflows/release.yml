@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Release: build and sign qg-trust for each platform, publish QSO Graph Trust's binding, library and
 # command line on crates.io, tag the commit, and put the programs on the GitHub Release.
 # Run by hand (Actions -> Release -> Run workflow) from main, with the version main already says:
