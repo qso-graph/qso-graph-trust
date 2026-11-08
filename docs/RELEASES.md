@@ -14,7 +14,9 @@ verify and attest successfully before crates or a GitHub release can be publishe
 
 A release starts with one pull request that:
 
-1. Sets the version in every crate's `Cargo.toml` and in `Cargo.lock`, and turns CHANGELOG's
+1. Sets the version in every crate's `Cargo.toml`, in `Cargo.lock`, and in `fuzz/Cargo.lock` (the
+   fuzzers are outside the workspace; `cd fuzz && cargo update -p qso-graph-trust -p
+   qso-graph-trust-awslc`), and turns CHANGELOG's
    `## [Unreleased]` into the version's heading with the date.
 2. Refreshes the figures in the README's **Security — Our #1 Priority** section, rounded down so
    they stay true as they grow:
