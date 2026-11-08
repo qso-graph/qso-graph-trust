@@ -98,7 +98,7 @@ enum Command {
         qg-trust import KI7MT.p12\n  qg-trust import KI7MT.tq6 --trust-root 1A:2B:3C:4D:...:9F\n\n\
         When ARRL starts issuing under a new root, its .tq6 brings the root with it, and qg-trust \
         names the root and its SHA-256 fingerprint before trusting it; run again with --trust-root \
-        and that fingerprint once you know it is ARRL's. A new root in your own TQSL backup is \
+        and that fingerprint once you know it is ARRL's. A new root in your own .tbk backup is \
         trusted, and named."
     )]
     Import(ImportArgs),
@@ -188,7 +188,7 @@ struct SignArgs {
 
 /// TQSL's settings that change what is signed, each off by default as in TQSL.
 #[derive(Debug, Args)]
-#[command(next_help_heading = "TQSL's signing settings")]
+#[command(next_help_heading = "Signing settings")]
 struct OptionArgs {
     /// Sign QSO times without their seconds.
     #[arg(long)]
@@ -199,11 +199,11 @@ struct OptionArgs {
     /// Don't check the log's STATION_CALLSIGN and OPERATOR against the certificate.
     #[arg(long)]
     ignore_log_callsigns: bool,
-    /// What the log's own MY_ fields do: refuse a QSO that disagrees (TQSL's default), ignore them,
+    /// What the log's own MY_ fields do: refuse a QSO that disagrees (the default), ignore them,
     /// or take them in place of the location's.
     #[arg(long, value_enum, value_name = "HOW", default_value_t = Qth::Refuse)]
     qth: Qth,
-    /// Sign an ADIF mode as a LoTW mode, as TQSL's custom mode mappings do (repeatable).
+    /// Sign an ADIF mode as a LoTW mode (repeatable).
     #[arg(long = "mode", value_name = "ADIF=LOTW", value_parser = pair)]
     modes: Vec<(String, String)>,
 }
