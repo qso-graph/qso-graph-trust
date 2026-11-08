@@ -23,7 +23,9 @@ malicious files, and no key data is left in memory it frees.
 It's part of the QSO Graph Project, and a ground-up rewrite, not a method-by-method port of TQSL. What
 it does was decided from the sources below, and how it does it is its own.
 
+<!-- vale Google.EmDash = NO -->
 ## Security — Our #1 Priority
+<!-- vale Google.EmDash = YES -->
 
 **Your key stays in your computer's credential store,** leaving it only to sign or into a backup QSO
 Graph Trust encrypts itself. QSO Graph Trust is built to the standard of enterprise security
@@ -179,5 +181,5 @@ OpenSSL, without TQSL, and uploads it to LoTW, showing that LoTW accepts a log s
 ## Licence
 
 GPL-3.0-only ([LICENSE](LICENSE)); see [NOTICE](NOTICE). QSO Graph Trust is not made, affiliated with or
-endorsed by ARRL. "Logbook of The World", "LoTW" and "TQSL" are ARRL's names, used here only to say what it
+endorsed by ARRL. "Logbook of The World," "LoTW" and "TQSL" are ARRL's names, used here only to say what it
 works with.
