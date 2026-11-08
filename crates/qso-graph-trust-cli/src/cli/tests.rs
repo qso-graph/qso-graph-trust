@@ -1485,3 +1485,27 @@ fn c_and_t_are_shown_in_help_and_no_longer_refused() {
         );
     }
 }
+
+#[test]
+fn logger_signs_adx_by_content_even_with_adi_extension() {
+    let dir = scratch();
+    let input = dir.join("log.adi");
+    let output = dir.join("log.tq8");
+    std::fs::write(&input, b"<ADX><HEADER/><RECORDS><RECORD><CALL>KN4YU</CALL><QSO_DATE>20261103</QSO_DATE><TIME_ON>183055</TIME_ON><BAND>20m</BAND><MODE>CW</MODE></RECORD></RECORDS></ADX>").expect("test log");
+    let pw = password("KC4QPQ");
+    let ran = qg_trust(
+        &[
+            "-x",
+            "-i",
+            path(&set("standard.tbk")),
+            "-l",
+            "KC4QPQ-HOME",
+            "-o",
+            path(&output),
+            path(&input),
+        ],
+        Some(&pw),
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(!signed(&output).is_empty());
+}

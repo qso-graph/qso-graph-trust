@@ -330,3 +330,50 @@ fn preferences_are_explicit_and_do_not_change_other_conversions() {
     };
     assert_eq!(qsos("default", &native)[0].mode(), "CW");
 }
+
+#[test]
+fn equivalent_adi_and_adx_sign_to_the_same_tq8() {
+    let trust = Trust::with_roots(&[&corpus("standard/pki/root.pem")]).expect("test root");
+    let backup = tbk::read(&corpus("standard/standard.tbk"), &trust).expect("test backup");
+    let cert = backup
+        .certificates
+        .iter()
+        .find(|c| c.callsign == "KC4QPQ")
+        .and_then(|c| c.certificate.as_ref())
+        .expect("certificate");
+    let station = &backup
+        .locations
+        .iter()
+        .find(|l| l.name == "KC4QPQ-HOME")
+        .expect("home")
+        .station;
+    let key = KeyEntry::read_key_file(&corpus("standard/tqsl/keys/KC4QPQ"))
+        .expect("key")
+        .remove(0)
+        .unlock(Some(&corpus("standard/keys/KC4QPQ.password")))
+        .expect("unlock test key");
+    let at = cert.validity().0 + Duration::from_secs(3600);
+    let logs: [&[u8]; 2] = [b"<CALL:5>KN4YU<QSO_DATE:8>20261103<TIME_ON:6>183055<BAND:3>20m<MODE:2>CW<EOR>", b"<ADX><HEADER/><RECORDS><RECORD><CALL>KN4YU</CALL><QSO_DATE>20261103</QSO_DATE><TIME_ON>183055</TIME_ON><BAND>20m</BAND><MODE>CW</MODE></RECORD></RECORDS></ADX>"];
+    let mut results = Vec::new();
+    for (i, log) in logs.iter().enumerate() {
+        let qsos: Vec<Qso> = records::parse(log)
+            .expect("records")
+            .iter()
+            .map(|r| Qso::from_adif(r).expect("qso"))
+            .collect();
+        let folder = Folder::new(if i == 0 { "adx-adi" } else { "adx-xml" });
+        let store = Store::open(folder.0.join("store"), KeyBackend::Memory)
+            .expect("store")
+            .0;
+        let plan = store
+            .prepare_signing_with_options(&qsos, station, &SigningOptions::default())
+            .expect("plan");
+        let signed = plan
+            .choose(DuplicateChoice::NewOnly)
+            .expect("select")
+            .sign(cert, &key, at)
+            .expect("sign");
+        results.push(signed.tq8().to_vec());
+    }
+    assert_eq!(results[0], results[1]);
+}

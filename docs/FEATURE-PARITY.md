@@ -46,6 +46,7 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Sign an ADIF log | File: Sign and save | Signed records and signatures match TQSL's byte for byte; only the identification line differs | Done | #171 |
 | Save the signed log (`.tq8`) | File: Sign and save | | Done | #171 |
 | Read ADIF | | | Done | #171 |
+| Read ADX (ADIF in XML) | | Detected by content; same signing path as ADI | Done | #172 |
 | Choose the station location to sign for | prompt | | Done | #171 |
 | Refuse QSOs outside the certificate's dates | | | Done | #171 |
 | Refuse what LoTW would refuse (calls, bands, modes, dates, satellites) | | Names the field at fault | Done | #171 |
@@ -127,7 +128,6 @@ in [#174](https://github.com/qso-graph/qso-graph-desktop/issues/174).
 | Feature | TQSL | Why later | Status |
 |---|---|---|---|
 | Sign a Cabrillo log, read Cabrillo, custom contest definitions | Sign and save; Preferences | Most loggers export ADIF | Later |
-| Read ADX (ADIF in XML) | | Few loggers write it | Later |
 | Test signing: sign, upload nothing | Test Signing | Saving `.tq8` without uploading already does this | Later |
 | Grid checked against the entity, state or county | warns | TQSL only warns | Later |
 | Continent and WPX prefix in a location | wizard | Not signed | Later |

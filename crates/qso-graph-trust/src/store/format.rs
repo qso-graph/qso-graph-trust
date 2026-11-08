@@ -598,6 +598,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn store_xml_refuses_processing_instructions() {
+        let good = "<qgt-store version=\"1\"/>";
+        assert!(xml::parse_with_limits(good, &xml_limits()).is_ok());
+        let planted = "<qgt-store version=\"1\"><?p x?></qgt-store>";
+        assert!(matches!(read(planted), Err(StoreError::Invalid("XML"))));
+    }
+
+    #[test]
     fn signed_record_counts_stop_the_xml_reader_before_the_remaining_entries() {
         for (name, max) in [("q", MAX_SIGNED_QSOS), ("s", MAX_SIGNED_STATIONS)] {
             let prefix = format!(

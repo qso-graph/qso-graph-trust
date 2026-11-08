@@ -103,6 +103,8 @@ pub enum RecordError {
     },
     /// Fields after the last `<eor>`: a record that never ended.
     Unterminated,
+    /// An ADX document could not be read.
+    Adx(&'static str),
 }
 
 impl fmt::Display for RecordError {
@@ -116,15 +118,27 @@ impl fmt::Display for RecordError {
                 write!(f, "a record ending at byte {offset} has too many fields")
             }
             Self::Unterminated => write!(f, "the last record has no <eor>"),
+            Self::Adx(problem) => write!(f, "ADX: {problem}"),
         }
     }
 }
 
 impl std::error::Error for RecordError {}
 
-/// Every record in `input`. Text outside fields is ignored, as it is in ADIF, and `<eoh>` ends a
-/// header, whose fields are dropped. A field after the last `<eor>` is an error.
+/// Every record in `input`, detected by content as ADX or ADI after an optional UTF-8 BOM and
+/// whitespace. An ADX claim that fails is not retried as ADI. In ADI, text outside fields is
+/// ignored and `<eoh>` ends a header whose fields are dropped; fields after the last `<eor>` are an
+/// error. ADX headers are discarded as well.
 pub fn parse(input: &[u8]) -> Result<Vec<Record>, RecordError> {
+    let content = input.strip_prefix(b"\xef\xbb\xbf").unwrap_or(input);
+    let content = content.trim_ascii_start();
+    if content.starts_with(b"<?xml") || content.starts_with(b"<ADX") {
+        return crate::adx::parse(content);
+    }
+    parse_adi(input)
+}
+
+fn parse_adi(input: &[u8]) -> Result<Vec<Record>, RecordError> {
     let mut records = Vec::new();
     let mut current = Record::default();
     let mut total_fields = 0;

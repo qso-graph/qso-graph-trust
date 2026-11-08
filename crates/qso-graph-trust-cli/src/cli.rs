@@ -138,7 +138,7 @@ from standard input when a logger runs qg-trust. The last line on standard error
              your computer's credential store.",
     after_help = AFTER_HELP,
     override_usage = "qg-trust <COMMAND> [ARGS]     (import, cert, location, sign, send, upload: below)\n       \
-                      qg-trust -l <NAME> [OPTIONS] <LOG.adi>     (as loggers call tqsl)\n       \
+                      qg-trust -l <NAME> [OPTIONS] <LOG.adi|adx>     (as loggers call tqsl)\n       \
                       qg-trust --completions <SHELL>",
     disable_version_flag = true,
     disable_help_flag = true,
@@ -191,8 +191,8 @@ struct Options {
         help_heading = "Signing"
     )]
     output: Option<PathBuf>,
-    /// The ADIF log to sign.
-    #[arg(value_name = "LOG.adi")]
+    /// The ADIF log to sign (.adi or .adx).
+    #[arg(value_name = "LOG.adi|adx")]
     input: Option<PathBuf>,
     /// Upload the signed log to LoTW.
     #[arg(short = 'u', long, help_heading = "Signing")]

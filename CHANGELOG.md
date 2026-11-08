@@ -7,6 +7,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Read ADIF logs in ADX XML form as well as ADI, selected by content, for signing through the library and CLI (decision 0013).
+
 - The file readers are fuzzed: cargo-fuzz and libFuzzer, with a target for ADIF logs, `.tq6`, `.p12`
   and `.tbk` files, each driving the library as `qg-trust` does and checking that no record the
   library refuses is ever signed and that everything imported hangs together. In CI on every pull
