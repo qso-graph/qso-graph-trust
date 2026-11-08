@@ -8,6 +8,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 ### Changed
 
 
+
+- Licensed GPL-3.0-or-later, the same as every QSO Graph project; the ARRL notice appears once, in the README.
 - AGENTS.md and CLAUDE.md: the organization's shared agent guide, and this repository's own.
 - README: American spelling, as the QSO Graph style guide asks.
 

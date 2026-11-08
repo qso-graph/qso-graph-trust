@@ -92,7 +92,7 @@ removed (ARRL's [certificate security](https://lotw.arrl.org/lotw-help/certifica
 - **A new check is proved by a planted case** that fails it, then passes without it.
 - **Pin, don't float.** Exact versions for anything in the key, crypto, signing or packaging path;
   `Cargo.lock` is committed and CI builds `--locked`.
-- **House rules:** every new file starts with the SPDX header (`GPL-3.0-only`, see `CONTRIBUTING.md`);
+- **House rules:** every new file starts with the SPDX header (`GPL-3.0-or-later`, see `CONTRIBUTING.md`);
   changes go in by pull request; branches are `feat-…`, `fix-…` or `docs-…`; match the code around you,
   and don't rename or reformat what your task doesn't need.
 

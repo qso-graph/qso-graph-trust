@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 [package]
 name = "qso-graph-trust-cli"
 description = "qg-trust: sign and upload your logs for ARRL's Logbook of The World (LoTW), with your key in your computer's credential store"

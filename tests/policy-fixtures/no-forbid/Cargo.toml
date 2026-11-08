@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: its crate root lacks #![forbid(unsafe_code)]. The no-unsafe check must catch it.
 [package]
 name = "planted-no-forbid"

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Dependabot: security updates only, grouped into one pull request per ecosystem, as across the org.
 # open-pull-requests-limit: 0 switches off version updates; security updates have their own limit and
 # are unaffected. CI's weekly audit fails on a vulnerable lock whether or not a pull request comes.

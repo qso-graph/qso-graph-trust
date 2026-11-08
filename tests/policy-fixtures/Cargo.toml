@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Planted cases for the policy checks (xtask/tests/planted.rs). Read by
 # `cargo metadata` only: never compiled, never part of QGT.
 [workspace]

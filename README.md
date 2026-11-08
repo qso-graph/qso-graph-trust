@@ -2,7 +2,7 @@
   <a href="https://github.com/qso-graph/qso-graph-trust/releases/latest"><img src="https://img.shields.io/github/v/release/qso-graph/qso-graph-trust?sort=semver&label=Release&color=blue" alt="Latest release"></a>
   <a href="https://crates.io/crates/qso-graph-trust-cli"><img src="https://img.shields.io/crates/v/qso-graph-trust-cli?label=crates.io&color=blue" alt="qso-graph-trust-cli on crates.io"></a>
   <a href="https://docs.rs/qso-graph-trust"><img src="https://img.shields.io/docsrs/qso-graph-trust?label=docs.rs" alt="The library's documentation on docs.rs"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--only-blue" alt="License: GPL-3.0-only"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
   <img src="https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20%7C%20macOS-blue" alt="Platforms: Windows, Linux, macOS">
 </p>
 
@@ -180,6 +180,8 @@ OpenSSL, without TQSL, and uploads it to LoTW, showing that LoTW accepts a log s
 
 ## License
 
-GPL-3.0-only ([LICENSE](LICENSE)); see [NOTICE](NOTICE). QSO Graph Trust is not made, affiliated with or
-endorsed by ARRL. "Logbook of The World," "LoTW" and "TQSL" are ARRL's names, used here only to say what it
-works with.
+GPL-3.0-or-later ([LICENSE](LICENSE)); see [NOTICE](NOTICE).
+
+QSO Graph Trust is not made, affiliated with or endorsed by ARRL.
+"Logbook of The World", "LoTW" and "TQSL" are ARRL's names, used here only to say what it works
+with.

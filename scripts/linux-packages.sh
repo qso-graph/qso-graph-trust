@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # The .deb and .rpm of one Linux build, for packages.qso-graph.net's apt and dnf repositories
 # (qso-graph/qso-graph-packages), which sign them:
 #
@@ -75,7 +75,7 @@ Name: $name
 Version: $pkg_version
 Release: 1
 Summary: $summary
-License: GPL-3.0-only
+License: GPL-3.0-or-later
 URL: https://github.com/qso-graph/qso-graph-trust
 %description
 qg-trust signs your ADIF log for LoTW, byte for byte as TQSL signs it, and

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: a crate root that is not a .rs file, which the token scan would not read. Must be caught.
 [package]
 name = "planted-inc-root"

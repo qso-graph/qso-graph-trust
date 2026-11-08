@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # QSO Graph Trust (QGT): one library, the CLI tools on it, and the policy checks (xtask).
 [workspace]
 members = ["crates/qso-graph-trust", "crates/qso-graph-trust-awslc", "crates/qso-graph-trust-cli", "crates/qso-graph-trust-custody", "xtask"]
@@ -10,7 +10,7 @@ resolver = "3"
 version = "0.1.5"
 edition = "2024"
 rust-version = "1.99"
-license = "GPL-3.0-only"
+license = "GPL-3.0-or-later"
 repository = "https://github.com/qso-graph/qso-graph-trust"
 
 # Every crate inherits these with `[lints] workspace = true`. The policy check also

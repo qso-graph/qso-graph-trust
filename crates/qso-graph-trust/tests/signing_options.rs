@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 the QSO Graph Trust contributors (see AUTHORS). Part of QSO Graph Trust; see LICENSE.
 
 //! Full signed records, signatures and duplicate metadata against tqsllib 2.8.7. Reproduce with
@@ -29,7 +29,7 @@ fn corpus(path: &str) -> Vec<u8> {
 
 fn fixture(case: &str, suffix: &str) -> Vec<u8> {
     let file = corpus(&format!("signing-options/{case}.{suffix}"));
-    assert!(file.starts_with(b"SPDX-License-Identifier: GPL-3.0-only\n"));
+    assert!(file.starts_with(b"SPDX-License-Identifier: GPL-3.0-or-later\n"));
     let start = file
         .windows(2)
         .position(|w| w == b"\n\n")

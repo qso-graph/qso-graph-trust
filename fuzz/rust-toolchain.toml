@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # The fuzzers' compiler, and theirs only: libFuzzer's coverage instrumentation needs a nightly
 # (docs/decisions/0012-fuzzing.md). A dated nightly, so every run builds with the same one. The
 # repository's root rust-toolchain.toml, an exact stable, still builds everything that ships.

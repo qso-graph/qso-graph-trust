@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: a build script with no `links` and no native-build crate, which could still run a compiler.
 # The no-C check must catch it as unreviewed.
 [package]

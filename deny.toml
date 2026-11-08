@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # cargo-deny: the mechanical dependency rules (docs/decisions/0004).
 # Reviewing what each crate does is cargo-vet's (supply-chain/); this file says where crates
-# may come from, which may not appear at all, and which licences fit a GPL-3.0-only project.
+# may come from, which may not appear at all, and which licences fit a GPL-3.0-or-later project.
 # CI runs `cargo deny --locked check bans licenses sources`; advisories stay with cargo audit.
 
 [graph]
@@ -31,7 +31,7 @@ deny = [
     { crate = "vcpkg", reason = "finds native libraries to link" },
 ]
 
-# Licences compatible with GPL-3.0-only, which QGT is.
+# Licences compatible with GPL-3.0-or-later, which QGT is.
 [licenses]
 confidence-threshold = 0.93
 allow = [
@@ -39,7 +39,7 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
-    "GPL-3.0-only",
+    "GPL-3.0-or-later",
     "ISC",
     "MIT",
     "Unicode-3.0",

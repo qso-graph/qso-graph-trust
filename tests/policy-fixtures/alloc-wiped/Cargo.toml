@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # A program that installs the wiping allocator as required: the check must pass it.
 [package]
 name = "planted-alloc-wiped"

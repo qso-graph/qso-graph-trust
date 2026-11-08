@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: a macro taking a whole attribute as a meta fragment, $h [$a], to build #[path]. Workspace
 # crates define no macros, so it must be caught.
 [package]

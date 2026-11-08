@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: a macro that joins a lone # to brackets passed separately, making #[path = "hidden.md"] where
 # no token is #[ ...]. The token scan must catch the lone #.
 [package]

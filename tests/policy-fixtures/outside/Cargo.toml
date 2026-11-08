@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: outside the workspace and not from crates.io. The no-C check must catch it.
 [package]
 name = "planted-outside"

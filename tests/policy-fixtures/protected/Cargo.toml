@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Stands in for the library: the check follows its dependencies.
 [package]
 name = "qso-graph-trust"

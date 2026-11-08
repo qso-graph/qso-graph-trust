@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # qso-graph-trust
 
 LoTW signing for your own programs: sign ADIF logs (`.adi` or `.adx`) with your LoTW certificate, so ARRL's
@@ -111,11 +111,8 @@ from these, and how is QG Trust's own:
 
 ## Licence
 
-GPL-3.0-only. LoTW's tables are generated from ARRL's TQSL configuration, Copyright (C) 2001-2015
+LoTW's tables are generated from ARRL's TQSL configuration, Copyright (C) 2001-2015
 American Radio Relay League, Inc., portions (C) 2003-2026 The TrustedQSL Developers, redistributed under
 ARRL's terms in `LICENSE-ARRL.md` (ARRL's text, unchanged), which ships with this crate.
 
-QSO Graph Trust is not made, affiliated with or endorsed by ARRL. "Logbook of The World" and "LoTW" are
-ARRL's marks, used here only to say what this library works with.
-
-Source, decisions and the plan: <https://github.com/qso-graph/qso-graph-trust>.
+GPL-3.0-or-later. Credits, notices and the source: <https://github.com/qso-graph/qso-graph-trust>.

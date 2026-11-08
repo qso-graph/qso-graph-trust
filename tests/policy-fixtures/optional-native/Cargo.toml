@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: links a native library, reached only through an optional feature. The no-C check must catch it.
 [package]
 name = "planted-optional-native"

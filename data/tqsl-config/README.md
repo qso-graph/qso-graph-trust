@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # ARRL's TQSL configuration
 
 `config.xml` is ARRL's TQSL configuration, version 11.35, as TrustedQSL 2.8.7 ships it

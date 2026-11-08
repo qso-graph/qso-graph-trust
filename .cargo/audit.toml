@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # cargo audit's one exception (docs/decisions/0002-no-c-in-the-library.md, amended 2026-11-03).
 [advisories]
 # RUSTSEC-2023-0071 (Marvin), rsa: no fixed release exists. rsa is a test tool only since decision 0006

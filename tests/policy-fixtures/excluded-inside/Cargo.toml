@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: the workspace excludes src/hidden inside this crate, but `mod hidden;` still loads it.
 # The token scan must still read it.
 [package]

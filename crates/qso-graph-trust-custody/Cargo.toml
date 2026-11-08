@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 [package]
 name = "qso-graph-trust-custody"
 description = "QSO Graph Trust's custody test: no key data left in a signing program's memory"

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # PLANTED: links a library through #[link] and an extern block, and carries a C file, with no
 # `links` key and no build script. The no-C check must catch it.
 [package]

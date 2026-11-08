@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # The Rust that builds QGT, pinned, and the same as QSO Graph Desktop's
 # (qso-graph-desktop/rust-toolchain.toml), because QSO Graph Desktop links this
 # library. rustup reads this file and installs this version before any cargo command.

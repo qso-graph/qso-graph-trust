@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 [package]
 name = "qso-graph-trust-awslc"
 description = "QSO Graph Trust's one binding to AWS-LC: LoTW's RSA-SHA-1 signature and certificate checks"
