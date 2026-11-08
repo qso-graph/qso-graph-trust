@@ -39,6 +39,9 @@ change:
 - **Only LoTW, only HTTPS, only ARRL's roots,** with the server's certificate always checked.
 - **A locked supply chain:** pinned dependencies, policy checks and CodeQL on every pull request, and
   signed, notarized and attested releases.
+- **Nothing merges until it passes:** nearly 400 tests, five fuzzers feeding about 1.8 million hostile
+  inputs, eight security policy checks, a custody search of memory and every file written, and CodeQL,
+  on every change.
 
 How each is tested, and how to report a security problem privately: [SECURITY.md](SECURITY.md).
 
