@@ -32,6 +32,9 @@ use qso_graph_trust::upload::UploadRequest;
 use qso_graph_trust::{VERSION, records};
 use zeroize::Zeroizing;
 
+/// The TQSL command-line version understood by compatible loggers.
+const TQSL_VERSION: &str = "2.8.7";
+
 pub(crate) mod trace;
 pub(crate) use trace::Trace;
 
@@ -249,6 +252,23 @@ struct Options {
         help_heading = "Other"
     )]
     diagnose: Option<PathBuf>,
+    /// TQSL's passphrase for a key file. Not needed: qg-trust keeps your key in the computer's
+    /// credential store. Accepted so loggers that send it keep working; it unlocks only a key read
+    /// with -i that has one.
+    #[arg(
+        short = 'p',
+        long = "password",
+        value_name = "PASSPHRASE",
+        allow_hyphen_values = true,
+        hide = true
+    )]
+    password: Option<String>,
+    /// Sign a test file without recording its QSOs.
+    #[arg(short = 'z', long = "test-sign", help_heading = "Signing")]
+    test_sign: bool,
+    /// Clear the record of QSOs signed before, after confirmation.
+    #[arg(short = 'w', long = "wipe", help_heading = "Other")]
+    wipe: bool,
     /// Print the version.
     #[arg(short = 'v', long, action = clap::ArgAction::SetTrue, help_heading = "Other")]
     version: bool,
@@ -291,47 +311,32 @@ pub(crate) enum Verify {
 /// An omitted value gets an empty default so clap records its index for ordering refusals.
 #[derive(Debug, clap::Args)]
 struct Rejected {
-    #[arg(short = 'p', long = "password", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
-    password: Option<Option<String>>,
     #[arg(short = 'n', long = "updates", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     updates: Option<Option<String>>,
     #[arg(short = 's', long = "editlocation", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
     editlocation: Option<Option<String>>,
-    #[arg(short = 'w', long = "wipe", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
-    wipe: Option<Option<String>>,
-    #[arg(short = 'z', long = "test-sign", hide = true, num_args = 0..=1, default_missing_value = "", allow_hyphen_values = true)]
-    test_sign: Option<Option<String>>,
 }
 
-const PASSWORD_MESSAGE: &str = "a password is never given on the command line: qg-trust asks for \
-    the key's password when it needs it";
+/// Said whenever -p is given. TQSL calls it a password; it is the passphrase that unlocks a key
+/// file. qg-trust keeps keys in the computer's credential store, which needs none, so -p is
+/// accepted only so loggers that always send it (fldigi does by default) keep working.
+const PASSPHRASE_NOTE: &str = "-p is TQSL's key passphrase. qg-trust needs none for a key in its \
+    store, and a passphrase on a command line can be read by other programs on this computer, so \
+    your logger can stop sending it";
 
 // Only these literals can become a refusal message, never a slice of an argument.
 const REJECTED_MESSAGES: &[(char, &str, &str, &str)] = &[
-    ('p', "--password", PASSWORD_MESSAGE, PASSWORD_MESSAGE),
     (
         'n',
         "--updates",
-        "-n is not supported yet",
-        "--updates is not supported yet",
+        "qg-trust does not update itself: it is updated by your package manager (apt, dnf, Homebrew) or its installer",
+        "qg-trust does not update itself: it is updated by your package manager (apt, dnf, Homebrew) or its installer",
     ),
     (
         's',
         "--editlocation",
-        "-s is not supported yet",
-        "--editlocation is not supported yet",
-    ),
-    (
-        'w',
-        "--wipe",
-        "-w is not supported yet",
-        "--wipe is not supported yet",
-    ),
-    (
-        'z',
-        "--test-sign",
-        "-z is not supported yet",
-        "--test-sign is not supported yet",
+        "qg-trust has no location editor window: use qg-trust location add or qg-trust location edit",
+        "qg-trust has no location editor window: use qg-trust location add or qg-trust location edit",
     ),
 ];
 
@@ -397,7 +402,8 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
     // Defaults have indices too, so only command-line occurrences take part in the ordering.
     // A refused option anywhere on the line is refused before help or the version is shown: a
     // repeated option keeps only its last occurrence's index, so an order-based rule would let
-    // `-p SECRET --version -p SECRET2` print the version (found in review).
+    // `-n x --version -n y` print the version (found in review). Only options with a fixed
+    // refusal are refused; a hidden option that is accepted (-p) is not one of them.
     let given = |arg: &&clap::Arg| {
         matches.value_source(arg.get_id().as_str()) == Some(clap::parser::ValueSource::CommandLine)
     };
@@ -413,7 +419,13 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
             })
             .min_by_key(|(index, _)| *index)
     };
-    let first = earliest(&|arg| arg.is_hide_set())
+    let refused = |arg: &clap::Arg| {
+        arg.is_hide_set()
+            && REJECTED_MESSAGES
+                .iter()
+                .any(|option| arg.get_short() == Some(option.0))
+    };
+    let first = earliest(&refused)
         .or_else(|| earliest(&|arg| matches!(arg.get_id().as_str(), "help" | "version")));
     if let Some((_, arg)) = first {
         match arg.get_id().as_str() {
@@ -427,7 +439,10 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
                 return None;
             }
             "version" => {
-                let _ = writeln!(env.out, "qg-trust {VERSION}");
+                let _ = writeln!(
+                    env.out,
+                    "qg-trust {VERSION} (compatible with TQSL Version {TQSL_VERSION})"
+                );
                 return None;
             }
             _ => {
@@ -451,7 +466,7 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
         }
     }
     // Keep clap's matches so control options can be ordered before the derive API builds Options.
-    let options = match Options::from_arg_matches(&matches) {
+    let mut options = match Options::from_arg_matches(&matches) {
         Ok(options) => options,
         Err(error) => return Some(syntax_error(env, parse_error_message(&error))),
     };
@@ -463,6 +478,22 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
         clap_complete::generate(shell, &mut Options::command(), "qg-trust", &mut script);
         let _ = env.out.write_all(&script);
         return None;
+    }
+    if options.password.is_some() {
+        env.message(Tone::Warning, format_args!("{PASSPHRASE_NOTE}"));
+        env.trace.line(format_args!("{PASSPHRASE_NOTE}"));
+    }
+    // TQSL handles -w first and exits, whatever else is given (tqsl.cpp:6480).
+    if options.wipe {
+        return Some(crate::commands::clear_signed(false, env));
+    }
+    // TQSL's upload path never reads -z (tqsl.cpp:6884 is the file path only): with -u the log is
+    // signed, recorded and sent as usual. Done the same, and said in the diagnostic log.
+    if options.test_sign && options.upload {
+        options.test_sign = false;
+        env.trace.line(format_args!(
+            "-z has no effect with -u, as in TQSL: the log is signed, recorded and uploaded"
+        ));
     }
     let missing = if options.input.is_none() {
         Some("give the log to sign")
@@ -492,6 +523,7 @@ fn execute(args: &[&str], env: &mut Env<'_>) -> Option<Exit> {
                 action: options.action,
                 verify: options.verify,
                 upload: options.upload,
+                test_sign: options.test_sign,
             },
             env,
         ))
@@ -864,7 +896,12 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
     ));
     let key = if entry_key.is_encrypted() {
         let prompt = format!("Password for {}'s key: ", entry.callsign);
-        let password = match (env.ask_password)(&prompt) {
+        // TQSL's -p, given, takes the place of asking, as tqsl_beginSigning does (tqsl.cpp:2380).
+        let given = options
+            .password
+            .as_deref()
+            .map(|p| Ok(Zeroizing::new(p.as_bytes().to_vec())));
+        let password = match given.unwrap_or_else(|| (env.ask_password)(&prompt)) {
             Ok(p) => p,
             Err(e) => {
                 env.message(
@@ -896,7 +933,9 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
     };
     env.trace.line(format_args!(
         "Key: unlocked{}",
-        if entry_key.is_encrypted() {
+        if entry_key.is_encrypted() && options.password.is_some() {
+            " with the passphrase given with -p"
+        } else if entry_key.is_encrypted() {
             " with the password asked for"
         } else {
             ", it has no password"
@@ -1042,7 +1081,25 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
         );
         return Exit::TqslError;
     }
-    if let Err(e) = write_whole(&output, &signed) {
+    let tq7 = if options.test_sign {
+        match qso_graph_trust::gzip::decompress(
+            &signed,
+            qso_graph_trust::upload::MAX_SIGNED_LOG_BYTES,
+        ) {
+            Ok(bytes) => bytes.to_vec(),
+            Err(_) => {
+                env.message(
+                    Tone::Error,
+                    format_args!("{}", crate::commands::UNUPLOADABLE),
+                );
+                return Exit::TqslError;
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let file_bytes = if options.test_sign { &tq7 } else { &signed };
+    if let Err(e) = write_whole(&output, file_bytes) {
         env.message(Tone::Error, format_args!("the output file (-o): {e}"));
         return Exit::OutputError;
     }
@@ -1055,6 +1112,9 @@ fn sign(options: &Options, env: &mut Env<'_>, written: &mut Option<Vec<u8>>) -> 
             "beside the log, with .tq8"
         }
     ));
+    if options.test_sign {
+        test_sign_message(env);
+    }
     *written = Some(signed);
     env.message(
         Tone::Success,
@@ -1101,6 +1161,12 @@ pub(crate) fn read_file(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
         return Err(io::Error::other("larger than any file qg-trust reads"));
     }
     std::fs::read(path)
+}
+
+pub(crate) fn test_sign_message(env: &mut Env<'_>) {
+    const MESSAGE: &str = "Test signing: these QSOs were not recorded as signed. You can upload this file to LoTW or discard it.";
+    let _ = writeln!(env.out, "{MESSAGE}");
+    env.trace.line(format_args!("{MESSAGE}"));
 }
 
 /// `bytes` written to `path` whole or not at all: to a file beside it, then renamed over it.

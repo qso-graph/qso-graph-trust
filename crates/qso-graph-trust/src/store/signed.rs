@@ -175,6 +175,34 @@ impl SignedLog {
     /// (2097–2108), not on upload. The corpus driver commits after closing successful output
     /// (tests/tqsllib/qgt-tqsllib.cpp:230–241). Here the write is synced before record replacement.
     pub fn write_to(&self, store: &Store, path: &Path) -> Result<(), StoreError> {
+        self.check_output_path(store, path)?;
+        let _lock = store.lock()?;
+        let mut data = store.read()?;
+        // A new-only selection was made from a snapshot; another signing may have recorded one of
+        // its QSOs since. Checked under the lock, so two runs never both sign a QSO as new. A QSO
+        // whose record is as the plan found it (an update adding station details) is not refused.
+        if let Some(snapshot) = &self.snapshot
+            && self.records.iter().any(|r| {
+                data.signed_qsos.get(&r.key) != snapshot.get(&r.key).and_then(Option::as_ref)
+            })
+        {
+            return Err(StoreError::SignedMeanwhile);
+        }
+        merge(&mut data.signed_qsos, &self.records, true)?;
+        let xml = format::write(&data)?;
+        let mut output = owner_file().create_new(true).open(path)?;
+        output.write_all(&self.bytes)?;
+        output.sync_all()?;
+        drop(output);
+        sync_directory(
+            path.parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new(".")),
+        )?;
+        store.replace(&xml)
+    }
+    /// Refuse store-owned filenames and paths inside the store before writing a signed log.
+    pub fn check_output_path(&self, store: &Store, path: &Path) -> Result<(), StoreError> {
         if path
             .file_name()
             .and_then(|name| name.to_str())
@@ -207,26 +235,7 @@ impl SignedLog {
         if in_store {
             return Err(StoreError::Invalid("output in store directory"));
         }
-        let _lock = store.lock()?;
-        let mut data = store.read()?;
-        // A new-only selection was made from a snapshot; another signing may have recorded one of
-        // its QSOs since. Checked under the lock, so two runs never both sign a QSO as new. A QSO
-        // whose record is as the plan found it (an update adding station details) is not refused.
-        if let Some(snapshot) = &self.snapshot
-            && self.records.iter().any(|r| {
-                data.signed_qsos.get(&r.key) != snapshot.get(&r.key).and_then(Option::as_ref)
-            })
-        {
-            return Err(StoreError::SignedMeanwhile);
-        }
-        merge(&mut data.signed_qsos, &self.records, true)?;
-        let xml = format::write(&data)?;
-        let mut output = owner_file().create_new(true).open(path)?;
-        output.write_all(&self.bytes)?;
-        output.sync_all()?;
-        drop(output);
-        sync_directory(parent)?;
-        store.replace(&xml)
+        Ok(())
     }
 }
 
