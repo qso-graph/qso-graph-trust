@@ -57,6 +57,7 @@ impl fmt::Display for ImportRefusal {
 
 /// Why a certificate import failed. No variant contains passwords or key material.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ImportError {
     /// Input, decompression, nesting, item count, password or KDF work exceeds a bound.
     Limit,

@@ -899,3 +899,252 @@ fn the_owned_pending_value_spans_ui_commands_and_keeps_its_store_identity() {
         .commit(pending, ImportChoices::default())
         .expect("fresh instance's plan");
 }
+
+#[test]
+fn delete_refuses_a_key_attached_after_inspection_by_another_instance() {
+    let folder = Folder::new();
+    let keys = Arc::new(MemoryKeyStore::new());
+    let (store, _) = open(&folder.0, &keys).expect("open");
+    let (other, _) = open(&folder.0, &keys).expect("other instance");
+    let trust = Trust::with_roots(&[&tqsl("pki/root.pem")]).expect("test root");
+    let id = store
+        .import_tq6(&tqsl("1024/QG0TEST.tq6"), &trust, None)
+        .expect("keyless import")
+        .remove(0)
+        .id;
+    let pending = store.inspect_delete(&id).expect("inspect keyless deletion");
+    assert!(!pending.preview().key_present);
+    other
+        .import_pkcs12(&tqsl("1024/QG0TEST.p12"), &p12_password(), &trust, None)
+        .expect("attach matching key");
+    let before = snapshot(&store);
+    assert!(matches!(
+        store.commit_delete(pending),
+        Err(StoreError::Conflict)
+    ));
+    assert!(
+        snapshot(&store) == before,
+        "newly attached key or record changed"
+    );
+    store.with_key(&id, |_| ()).expect("attached key retained");
+    let pending = store.inspect_delete(&id).expect("inspect new state");
+    assert!(pending.preview().key_present);
+    store.commit_delete(pending).expect("fresh confirmation");
+    assert!(store.certificates().expect("records").is_empty());
+    assert!(keys.names().expect("credentials").is_empty());
+}
+
+#[test]
+fn delete_refuses_an_unrelated_public_store_change() {
+    let folder = Folder::new();
+    let keys = Arc::new(MemoryKeyStore::new());
+    let (store, _) = open(&folder.0, &keys).expect("open");
+    let (other, _) = open(&folder.0, &keys).expect("other instance");
+    let id = store
+        .add_certificate(backup().certificates[0].certificate.as_ref().expect("cert"))
+        .expect("public certificate");
+    let pending = store.inspect_delete(&id).expect("inspect");
+    other
+        .add_location("concurrent", &station())
+        .expect("unrelated change");
+    let before = snapshot(&store);
+    assert!(matches!(
+        store.commit_delete(pending),
+        Err(StoreError::Conflict)
+    ));
+    assert!(
+        snapshot(&store) == before,
+        "unrelated change caused deletion"
+    );
+    let pending = store.inspect_delete(&id).expect("inspect again");
+    store.commit_delete(pending).expect("fresh confirmation");
+    assert_eq!(store.locations().expect("locations").len(), 1);
+}
+
+#[test]
+fn delete_refuses_a_certificate_removed_after_inspection() {
+    let folder = Folder::new();
+    let (store, _) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
+    let cert = backup().certificates[0].certificate.clone().expect("cert");
+    let id = store.add_certificate(&cert).expect("certificate");
+    let pending = store.inspect_delete(&id).expect("inspect");
+    store.delete_certificate(&id).expect("concurrent deletion");
+    let before = snapshot(&store);
+    assert!(matches!(
+        store.commit_delete(pending),
+        Err(StoreError::Conflict)
+    ));
+    assert!(snapshot(&store) == before, "removed record caused writes");
+    assert!(matches!(
+        store.inspect_delete(&id),
+        Err(StoreError::NotFound)
+    ));
+    let id = store.add_certificate(&cert).expect("restore certificate");
+    let pending = store.inspect_delete(&id).expect("inspect restored record");
+    store.commit_delete(pending).expect("fresh confirmation");
+}
+
+#[test]
+fn delete_pending_is_bound_to_its_store_instance_even_in_the_same_folder() {
+    let folder = Folder::new();
+    let keys = Arc::new(MemoryKeyStore::new());
+    let (store, _) = open(&folder.0, &keys).expect("open");
+    let (other, _) = open(&folder.0, &keys).expect("same folder and backend");
+    let id = store
+        .add_certificate(backup().certificates[0].certificate.as_ref().expect("cert"))
+        .expect("certificate");
+    let pending = store.inspect_delete(&id).expect("inspect");
+    let before = snapshot(&store);
+    assert!(matches!(
+        other.commit_delete(pending),
+        Err(StoreError::Conflict)
+    ));
+    assert!(snapshot(&store) == before, "other instance deleted record");
+    let pending = other.inspect_delete(&id).expect("fresh instance's preview");
+    other.commit_delete(pending).expect("same instance");
+}
+
+#[test]
+fn delete_clean_commit_removes_record_then_key_matching_the_public_preview() {
+    let folder = Folder::new();
+    let keys = Arc::new(ObservedKeys::new(&folder.0, false, false));
+    let (store, _) = open(&folder.0, &keys).expect("open");
+    let trust = Trust::with_roots(&[&tqsl("pki/root.pem")]).expect("test root");
+    let id = store
+        .import_pkcs12(&tqsl("1024/QG0TEST.p12"), &p12_password(), &trust, None)
+        .expect("import")
+        .id;
+    let certificate = store.certificates().expect("records").remove(0).certificate;
+    let before = snapshot(&store);
+    let pending = store.inspect_delete(&id).expect("inspect");
+    fn owned<T: Send + Sync + 'static>(_: &T) {}
+    owned(&pending);
+    let preview = pending.preview();
+    assert_eq!(preview.callsign, certificate.callsign());
+    assert_eq!(preview.dxcc, certificate.dxcc());
+    assert_eq!(preview.serial, certificate.serial_number());
+    assert_eq!(preview.qso_dates, certificate.qso_dates());
+    assert_eq!(preview.validity, certificate.validity());
+    assert!(preview.key_present);
+    assert!(
+        !format!("{preview:?}").contains('@'),
+        "preview exposed email"
+    );
+    assert!(snapshot(&store) == before, "inspection changed the store");
+    keys.calls.lock().expect("calls").clear();
+    let moved_store = store;
+    moved_store
+        .commit_delete(pending)
+        .expect("delete after moving Store");
+    assert_eq!(*keys.calls.lock().expect("calls"), ["delete"]);
+    assert!(moved_store.certificates().expect("records").is_empty());
+    assert!(keys.names().expect("credentials").is_empty());
+}
+
+#[test]
+fn delete_dropping_pending_leaves_all_public_bytes_and_credentials_unchanged() {
+    let folder = Folder::new();
+    let (store, _) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
+    let trust = Trust::with_roots(&[&tqsl("pki/root.pem")]).expect("test root");
+    let id = store
+        .import_pkcs12(&tqsl("1024/QG0TEST.p12"), &p12_password(), &trust, None)
+        .expect("import")
+        .id;
+    let before = snapshot(&store);
+    let pending = store.inspect_delete(&id).expect("inspect");
+    assert!(snapshot(&store) == before, "inspection changed the store");
+    drop(pending);
+    assert!(snapshot(&store) == before, "cancellation changed the store");
+    store.with_key(&id, |_| ()).expect("key retained");
+}
+
+#[test]
+fn delete_refuses_credential_presence_changes_without_public_file_changes() {
+    for initially_present in [false, true] {
+        let folder = Folder::new();
+        let (store, _) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
+        let trust = Trust::with_roots(&[&tqsl("pki/root.pem")]).expect("test root");
+        let id = store
+            .import_pkcs12(&tqsl("1024/QG0TEST.p12"), &p12_password(), &trust, None)
+            .expect("import")
+            .id;
+        let name = store.certificates().expect("records")[0]
+            .key_name
+            .clone()
+            .expect("key name");
+        let der = store.keys.get(&name).expect("key").expect("present");
+        if !initially_present {
+            store.keys.delete(&name).expect("plant missing key");
+        }
+        let pending = store.inspect_delete(&id).expect("inspect");
+        assert_eq!(pending.preview().key_present, initially_present);
+        if initially_present {
+            store.keys.delete(&name).expect("remove key meanwhile");
+        } else {
+            store.keys.put(&name, &der).expect("restore key meanwhile");
+        }
+        let before = snapshot(&store);
+        let error = store.commit_delete(pending).expect_err("presence conflict");
+        assert!(matches!(error, StoreError::Conflict));
+        assert_eq!(format!("{error:?}"), "Conflict");
+        assert_eq!(
+            error.to_string(),
+            "the store changed since inspection; inspect again before committing"
+        );
+        assert!(std::error::Error::source(&error).is_none());
+        assert!(
+            snapshot(&store) == before,
+            "credential-only change caused writes"
+        );
+        let pending = store.inspect_delete(&id).expect("inspect again");
+        store.commit_delete(pending).expect("fresh confirmation");
+        assert!(store.certificates().expect("records").is_empty());
+        assert!(store.keys.names().expect("credentials").is_empty());
+    }
+}
+
+#[test]
+fn delete_inspection_and_commit_wait_for_the_store_lock() {
+    for commit in [false, true] {
+        let folder = Folder::new();
+        let (store, _) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
+        let id = store
+            .add_certificate(backup().certificates[0].certificate.as_ref().expect("cert"))
+            .expect("certificate");
+        let pending = store.inspect_delete(&id).expect("inspect");
+        let before = snapshot(&store);
+        let lock = store.lock().expect("plant held lock");
+        let (send, receive) = mpsc::channel();
+        let (events, observed) = mpsc::channel();
+        *store.lock_observer.lock().expect("observer") = Some(events.clone());
+        let store_ref = &store;
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                let result = if commit {
+                    store_ref.commit_delete(pending)
+                } else {
+                    store_ref.inspect_delete(&id).map(drop)
+                };
+                events.send(false).expect("completion observed");
+                send.send(result).expect("send");
+            });
+            assert!(
+                observed
+                    .recv_timeout(Duration::from_secs(120))
+                    .expect("lock attempt or completion"),
+                "deletion operation completed without a blocked lock acquisition"
+            );
+            assert!(matches!(receive.try_recv(), Err(mpsc::TryRecvError::Empty)));
+            assert!(snapshot(&store) == before, "store changed while locked");
+            drop(lock);
+            receive
+                .recv_timeout(Duration::from_secs(120))
+                .expect("lock released")
+                .expect("operation succeeded");
+        });
+        assert_eq!(
+            store.certificates().expect("records").len(),
+            usize::from(!commit)
+        );
+    }
+}

@@ -1970,11 +1970,11 @@ fn cert(c: Cert, env: &mut Env<'_>) -> Done {
                 );
                 return Err(Exit::CommandError);
             };
-            let what = format!(
-                "{} ({})",
-                found.certificate.callsign(),
-                entity(found.certificate.dxcc())
-            );
+            let pending = store
+                .inspect_delete(&found.id)
+                .map_err(|e| store_error(env, "the certificate", &e))?;
+            let preview = pending.preview();
+            let what = format!("{} ({})", preview.callsign, entity(preview.dxcc));
             if !a.force {
                 env.message(
                     Tone::Error,
@@ -1983,7 +1983,7 @@ fn cert(c: Cert, env: &mut Env<'_>) -> Done {
                 return Err(Exit::CommandError);
             }
             store
-                .delete_certificate(&found.id)
+                .commit_delete(pending)
                 .map_err(|e| store_error(env, &what, &e))?;
             let _ = writeln!(
                 env.out,

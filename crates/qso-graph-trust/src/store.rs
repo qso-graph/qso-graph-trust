@@ -11,6 +11,7 @@
 //! Applications that sign must install the wiping allocator required by this crate's README.
 //! Callers select a [`KeyBackend`]; raw credential access stays inside the library.
 
+mod delete;
 mod format;
 mod import;
 mod keys;
@@ -18,6 +19,7 @@ mod listing;
 mod part;
 mod pending;
 
+pub use delete::{DeletePreview, PendingDelete};
 pub use pending::{
     ImportCertificate, ImportChoices, ImportDisposition, ImportLocation, ImportPreview,
     ImportReport, ImportRoot, PendingImport,
@@ -141,6 +143,7 @@ pub struct OpenReport {
 
 /// Why a store operation failed. No variant carries secret bytes or a password.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum StoreError {
     /// The log's station details cannot be resolved for signing.
     Log(crate::signed_log::LogError),
@@ -166,6 +169,9 @@ pub enum StoreError {
     Invalid(&'static str),
     /// A certificate or location already exists.
     AlreadyExists,
+    /// The store changed since inspection, or the pending operation belongs to another instance.
+    /// Nothing was changed; inspect again before committing.
+    Conflict,
     /// A new-only signed log holds a QSO another signing recorded after the plan was made.
     /// Nothing was written; prepare and sign again.
     SignedMeanwhile,
@@ -204,6 +210,9 @@ impl fmt::Display for StoreError {
             Self::Limit(what) => write!(f, "the store exceeds its limit for {what}"),
             Self::Invalid(what) => write!(f, "invalid store: {what}"),
             Self::AlreadyExists => f.write_str("the store entry already exists"),
+            Self::Conflict => {
+                f.write_str("the store changed since inspection; inspect again before committing")
+            }
             Self::SignedMeanwhile => f.write_str(
                 "a QSO in this log was signed by another run meanwhile; nothing was written",
             ),
@@ -276,7 +285,7 @@ struct Data {
 pub struct Store {
     dir: PathBuf,
     keys: Box<dyn KeyStore>,
-    // An owned pending import can span UI commands without borrowing the Store. Its token also
+    // An owned pending operation can span UI commands without borrowing the Store. Its token also
     // prevents a different backend, or a reopened store, from committing this instance's plan.
     import_identity: std::sync::Arc<()>,
     // Exercise failures after rename without depending on host permissions or filesystem faults.
@@ -580,20 +589,10 @@ impl Store {
     /// Delete the file record first, then its credential. A backend failure leaves an orphan
     /// reported by the next open when orphan detection is available; it never leaves a certificate
     /// pointing to a key we deleted.
+    /// This one-step wrapper inspects and commits immediately. Applications that confirm deletion
+    /// should retain [`PendingDelete`] between [`Self::inspect_delete`] and [`Self::commit_delete`].
     pub fn delete_certificate(&self, id: &str) -> Result<(), StoreError> {
-        let _lock = self.lock()?;
-        let mut data = self.read()?;
-        let i = data
-            .certificates
-            .iter()
-            .position(|c| c.id == id)
-            .ok_or(StoreError::NotFound)?;
-        let cert = data.certificates.remove(i);
-        self.replace(&format::write(&data)?)?;
-        if let Some(name) = cert.key_name {
-            self.keys.delete(&name)?;
-        }
-        Ok(())
+        self.commit_delete(self.inspect_delete(id)?)
     }
 
     /// Add a location; a name already present is refused.
