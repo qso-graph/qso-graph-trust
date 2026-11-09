@@ -1349,7 +1349,7 @@ dependencies = [
 
 [[package]]
 name = "qso-graph-trust"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64ct",
  "getrandom 0.4.3",
@@ -1372,7 +1372,7 @@ dependencies = [
 
 [[package]]
 name = "qso-graph-trust-awslc"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "aws-lc-rs",
  "aws-lc-sys",
@@ -1381,7 +1381,7 @@ dependencies = [
 
 [[package]]
 name = "qso-graph-trust-cli"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1397,7 +1397,7 @@ dependencies = [
 
 [[package]]
 name = "qso-graph-trust-custody"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "num-bigint-dig",
  "pkcs8 0.10.2",
@@ -2272,7 +2272,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "proc-macro2",
  "serde_json",

@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-11-09
+
 ### Added
 
 - Inspect `.tq6`, `.p12`, and TQSL backup imports before committing them: public certificate and
@@ -15,9 +17,6 @@ versions follow [Semantic Versioning](https://semver.org/).
   backup keys with different passwords.
 
 ### Changed
-
-- Update the test-only RSA tool to 0.10.0 and remove its resolved audit exception.
-- Derive oversized test passwords from the test corpus.
 
 - `qg-trust import` uses the same inspection and commit path for all three file formats.
 - A failed fresh TQSL backup import now leaves all certificates, keys, roots, locations, and
@@ -30,14 +29,13 @@ versions follow [Semantic Versioning](https://semver.org/).
 - Import-lock regression coverage synchronizes on a blocked OS acquisition and rejects a missing
   lock even with delayed worker startup. Custody helpers reserve unique owner-only export
   directories atomically, so stale PID-named directories cannot prevent a run.
-
-
-
+- Update the test-only RSA tool to 0.10.0 and remove its resolved audit exception.
+- Derive oversized test passwords from the test corpus.
 - Licensed GPL-3.0-or-later, the same as every QSO Graph project; the ARRL notice appears once, in the README.
 - AGENTS.md and CLAUDE.md: the organization's shared agent guide, and this repository's own.
-- README: American spelling, as the QSO Graph style guide asks.
-
-- README: style fixes for the QSO Graph style guide (Google Developer Documentation Style Guide, American English).
+- README: American spelling and style fixes for the QSO Graph style guide (Google Developer
+  Documentation Style Guide, American English).
+- README: the security figures for this release.
 
 ## [0.1.5] - 2026-11-08
 
