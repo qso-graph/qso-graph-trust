@@ -5,6 +5,19 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Inspect certificate deletions with `Store::inspect_delete` and a public `PendingDelete` preview
+  before committing. Commit refuses changes to the public store or referenced key presence and
+  pending deletions from another Store instance without deleting anything (decision 0015).
+
+### Changed
+
+- `qg-trust cert delete` uses inspection and commit with its existing output and force check.
+  `Store::delete_certificate` remains the one-step wrapper, preserving record-first deletion.
+- `StoreError` and `ImportError` are `#[non_exhaustive]`, so a new error variant no longer breaks a
+  caller's `match`. Callers matching every variant add a wildcard arm once.
+
 ## [0.1.6] - 2026-11-09
 
 ### Added
