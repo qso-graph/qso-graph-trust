@@ -7,7 +7,7 @@ Closes #
 ## Verification
 
 - [ ] `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`: PASS
-- [ ] `cargo xtask policy`: PASS (no C in the library, no unsafe code)
+- [ ] `cargo xtask policy`: PASS (no C in the library, no unsafe code outside the AWS-LC binding)
 - [ ] A new check or gate is proved by a planted case that fails it
 
 ## Credentials

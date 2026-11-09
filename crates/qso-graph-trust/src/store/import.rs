@@ -3,15 +3,9 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::roots::{self, RootSource};
-use super::{
-    MAX_KEY_LEN, Store, StoreError, StoredCertificate, check_certificate, format, keyless_twin,
-    keys,
-};
+use super::{Store, StoreError};
 use crate::certificate::Trust;
-use crate::import::{self, ImportError, ImportedCertificate};
-use crate::pkcs12;
-use crate::signing::TqslKey;
+use crate::import::{ImportError, ImportedCertificate};
 
 /// A certificate whose UTC validity-end date is within the warning interval, or already past.
 /// QSO-end dates do not determine expiry. Includes public-only certificates as well as signers.
@@ -59,90 +53,16 @@ impl Store {
         trust: &Trust,
         accept_root: Option<&str>,
     ) -> Result<Vec<ImportedCertificate>, ImportError> {
-        let trust = self.trust_with(trust)?;
-        let import::Checked { certificates, root } = import::tq6(bytes, &trust, accept_root)?;
-        let _lock = self.lock()?;
-        let mut data = self.read()?;
-        roots::add(&mut data, root.as_slice(), RootSource::Tq6)?;
-        let mut report: Vec<ImportedCertificate> = Vec::new();
-        for certificate in certificates {
-            // One already here is reported and the rest of the file still imported, unless it has
-            // no key and its pending request is here: then it takes the request's key below.
-            let pending_for = |data: &super::Data| {
-                data.pending_requests.iter().any(|r| {
-                    r.public_key_der == certificate.public_key_der()
-                        && r.callsign == certificate.callsign()
-                        && r.dxcc == certificate.dxcc()
-                })
-            };
-            if let Some(existing) = data
-                .certificates
-                .iter()
-                .find(|c| c.certificate.der() == certificate.der())
-                && (existing.key_name.is_some() || !pending_for(&data))
-            {
-                report.push(ImportedCertificate {
-                    id: existing.id.clone(),
-                    has_key: existing.key_name.is_some(),
-                    attached_request: false,
-                    already_here: true,
-                });
-                continue;
-            }
-            let keyless = keyless_twin(&data, &certificate);
-            if keyless.is_none() {
-                check_certificate(&data, &certificate)?;
-            }
-            let pending = data.pending_requests.iter().position(|r| {
-                r.public_key_der == certificate.public_key_der()
-                    && r.callsign == certificate.callsign()
-                    && r.dxcc == certificate.dxcc()
-            });
-            let key_name = if let Some(i) = pending {
-                let name = data.pending_requests[i].key_name.clone();
-                let der = self
-                    .keys
-                    .get(&name)
-                    .map_err(StoreError::from)?
-                    .ok_or(StoreError::NotFound)?;
-                if der.len() > MAX_KEY_LEN {
-                    return Err(StoreError::Limit("credential bytes").into());
-                }
-                TqslKey::from_pkcs8_der(&der, certificate.public_key_der())?;
-                data.pending_requests.remove(i);
-                Some(name)
-            } else {
-                None
-            };
-            if let Some(i) = keyless {
-                // Here already without a key, and its request's key is here: attach it.
-                data.certificates[i].key_name = key_name;
-                report.push(ImportedCertificate {
-                    id: data.certificates[i].id.clone(),
-                    has_key: true,
-                    attached_request: true,
-                    already_here: false,
-                });
-                continue;
-            }
-            let id = keys::new_name("cert:")?;
-            if data.certificates.iter().any(|c| c.id == id) {
-                return Err(StoreError::AlreadyExists.into());
-            }
-            report.push(ImportedCertificate {
-                id: id.clone(),
-                has_key: key_name.is_some(),
-                attached_request: pending.is_some(),
-                already_here: false,
-            });
-            data.certificates.push(StoredCertificate {
-                id,
-                certificate,
-                key_name,
-            });
-        }
-        self.replace(&format::write(&data)?)?;
-        Ok(report)
+        let pending = self.inspect_tq6(bytes, trust)?;
+        Ok(self
+            .commit(
+                pending,
+                super::ImportChoices {
+                    accept_roots: &accept_root.into_iter().collect::<Vec<_>>(),
+                    ..Default::default()
+                },
+            )?
+            .certificates)
     }
 
     /// Load a password-authenticated PKCS#12 `.p12`. Supports PBES2/PBKDF2 with SHA-1 or SHA-256
@@ -159,49 +79,24 @@ impl Store {
         trust: &Trust,
         accept_root: Option<&str>,
     ) -> Result<ImportedCertificate, ImportError> {
-        let trust = self.trust_with(trust)?;
-        let loaded = pkcs12::read_confirming(bytes, password, &trust, accept_root)?;
-        let _lock = self.lock()?;
-        let mut data = self.read()?;
-        roots::add(&mut data, loaded.root.as_slice(), RootSource::P12)?;
-        // The same certificate already here without its key takes this one.
-        if let Some(i) = keyless_twin(&data, &loaded.certificate) {
-            let name = keys::new_name("key:")?;
-            if self.keys.exists(&name).map_err(StoreError::from)? {
-                return Err(StoreError::AlreadyExists.into());
-            }
-            data.certificates[i].key_name = Some(name.clone());
-            let id = data.certificates[i].id.clone();
-            let xml = format::write(&data)?;
-            self.put_and_replace(&name, &loaded.key, &xml)?;
-            return Ok(ImportedCertificate {
-                id,
-                has_key: true,
-                attached_request: false,
-                already_here: false,
-            });
+        let pending = self.inspect_pkcs12(bytes, password, trust)?;
+        let imported = self
+            .commit(
+                pending,
+                super::ImportChoices {
+                    accept_roots: &accept_root.into_iter().collect::<Vec<_>>(),
+                    ..Default::default()
+                },
+            )?
+            .certificates
+            .into_iter()
+            .next()
+            .ok_or(ImportError::Malformed)?;
+        if imported.already_here {
+            Err(StoreError::AlreadyExists.into())
+        } else {
+            Ok(imported)
         }
-        check_certificate(&data, &loaded.certificate)?;
-        let name = keys::new_name("key:")?;
-        let id = keys::new_name("cert:")?;
-        if self.keys.exists(&name).map_err(StoreError::from)?
-            || data.certificates.iter().any(|c| c.id == id)
-        {
-            return Err(StoreError::AlreadyExists.into());
-        }
-        data.certificates.push(StoredCertificate {
-            id: id.clone(),
-            certificate: loaded.certificate,
-            key_name: Some(name.clone()),
-        });
-        let xml = format::write(&data)?;
-        self.put_and_replace(&name, &loaded.key, &xml)?;
-        Ok(ImportedCertificate {
-            id,
-            has_key: true,
-            attached_request: false,
-            already_here: false,
-        })
     }
 
     /// List certificates with fewer than `days` UTC calendar days until their X.509 validity

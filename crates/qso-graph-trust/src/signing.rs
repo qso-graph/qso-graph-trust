@@ -352,7 +352,7 @@ mod tests {
         EncryptedPrivateKeyInfo,
         pkcs5::{EncryptionScheme, pbes2},
     };
-    use rsa::RsaPrivateKey;
+    use rsa::PrivateKey;
     use rsa::pkcs8::DecodePrivateKey;
 
     #[test]
@@ -459,7 +459,7 @@ mod tests {
     /// The test key's public half, as a key file states it.
     fn test_public_key() -> String {
         use rsa::pkcs8::EncodePublicKey;
-        RsaPrivateKey::from_pkcs8_pem(include_str!("../../../tests/corpus/pki/user-1024.key.pem"))
+        PrivateKey::from_pkcs8_pem(include_str!("../../../tests/corpus/pki/user-1024.key.pem"))
             .expect("key")
             .to_public_key()
             .to_public_key_pem(pkcs8::LineEnding::LF)
@@ -625,7 +625,7 @@ mod tests {
     #[test]
     fn a_key_that_is_not_lotw_shaped_is_refused_before_it_can_sign() {
         use rsa::pkcs8::EncodePrivateKey;
-        // Found in review: p = 3 and a 1022-bit q make a 1024-bit key that rsa accepts, whose CRT step
+        // Found in review: p = 3 and a 1022-bit q make a 1024-bit key whose CRT step
         // would then loop for over 2^1000 iterations. q from `openssl prime -generate -bits 1022`.
         let q = [
             "39241060f9dd871a47f383b6d93528e91ef2f26a23a18ac4c84be4a7de864fd4",
@@ -634,14 +634,16 @@ mod tests {
             "e45b9f2cce85625caafe930ff7e6992e060b76e032f908075ba56c5c86e35fb7",
         ]
         .concat();
-        let q = rsa::BigUint::parse_bytes(q.as_bytes(), 16).expect("q");
-        let key =
-            RsaPrivateKey::from_p_q(rsa::BigUint::from(3u32), q, rsa::BigUint::from(65_537u32))
-                .expect("rsa accepts it");
-        let pem = key.to_pkcs8_pem(pkcs8::LineEnding::LF).expect("PEM");
-        assert_eq!(entry(&pem).unlock(None).err(), Some(KeyError::NotLotwKey));
+        let q = num_bigint_dig::BigUint::parse_bytes(q.as_bytes(), 16).expect("q");
+        let p = num_bigint_dig::BigUint::from(3u32);
+        let d = inverse_of_e(&(&q - num_bigint_dig::BigUint::from(1u32)));
+        let refused = crafted(&p, &q, &d).unlock(None).err();
+        assert!(matches!(
+            refused,
+            Some(KeyError::NotAKey | KeyError::NotLotwKey)
+        ));
         // A key of another size, however well made, is not LoTW's either.
-        let other = RsaPrivateKey::new(&mut rand_core::OsRng, 1536).expect("key");
+        let other = PrivateKey::new(&mut getrandom::SysRng, 1536).expect("key");
         let pem = other.to_pkcs8_pem(pkcs8::LineEnding::LF).expect("PEM");
         assert_eq!(entry(&pem).unlock(None).err(), Some(KeyError::NotLotwKey));
     }
@@ -692,13 +694,18 @@ mod tests {
     /// A key file as a crafted one would be written, by hand through pkcs1 and pkcs8, from p, q
     /// and d: rsa will not write keys whose CRT values do not exist, but a file can carry any
     /// numbers. Its stated public key is n's and e's own, so only the shape check can refuse it.
-    fn crafted(p: &rsa::BigUint, q: &rsa::BigUint, d: &rsa::BigUint) -> KeyEntry {
+    fn crafted(
+        p: &num_bigint_dig::BigUint,
+        q: &num_bigint_dig::BigUint,
+        d: &num_bigint_dig::BigUint,
+    ) -> KeyEntry {
+        use num_bigint_dig::ModInverse;
         use pkcs8::der::Encode;
         use rsa::pkcs8::EncodePublicKey;
         fn uint(b: &[u8]) -> pkcs8::der::asn1::UintRef<'_> {
             pkcs8::der::asn1::UintRef::new(b).expect("uint")
         }
-        let e = rsa::BigUint::from(65_537u32);
+        let e = num_bigint_dig::BigUint::from(65_537u32);
         let n = p * q;
         let (nb, eb, db, pb, qb) = (
             n.to_bytes_be(),
@@ -707,31 +714,42 @@ mod tests {
             p.to_bytes_be(),
             q.to_bytes_be(),
         );
-        let one = [1u8];
-        let pkcs1_key = rsa::pkcs1::RsaPrivateKey {
+        let one = num_bigint_dig::BigUint::from(1u32);
+        let dp = (d % (p - &one)).to_bytes_be();
+        let dq = (d % (q - &one)).to_bytes_be();
+        let coefficient = q
+            .clone()
+            .mod_inverse(p)
+            .and_then(|n| n.to_biguint())
+            .unwrap_or(one)
+            .to_bytes_be();
+        let pkcs1_key = pkcs1_test::RsaPrivateKey {
             modulus: uint(&nb),
             public_exponent: uint(&eb),
             private_exponent: uint(&db),
             prime1: uint(&pb),
             prime2: uint(&qb),
-            exponent1: uint(&one),
-            exponent2: uint(&one),
-            coefficient: uint(&one),
+            exponent1: uint(&dp),
+            exponent2: uint(&dq),
+            coefficient: uint(&coefficient),
             other_prime_infos: None,
         }
         .to_der()
         .expect("PKCS#1");
-        let info = pkcs8::PrivateKeyInfo::new(rsa::pkcs1::ALGORITHM_ID, &pkcs1_key);
+        let info = pkcs8::PrivateKeyInfo::new(pkcs1_test::ALGORITHM_ID, &pkcs1_key);
         let pem = pkcs8::der::pem::encode_string(
             "PRIVATE KEY",
             pkcs8::LineEnding::LF,
             &info.to_der().expect("PKCS#8"),
         )
         .expect("PEM");
-        let public = rsa::RsaPublicKey::new(n, e)
-            .expect("public")
-            .to_public_key_pem(pkcs8::LineEnding::LF)
-            .expect("PEM");
+        let public = rsa::PublicKey::new(
+            rsa::BoxedUint::from_be_slice_vartime(&n.to_bytes_be()),
+            rsa::BoxedUint::from_be_slice_vartime(&e.to_bytes_be()),
+        )
+        .expect("public")
+        .to_public_key_pem(pkcs8::LineEnding::LF)
+        .expect("PEM");
         KeyEntry {
             request_dxcc: None,
             callsign: "QG0TEST".into(),
@@ -741,9 +759,9 @@ mod tests {
     }
 
     /// The inverse of 65537 modulo `m`.
-    fn inverse_of_e(m: &rsa::BigUint) -> rsa::BigUint {
+    fn inverse_of_e(m: &num_bigint_dig::BigUint) -> num_bigint_dig::BigUint {
         use num_bigint_dig::ModInverse;
-        rsa::BigUint::from(65_537u32)
+        num_bigint_dig::BigUint::from(65_537u32)
             .mod_inverse(m)
             .and_then(|d| d.to_biguint())
             .expect("d")
@@ -752,30 +770,33 @@ mod tests {
     #[test]
     fn a_key_with_composite_factors_does_not_unlock() {
         // The review's key: p = 3^323 and q = 7 * 3^321, both 512 bits, n of 1024 bits, d the
-        // inverse of e modulo lcm(p - 1, q - 1, 2 * 3^643): rsa accepts it, and it would sign.
-        let three_to = |k: u32| (0..k).fold(rsa::BigUint::from(1u32), |acc, _| acc * 3u32);
-        let one = rsa::BigUint::from(1u32);
-        let (p, q) = (three_to(323), rsa::BigUint::from(7u32) * three_to(321));
+        // inverse of e modulo lcm(p - 1, q - 1, 2 * 3^643).
+        let three_to =
+            |k: u32| (0..k).fold(num_bigint_dig::BigUint::from(1u32), |acc, _| acc * 3u32);
+        let one = num_bigint_dig::BigUint::from(1u32);
+        let (p, q) = (
+            three_to(323),
+            num_bigint_dig::BigUint::from(7u32) * three_to(321),
+        );
         assert_eq!((p.bits(), q.bits(), (&p * &q).bits()), (512, 512, 1024));
-        let gcd = |mut a: rsa::BigUint, mut b: rsa::BigUint| {
-            while b != rsa::BigUint::from(0u32) {
+        let gcd = |mut a: num_bigint_dig::BigUint, mut b: num_bigint_dig::BigUint| {
+            while b != num_bigint_dig::BigUint::from(0u32) {
                 let r = &a % &b;
                 a = b;
                 b = r;
             }
             a
         };
-        let lcm = |a: rsa::BigUint, b: rsa::BigUint| &a * &b / gcd(a.clone(), b.clone());
+        let lcm = |a: num_bigint_dig::BigUint, b: num_bigint_dig::BigUint| {
+            &a * &b / gcd(a.clone(), b.clone())
+        };
         let lambda = lcm(
             lcm(&p - &one, &q - &one),
-            rsa::BigUint::from(2u32) * three_to(643),
+            num_bigint_dig::BigUint::from(2u32) * three_to(643),
         );
         let d = inverse_of_e(&lambda);
         let entry = crafted(&p, &q, &d);
-        assert!(
-            RsaPrivateKey::from_pkcs8_pem(&entry.private_key_pem).is_ok(),
-            "rsa reads it as a key"
-        );
+        assert!(pkcs8::SecretDocument::from_pem(&entry.private_key_pem).is_ok());
         // AWS-LC's parser refuses it before QG Trust's own shape check needs to: either way it
         // never signs.
         let refused = entry.unlock(None).err();
@@ -788,14 +809,13 @@ mod tests {
     #[test]
     fn a_key_with_equal_primes_does_not_unlock() {
         use rsa::traits::PrivateKeyParts;
-        // Found in review: p = q gives a 1024-bit modulus of two 512-bit primes, which rsa accepts,
+        // Found in review: p = q gives a 1024-bit modulus of two 512-bit primes,
         // and anyone can factor it with a square root. d is the inverse of e modulo p(p - 1).
-        let real = RsaPrivateKey::from_pkcs8_pem(include_str!(
-            "../../../tests/corpus/pki/user-1024.key.pem"
-        ))
-        .expect("key");
-        let p = real.primes()[0].clone();
-        let d = inverse_of_e(&(&p * (&p - rsa::BigUint::from(1u32))));
+        let real =
+            PrivateKey::from_pkcs8_pem(include_str!("../../../tests/corpus/pki/user-1024.key.pem"))
+                .expect("key");
+        let p = num_bigint_dig::BigUint::from_bytes_be(&real.primes()[0].to_be_bytes());
+        let d = inverse_of_e(&(&p * (&p - num_bigint_dig::BigUint::from(1u32))));
         let refused = crafted(&p, &p, &d).unlock(None).err();
         assert!(
             matches!(refused, Some(KeyError::NotAKey | KeyError::NotLotwKey)),

@@ -49,7 +49,7 @@ being true.
   Signatures and certificate checks are made by AWS-LC, Amazon's open-source cryptography library,
   through one small crate, `qso-graph-trust-awslc`, whose every call into AWS-LC is checked and
   documented. The policy checks prove nothing else reaches outside Rust and that the library opens no
-  connection (`cargo xtask policy`: no C in the library, no unsafe code, no networking in the library;
+  connection (`cargo xtask policy`: no C in the library, no unsafe code outside the AWS-LC binding, no networking in the library;
   decisions 0002 and 0006).
 - **A certificate is trusted only if it chains to a trusted LoTW root.** LoTW's public roots and CAs
   are pinned in the library and always trusted. A root a `.tq6` or `.p12` brings is trusted only if it

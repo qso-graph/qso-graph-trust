@@ -6,7 +6,7 @@ use crate::qso::Date;
 use crate::request::{Authorization, CallKind, CertificateRequest};
 use base64ct::{Base64, Encoding};
 use rsa::pkcs8::DecodePrivateKey;
-use rsa::{Pkcs1v15Sign, RsaPrivateKey};
+use rsa::{Pkcs1v15Sign, PrivateKey};
 use sha2::Digest;
 use x509_cert::der::{Decode, DecodePem, Encode};
 
@@ -39,13 +39,12 @@ fn response(request: &GeneratedRequest) -> Certificate {
     cert.tbs_certificate.subject_public_key_info =
         x509_cert::spki::SubjectPublicKeyInfoOwned::from_der(request.public_key_der())
             .expect("SPKI");
-    let ca = RsaPrivateKey::from_pkcs8_pem(
-        &String::from_utf8(corpus("../tqsl/pki/ca.key")).expect("PEM"),
-    )
-    .expect("test CA");
+    let ca =
+        PrivateKey::from_pkcs8_pem(&String::from_utf8(corpus("../tqsl/pki/ca.key")).expect("PEM"))
+            .expect("test CA");
     let signature = ca
         .sign(
-            Pkcs1v15Sign::new::<sha2::Sha256>(),
+            Pkcs1v15Sign::new::<rsa::sha2::Sha256>(),
             &sha2::Sha256::digest(cert.tbs_certificate.to_der().expect("TBS")),
         )
         .expect("sign");

@@ -37,8 +37,9 @@ software, and every point below is a test or a check that runs on every change:
   custody test searches every file, output, log and the program's own memory to prove it.
 - **Every file it reads is tested against millions of broken and malicious files** (fuzz testing),
   and every length and count is capped, so a bad file is refused rather than crashing it.
-- **Memory-safe Rust, with no `unsafe` code.** No C or C++ beyond the cryptography library, AWS-LC,
-  isolated in one small crate and enforced by policy.
+- **Memory-safe Rust: no `unsafe` code in the library, the command line or anything that parses a
+  file.** The one exception is the small binding to AWS-LC, the cryptography library, which is also
+  the only C or C++; policy checks enforce both.
 - **Only LoTW, only HTTPS, only ARRL's roots,** with the server's certificate always checked.
 - **A locked supply chain:** pinned dependencies, policy checks and CodeQL on every pull request, and
   signed, notarized and attested releases.

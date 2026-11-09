@@ -142,7 +142,13 @@ fn only_a_self_signed_ca_a_certificate_in_the_file_chains_to_may_be_accepted() {
         // Not offered, and not taken when its fingerprint is given.
         let plain = store.import_tq6(file, &lotw, None);
         assert!(
-            matches!(plain, Err(ImportError::Certificate(_))),
+            matches!(
+                plain,
+                Err(ImportError::Refused {
+                    index: 0,
+                    reason: crate::import::ImportRefusal::Certificate
+                })
+            ),
             "{root}: {plain:?}"
         );
         assert!(matches!(

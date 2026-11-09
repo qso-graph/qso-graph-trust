@@ -321,7 +321,7 @@ pub(super) fn check_record(record: &SignedQso) -> Result<(), StoreError> {
     Ok(())
 }
 
-fn merge(
+pub(super) fn merge(
     target: &mut BTreeMap<String, SignedQso>,
     entries: &[SignedQso],
     overwrite: bool,

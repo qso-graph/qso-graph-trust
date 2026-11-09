@@ -6,7 +6,7 @@ use std::path::Path;
 
 use base64ct::{Base64, Encoding};
 use rsa::pkcs8::DecodePublicKey;
-use rsa::{Pkcs1v15Sign, RsaPublicKey};
+use rsa::{Pkcs1v15Sign, PublicKey};
 use sha2::Digest;
 use x509_cert::der::{DecodePem, Encode};
 
@@ -67,12 +67,12 @@ fn csr_in(tq5: &str) -> CertReq {
 }
 
 fn verify_csr(csr: &CertReq) {
-    let public = RsaPublicKey::from_public_key_der(&csr.info.public_key.to_der().expect("SPKI"))
-        .expect("RSA");
+    let public =
+        PublicKey::from_public_key_der(&csr.info.public_key.to_der().expect("SPKI")).expect("RSA");
     let digest = sha2::Sha256::digest(csr.info.to_der().expect("info"));
     public
         .verify(
-            Pkcs1v15Sign::new::<sha2::Sha256>(),
+            Pkcs1v15Sign::new::<rsa::sha2::Sha256>(),
             &digest,
             csr.signature.as_bytes().expect("signature"),
         )
@@ -82,7 +82,7 @@ fn verify_csr(csr: &CertReq) {
     assert!(
         public
             .verify(
-                Pkcs1v15Sign::new::<sha2::Sha256>(),
+                Pkcs1v15Sign::new::<rsa::sha2::Sha256>(),
                 &changed,
                 csr.signature.as_bytes().expect("signature")
             )
@@ -194,7 +194,7 @@ fn additional_and_renewal_sign_the_complete_der_with_the_existing_key() {
         Certificate::from_pem_or_der(&corpus("tqsl/1024/tqsl/certs/user")).expect("certificate");
     let entry = fixture_key("tqsl/1024/tqsl/keys/QG0TEST");
     let key = entry.unlock(None).expect("key");
-    let public = RsaPublicKey::from_public_key_der(certificate.public_key_der()).expect("public");
+    let public = PublicKey::from_public_key_der(certificate.public_key_der()).expect("public");
     for renewal in [false, true] {
         let mut req = request(if renewal { "QG0TEST" } else { "QG1TEST" });
         req.qso_not_after = Date::from_iso("2026-11-04");
@@ -259,7 +259,7 @@ fn additional_and_renewal_sign_the_complete_der_with_the_existing_key() {
         let der = csr.to_der().expect("DER");
         public
             .verify(
-                Pkcs1v15Sign::new::<sha1::Sha1>(),
+                Pkcs1v15Sign::new::<sha1_test::Sha1>(),
                 &sha1::Sha1::digest(&der),
                 &sig,
             )
@@ -267,7 +267,7 @@ fn additional_and_renewal_sign_the_complete_der_with_the_existing_key() {
         assert!(
             public
                 .verify(
-                    Pkcs1v15Sign::new::<sha1::Sha1>(),
+                    Pkcs1v15Sign::new::<sha1_test::Sha1>(),
                     &sha1::Sha1::digest(record.get("TQSL_CRQ_REQUEST").expect("PEM")),
                     &sig
                 )
@@ -276,7 +276,7 @@ fn additional_and_renewal_sign_the_complete_der_with_the_existing_key() {
         assert!(
             public
                 .verify(
-                    Pkcs1v15Sign::new::<sha1::Sha1>(),
+                    Pkcs1v15Sign::new::<sha1_test::Sha1>(),
                     &sha1::Sha1::digest(csr.info.to_der().expect("info")),
                     &sig
                 )

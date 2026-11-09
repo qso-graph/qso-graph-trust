@@ -37,8 +37,9 @@ const MAX_WORK: u64 = 4_000_000;
 pub(crate) struct Loaded {
     pub certificate: Certificate,
     pub key: Zeroizing<Vec<u8>>,
-    /// The root the operator confirmed, which the certificate chains to (crate::import).
-    pub root: Option<FoundRoot>,
+    /// Candidate roots needed by these certificates; confirmation happens only at commit.
+    pub roots: Vec<FoundRoot>,
+    pub refusal: Option<crate::certificate::CertificateError>,
 }
 
 #[derive(Clone, Copy)]
@@ -371,26 +372,26 @@ impl Contents {
 
 #[cfg(test)]
 pub(crate) fn read(bytes: &[u8], password: &[u8], trust: &Trust) -> Result<Loaded, ImportError> {
-    read_confirming(bytes, password, trust, None)
+    let loaded = inspect(bytes, password, trust)?;
+    if let Some(error) = loaded.refusal {
+        return Err(error.into());
+    }
+    if let Some(root) = loaded.roots.first() {
+        return Err(ImportError::UntrustedRoot {
+            subject: root.subject.clone(),
+            fingerprint: root.fingerprint.clone(),
+        });
+    }
+    Ok(loaded)
 }
 
-/// Reads a `.p12`, with the root `accept_root` confirms, as `crate::import` checks one.
-pub(crate) fn read_confirming(
-    bytes: &[u8],
-    password: &[u8],
-    trust: &Trust,
-    accept_root: Option<&str>,
-) -> Result<Loaded, ImportError> {
-    crate::memory::scrub_after(|| read_inner(bytes, password, trust, accept_root))
+/// Authenticates the file and checks its keys without accepting new roots.
+pub(crate) fn inspect(bytes: &[u8], password: &[u8], trust: &Trust) -> Result<Loaded, ImportError> {
+    crate::memory::scrub_after(|| read_inner(bytes, password, trust))
 }
 
 #[inline(never)]
-fn read_inner(
-    bytes: &[u8],
-    password: &[u8],
-    trust: &Trust,
-    accept_root: Option<&str>,
-) -> Result<Loaded, ImportError> {
+fn read_inner(bytes: &[u8], password: &[u8], trust: &Trust) -> Result<Loaded, ImportError> {
     if bytes.len() > MAX_IMPORT_LEN {
         return Err(ImportError::Limit);
     }
@@ -446,23 +447,22 @@ fn read_inner(
             _ => return Err(ImportError::UnsupportedProtection),
         }
     }
-    let import::Checked {
-        mut certificates,
-        root,
-    } = import::check_certificates(&contents.users, &contents.authorities, trust, accept_root)?;
+    let (mut certificates, roots) =
+        import::inspect_certificates(&contents.users, &contents.authorities, trust)?;
     if certificates.len() != 1 {
         return Err(ImportError::Malformed);
     }
-    let certificate = certificates.remove(0);
+    let (certificate, refusal) = certificates.remove(0);
     let key = contents.key.ok_or(ImportError::Malformed)?;
     // The enclosing import scrubs once, after validation and all KDF/CBC frames have returned.
     signing::TqslKey::from_pkcs8_der_inner(&key, certificate.public_key_der())?;
     Ok(Loaded {
         certificate,
         key,
-        root,
+        roots,
+        refusal,
     })
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

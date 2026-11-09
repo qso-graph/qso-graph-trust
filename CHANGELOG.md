@@ -5,7 +5,31 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Inspect `.tq6`, `.p12`, and TQSL backup imports before committing them: public certificate and
+  key details, per-key backup passwords, root fingerprints, locations, and signed-QSO record size.
+  Commit uses the inspected data under one lock, refuses conflicting store changes, and rolls
+  back staged credentials if publication fails (decision 0014).
+- Memory-custody checks for canceling and committing inspected protected imports, including
+  backup keys with different passwords.
+
 ### Changed
+
+- Update the test-only RSA tool to 0.10.0 and remove its resolved audit exception.
+- Derive oversized test passwords from the test corpus.
+
+- `qg-trust import` uses the same inspection and commit path for all three file formats.
+- A failed fresh TQSL backup import now leaves all certificates, keys, roots, locations, and
+  signed-QSO records unchanged instead of retaining entries imported before the failure.
+  Reimporting an installed backup keeps existing certificates and keys without asking for their
+  backup passwords; keys being installed still receive all checks. Backup password prompts and
+  key-error text retain their original wording.
+- Refused inspected imports and the one-step certificate wrappers return only a preview index
+  and fixed category, keeping issuer names and email out of commit errors.
+- Import-lock regression coverage synchronizes on a blocked OS acquisition and rejects a missing
+  lock even with delayed worker startup. Custody helpers reserve unique owner-only export
+  directories atomically, so stale PID-named directories cannot prevent a run.
 
 
 

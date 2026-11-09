@@ -987,5 +987,6 @@ mod requests;
 mod import;
 mod listing;
 mod os;
+mod pending;
 mod roots;
 mod signed;

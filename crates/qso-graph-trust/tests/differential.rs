@@ -111,7 +111,7 @@ fn a_different_key_does_not_match() {
 
 #[test]
 fn an_unlocked_key_prints_nothing_of_itself() {
-    // rsa's own key types derive an unredacted Debug (rsa 0.9.10 src/key.rs:37); TqslKey's must not.
+    // The signer must never expose its key through Debug.
     let signer = key("1024").unlock(None).expect("unlocks");
     assert_eq!(format!("{signer:?}"), "TqslKey(..)");
     assert_eq!(format!("{signer:#?}"), "TqslKey(..)");

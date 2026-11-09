@@ -216,6 +216,113 @@ const LOCATIONS: &[&str] = &[
     "W4W-EVENT",
 ];
 
+fn import_with_wrong_backup_password(ham: &Ham) -> Ran {
+    let args: Vec<OsString> = ["import", path(&set("standard.tbk"))]
+        .into_iter()
+        .map(OsString::from)
+        .collect();
+    // The review's wrong-password answer must be harmless for keys already installed.
+    let mut prompts = Vec::new();
+    let mut ask = |prompt: &str| -> io::Result<Zeroizing<Vec<u8>>> {
+        prompts.push(prompt.to_owned());
+        let mut wrong = read("keys/KC4QPQ.password");
+        wrong.push(b'x');
+        Ok(Zeroizing::new(wrong))
+    };
+    let store = || -> Result<&Store, StoreError> { Ok(&ham.store) };
+    let mut upload = |_request: &UploadRequest| -> Result<(u16, Vec<u8>), UploadFailure> {
+        panic!("no network")
+    };
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = run(
+        &args,
+        &mut Env {
+            trust: &ham.trust,
+            now: ham.now,
+            color_out: false,
+            color_err: false,
+            ask_password: &mut ask,
+            out: &mut out,
+            err: &mut err,
+            store: &store,
+            upload: &mut upload,
+            trace: crate::cli::Trace::off(),
+        },
+    );
+    Ran {
+        code,
+        out: String::from_utf8(out).expect("text"),
+        err: String::from_utf8(err).expect("text"),
+        prompts,
+    }
+}
+
+#[test]
+fn adversarial_cli_compatibility_probe() {
+    let ham = Ham::new();
+    let first = ham.run(&["import", path(&set("standard.tbk"))]);
+    assert_eq!(first.code, 0);
+    let before = std::fs::read(ham.dir.join("store.xml")).expect("public store");
+    let certificates = ham.store.certificates().expect("certificates");
+    let repeated = import_with_wrong_backup_password(&ham);
+    assert_eq!(
+        repeated.code, 0,
+        "installed keys must not need backup passwords"
+    );
+    assert!(repeated.err.is_empty());
+    assert!(
+        repeated.prompts.is_empty(),
+        "retained keys need no passwords"
+    );
+    assert_eq!(repeated.out.matches("): already here\n").count(), 3);
+    assert!(
+        repeated
+            .out
+            .contains("Imported 0 certificates, 0 locations and 0 signed QSOs")
+    );
+    assert!(std::fs::read(ham.dir.join("store.xml")).expect("public store") == before);
+    let after = ham.store.certificates().expect("certificates");
+    assert_eq!(after.len(), 3);
+    assert!(
+        after
+            .iter()
+            .zip(&certificates)
+            .all(|(a, b)| a.id == b.id && a.key_name == b.key_name)
+    );
+    for certificate in certificates {
+        ham.store
+            .with_key(&certificate.id, |key| key.sign(b"retained key"))
+            .expect("retained credential")
+            .expect("signs");
+    }
+    assert_eq!(
+        first.prompts,
+        [
+            "Password for KC4QPQ's key, as set in TQSL: ",
+            "Password for W4W's key, as set in TQSL: ",
+        ]
+    );
+}
+
+#[test]
+fn a_failed_fresh_backup_import_publishes_nothing() {
+    let ham = Ham::new();
+    let roots = ham.store.trusted_roots().expect("initial roots");
+    let ran = import_with_wrong_backup_password(&ham);
+    assert_eq!(ran.code, 4);
+    assert!(ran.out.is_empty(), "no partial-import success output");
+    assert_eq!(
+        ran.err,
+        "qg-trust: KC4QPQ's key: the password does not unlock this key\n"
+    );
+    assert_eq!(ran.prompts, ["Password for KC4QPQ's key, as set in TQSL: "]);
+    assert!(!ham.dir.join("store.xml").exists());
+    assert!(ham.store.certificates().expect("certificates").is_empty());
+    assert!(ham.store.locations().expect("locations").is_empty());
+    assert!(ham.store.signed_qsos().expect("record").is_empty());
+    assert_eq!(ham.store.trusted_roots().expect("roots"), roots);
+}
+
 #[test]
 fn a_tqsl_backup_imports_certificates_keys_locations_and_the_signed_record() {
     let ham = Ham::new();

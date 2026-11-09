@@ -29,7 +29,8 @@ zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
 
 # Test tools only: they read the corpus key's numbers, the needles the test looks for.
 [dev-dependencies]
-rsa = { version = "=0.9.10", default-features = false, features = ["std", "pem"] }
+num-bigint-dig = { version = "=0.8.6", default-features = false }
+rsa = { version = "=0.10.0", default-features = false, features = ["std", "encoding"] }
 pkcs8 = { version = "=0.10.2", default-features = false, features = ["std", "pem", "encryption", "3des", "sha1-insecure"] }
 
 [lints]
