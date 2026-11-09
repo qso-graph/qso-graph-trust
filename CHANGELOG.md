@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-11-09
+
 ### Added
 
 - Inspect certificate deletions with `Store::inspect_delete` and a public `PendingDelete` preview
