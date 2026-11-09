@@ -39,8 +39,10 @@ zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
 # Independent test oracles and crafted encrypted envelopes only; never shipped crypto paths.
 sha2 = { version = "=0.10.9", default-features = false, features = ["oid"] }
 pkcs8 = { version = "=0.10.2", default-features = false, features = ["encryption", "3des", "sha1-insecure"] }
-rsa = { version = "=0.9.10", default-features = false, features = ["std", "pem", "getrandom"] }
-rand_core = { version = "=0.6.4", default-features = false, features = ["getrandom"] }
+rsa = { version = "=0.10.0", default-features = false, features = ["std", "encoding", "pkcs1v15", "getrandom"] }
+getrandom = "=0.4.3"
+sha1-test = { package = "sha1", version = "=0.11.0", features = ["oid"] }
+pkcs1-test = { package = "pkcs1", version = "=0.7.5", features = ["pkcs8"] }
 num-bigint-dig = { version = "=0.8.6", default-features = false, features = ["prime"] }
 # The README's example installs the wiping allocator, as every program that signs must.
 zeroizing-alloc = { version = "=0.1.1", default-features = false }

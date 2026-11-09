@@ -554,8 +554,13 @@ fn oversized_key_password_is_refused_before_unlock_and_can_be_corrected() {
         .iter()
         .position(|c| c.needs_password)
         .expect("protected key");
+    let password: Vec<u8> = p12_password()
+        .into_iter()
+        .cycle()
+        .take(crate::import::MAX_PASSWORD_LEN + 1)
+        .collect();
     assert!(matches!(
-        pending.unlock_key(index, &vec![b'x'; crate::import::MAX_PASSWORD_LEN + 1]),
+        pending.unlock_key(index, &password),
         Err(ImportError::Limit)
     ));
     assert!(pending.preview().certificates[index].needs_password);

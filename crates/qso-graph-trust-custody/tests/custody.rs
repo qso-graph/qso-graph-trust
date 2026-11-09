@@ -52,9 +52,10 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use num_bigint_dig::BigUint;
 use pkcs8::der::Decode;
 use rsa::traits::{PrivateKeyParts, PublicKeyParts};
-use rsa::{BigUint, RsaPrivateKey, pkcs8::DecodePrivateKey};
+use rsa::{PrivateKey, pkcs8::DecodePrivateKey};
 
 /// The test set's `.p12` password, from `tests/corpus/pki/p12-password`.
 fn p12_password() -> Vec<u8> {
@@ -99,29 +100,33 @@ fn key_needles(key_file: &Path, password_file: &Path) -> Needles {
     let password = password.as_slice();
     let pem = key_field(key_file, "PRIVATE_KEY");
     let key = if password.is_empty() {
-        RsaPrivateKey::from_pkcs8_pem(&pem).expect("the key")
+        PrivateKey::from_pkcs8_pem(&pem).expect("the key")
     } else {
         let (_, der) = pkcs8::SecretDocument::from_pem(&pem).expect("PEM");
         let info = pkcs8::EncryptedPrivateKeyInfo::from_der(der.as_bytes()).expect("encrypted");
         let plain = info.decrypt(password).expect("decrypts");
-        RsaPrivateKey::from_pkcs8_der(plain.as_bytes()).expect("the key")
+        PrivateKey::from_pkcs8_der(plain.as_bytes()).expect("the key")
     };
     let der = rsa::pkcs8::EncodePrivateKey::to_pkcs8_der(&key).expect("DER");
     let [p, q] = key.primes() else {
         panic!("two primes")
     };
+    let p = BigUint::from_bytes_be(&p.to_be_bytes());
+    let q = BigUint::from_bytes_be(&q.to_be_bytes());
+    let d = BigUint::from_bytes_be(&key.d().to_be_bytes());
+    let e = BigUint::from_bytes_be(&key.e().to_be_bytes());
     // q^-1 mod p, by Fermat: p is prime, so it is q^(p-2) mod p.
-    let qinv = q.modpow(&(p - BigUint::from(2u8)), p);
+    let qinv = q.modpow(&(&p - BigUint::from(2u8)), &p);
     let one = BigUint::from(1u8);
-    let (p1, q1) = (p - &one, q - &one);
+    let (p1, q1) = (&p - &one, &q - &one);
     let numbers: Vec<(&str, BigUint)> = vec![
-        ("d", key.d().clone()),
+        ("d", d.clone()),
         ("p", p.clone()),
         ("q", q.clone()),
-        ("d mod p-1", key.d() % &p1),
-        ("d mod q-1", key.d() % &q1),
+        ("d mod p-1", &d % &p1),
+        ("d mod q-1", &d % &q1),
         ("q^-1 mod p", qinv),
-        ("e*d", key.e() * key.d()),
+        ("e*d", e * &d),
         ("p-1", p1.clone()),
         ("q-1", q1.clone()),
     ];
@@ -144,7 +149,7 @@ fn key_needles(key_file: &Path, password_file: &Path) -> Needles {
     if !password.is_empty() {
         out.push(("the password".into(), password.to_vec()));
     }
-    (out, vec![der.as_bytes().to_vec(), key.d().to_bytes_be()])
+    (out, vec![der.as_bytes().to_vec(), d.to_bytes_be()])
 }
 
 /// Every readable byte of a process's memory, region by region, read through `/proc`. A region

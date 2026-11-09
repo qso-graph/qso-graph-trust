@@ -16,6 +16,9 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Update the test-only RSA tool to 0.10.0 and remove its resolved audit exception.
+- Derive oversized test passwords from the test corpus.
+
 - `qg-trust import` uses the same inspection and commit path for all three file formats.
 - A failed fresh TQSL backup import now leaves all certificates, keys, roots, locations, and
   signed-QSO records unchanged instead of retaining entries imported before the failure.

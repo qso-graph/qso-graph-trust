@@ -259,10 +259,12 @@ fn password_encoding_and_missing_mac_are_explicit() {
     assert_eq!(&*bmp("aé".as_bytes()).expect("BMP"), &[0, 97, 0, 233, 0, 0]);
     assert!(bmp(&[255]).is_err());
     assert!(bmp("🔑".as_bytes()).is_err());
-    assert!(matches!(
-        bmp(&vec![b'a'; MAX_PASSWORD_LEN + 1]),
-        Err(ImportError::Limit)
-    ));
+    let password: Vec<u8> = p12_password()
+        .into_iter()
+        .cycle()
+        .take(MAX_PASSWORD_LEN + 1)
+        .collect();
+    assert!(matches!(bmp(&password), Err(ImportError::Limit)));
     let missing = seq(&[&tlv(2, &[3]), &data(&seq(&[]))]);
     assert!(matches!(
         read(&missing, b"", &trust()),

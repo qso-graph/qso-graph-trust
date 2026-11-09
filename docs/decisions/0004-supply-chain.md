@@ -35,9 +35,9 @@ cargo-vet records trust per crate as each crate enters the dependency graph, so 
 is applied as phase 2 adds them. Today it covers David Tolnay's crates, which are in `xtask`'s
 tooling.
 
-**Trust is not a review of the signing code.** The path that signs a ham's QSO (`rsa`'s signing
-and `sha1`) is read by us whatever its publisher, and the byte-for-byte tests against tqsllib
-are the proof it does what it should. Trust does not mean free of bugs: `rsa` carries the open
+**Trust is not a review of the signing code.** At the time of this decision the signing path used
+`rsa` and `sha1`. Decision 0006 moved signing to AWS-LC; byte-for-byte tests against tqsllib check
+the result. The test-only `rsa` dependency is now at 0.10.0, which fixes the previously open
 Marvin advisory (RUSTSEC-2023-0071).
 
 **Not trusted blindly:** single-maintainer crates (`typenum`, `generic-array`, `spin`,

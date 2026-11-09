@@ -93,6 +93,11 @@ version = "0.1.92"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
+[[exemptions.base16ct]]
+version = "1.0.0"
+criteria = "safe-to-run"
+notes = "Not audited yet: test-only RSA to build crafted test keys; never shipped."
+
 [[exemptions.base64]]
 version = "0.23.1"
 criteria = "safe-to-deploy"
@@ -173,15 +178,30 @@ version = "0.8.23"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
+[[exemptions.crypto-bigint]]
+version = "0.7.11"
+criteria = "safe-to-run"
+notes = "Not audited yet: test-only RSA to build crafted test keys; never shipped."
+
 [[exemptions.crypto-common]]
 version = "0.2.2"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
+[[exemptions.crypto-primes]]
+version = "0.7.2"
+criteria = "safe-to-run"
+notes = "Not audited yet: test-only RSA to build crafted test keys; never shipped."
+
 [[exemptions.ctutils]]
 version = "0.4.8"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): Secret Service encrypted-session cryptography and supporting arithmetic/types. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
+
+[[exemptions.der]]
+version = "0.8.3"
+criteria = "safe-to-run"
+notes = "Not audited yet: test-only RSA to build crafted test keys; never shipped."
 
 [[exemptions.digest]]
 version = "0.11.3"
@@ -388,6 +408,11 @@ version = "2.2.1"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
+[[exemptions.pem-rfc7468]]
+version = "1.0.0"
+criteria = "safe-to-run"
+notes = "Not audited yet: test-only RSA to build crafted test keys; never shipped."
+
 [[exemptions.percent-encoding]]
 version = "2.3.2"
 criteria = "safe-to-deploy"
@@ -403,6 +428,16 @@ version = "0.2.5"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): Secret Service async runtime, synchronization and futures. Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
+[[exemptions.pkcs1]]
+version = "0.8.0"
+criteria = "safe-to-run"
+notes = "Not audited yet: test-only RSA to build crafted test keys; never shipped."
+
+[[exemptions.pkcs8]]
+version = "0.11.0"
+criteria = "safe-to-run"
+notes = "Not audited yet: test-only RSA to build crafted test keys; never shipped."
+
 [[exemptions.polling]]
 version = "3.11.0"
 criteria = "safe-to-deploy"
@@ -417,6 +452,11 @@ notes = "Not audited yet (decision 0004): credential backend support and build-t
 version = "6.0.0"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): getrandom 0.4's UEFI back end, never built for QG Trust's platforms (Windows, macOS, Linux)."
+
+[[exemptions.rand_core]]
+version = "0.10.1"
+criteria = "safe-to-deploy"
+notes = "Not audited yet: random-number traits enabled by test-only RSA; cargo-vet also follows unified features through the shipped Secret Service dependency tree."
 
 [[exemptions.regex]]
 version = "1.13.1"
@@ -437,6 +477,11 @@ notes = "Not audited yet (decision 0004): pattern matching in the credential bac
 version = "0.17.14"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): Not built: an optional rustls/rustls-webpki provider whose feature is off (rustls uses aws-lc-rs); it appears only in cargo-vet's all-features graph."
+
+[[exemptions.rsa]]
+version = "0.10.0"
+criteria = "safe-to-run"
+notes = "Not audited yet: test-only RSA to build crafted test keys; never shipped."
 
 [[exemptions.rustix]]
 version = "1.1.6"
@@ -487,6 +532,16 @@ notes = "Not audited yet (decision 0004): Secret Service D-Bus transport, serial
 version = "1.1.2"
 criteria = "safe-to-run"
 
+[[exemptions.serdect]]
+version = "0.4.3"
+criteria = "safe-to-run"
+notes = "Not audited yet: test-only RSA to build crafted test keys; never shipped."
+
+[[exemptions.sha1]]
+version = "0.11.0"
+criteria = "safe-to-run"
+notes = "Not audited yet: test-only RSA signature verification against crafted test requests; never shipped."
+
 [[exemptions.sha2]]
 version = "0.11.1"
 criteria = "safe-to-deploy"
@@ -497,6 +552,11 @@ version = "1.4.8"
 criteria = "safe-to-deploy"
 notes = "Not audited yet (decision 0004): OS interfaces used by the credential backend runtime (including unshipped target bindings). Resolved through keyring 4.2.0 with Desktop defaults; no matching audit or existing publisher coverage is available in the offline cache."
 
+[[exemptions.signature]]
+version = "3.0.0"
+criteria = "safe-to-run"
+notes = "Not audited yet: test-only RSA to build crafted test keys; never shipped."
+
 [[exemptions.slab]]
 version = "0.4.12"
 criteria = "safe-to-deploy"
@@ -506,6 +566,11 @@ notes = "Not audited yet (decision 0004): Secret Service async runtime, synchron
 version = "0.9.9"
 criteria = "safe-to-run"
 notes = "Not audited yet (decision 0004): reached only through lazy_static's no-std option, for num-bigint-dig."
+
+[[exemptions.spki]]
+version = "0.8.1"
+criteria = "safe-to-run"
+notes = "Not audited yet: test-only RSA to build crafted test keys; never shipped."
 
 [[exemptions.tempfile]]
 version = "3.27.0"

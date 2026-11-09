@@ -223,10 +223,10 @@ from vetted providers, each named in the policy checks:
   differential tests compare QG Trust's with it byte for byte.
 - **RustCrypto's `rsa`, for LoTW's signature only:** RSA PKCS#1 v1.5 with SHA-1, `SIGN_LOTW_V2.0`, the
   one LoTW accepts and the one aws-lc-rs does not sign. Pure Rust, so no C and no unsafe code in QG
-  Trust. Its timing advisory, RUSTSEC-2023-0071 (Marvin), has no fixed release; the advisory itself
-  says "local use on a non-compromised computer is fine". QG Trust signs only on the ham's own
-  machine, for that ham, and the library never signs for a remote caller. `cargo audit` ignores that
-  one advisory, pointing here; any other, and a fixed release of `rsa`, fails CI.
+  Trust. At the time, its timing advisory RUSTSEC-2023-0071 (Marvin) had no fixed release, and
+  `cargo audit` ignored it. Decision 0006 replaced this provider for signing; the test-only `rsa`
+  dependency is now updated to 0.10.0, and the advisory is no longer ignored. The library never
+  signs for a remote caller.
 - **What QG Trust adds around `rsa`** (reviews of qso-graph-trust#3): a key signs only if it is
   LoTW-shaped (1024-bit modulus, exponent 65537, two different 512-bit primes, each passing
   Baillie-PSW and 32 Miller-Rabin rounds with random bases) and matches its stated public key; a

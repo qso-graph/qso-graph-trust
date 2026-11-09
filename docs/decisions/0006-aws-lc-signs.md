@@ -22,8 +22,9 @@ decision 0002, and replaces RustCrypto's `rsa` as what signs.
 ## Why
 
 AWS-LC's RSA is constant-time and overwrites every block it frees (`OPENSSL_free`, `crypto/mem.c`), so
-the key's numbers and their temporaries do not stay in memory. `rsa` 0.9.10 carries an unpatched timing
-advisory (RUSTSEC-2023-0071) and wipes its own temporaries only in part. AWS-LC's FIPS validation does
+the key's numbers and their temporaries do not stay in memory. At the time of this decision, `rsa`
+0.9.10 carried the timing advisory RUSTSEC-2023-0071 and wiped its temporaries only in part. The
+test-only dependency is now 0.10.0, which fixes that advisory. AWS-LC's FIPS validation does
 not cover this operation (SHA-1 signing with 1024-bit keys is outside FIPS's approved parameters), and
 is not a reason here.
 
