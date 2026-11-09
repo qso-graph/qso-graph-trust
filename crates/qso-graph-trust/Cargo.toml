@@ -22,7 +22,7 @@ include = ["src/**/*.rs", "README.md", "LICENSE.md", "LICENSE-ARRL.md", "NOTICE.
 [dependencies]
 # LoTW's signature, RSA PKCS#1 v1.5 with SHA-1, from AWS-LC through QG Trust's
 # one binding (decision 0006).
-qso-graph-trust-awslc = { path = "../qso-graph-trust-awslc", version = "=0.1.6" }
+qso-graph-trust-awslc = { path = "../qso-graph-trust-awslc", version = "=0.1.7" }
 sha1 = { version = "=0.10.6", default-features = false, features = ["oid"] }
 # Parse keys and DER only; protected-key parameters are decoded locally without crypto features.
 # Derivation and decryption use the binding's safe AWS-LC API.
