@@ -318,7 +318,10 @@ fn an_unused_untrusted_tq6_root_is_rejected_and_a_bounded_bundle_loads_whole() {
     );
     assert!(matches!(
         store.import_tq6(with_root.as_bytes(), &trust(), None),
-        Err(ImportError::Certificate(_))
+        Err(ImportError::Refused {
+            index: 0,
+            reason: crate::import::ImportRefusal::Certificate
+        })
     ));
     assert!(store.certificates().expect("list").is_empty());
     // Count includes all supplied authorities, even duplicates. The actual certificate still

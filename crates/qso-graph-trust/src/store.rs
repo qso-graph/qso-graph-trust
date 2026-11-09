@@ -282,6 +282,9 @@ pub struct Store {
     // Exercise failures after rename without depending on host permissions or filesystem faults.
     #[cfg(test)]
     fail_sync: std::sync::atomic::AtomicBool,
+    // Observe an actual blocked OS lock attempt, rather than infer it from worker timing.
+    #[cfg(test)]
+    lock_observer: std::sync::Mutex<Option<std::sync::mpsc::Sender<bool>>>,
 }
 
 impl Store {
@@ -312,6 +315,8 @@ impl Store {
             import_identity: std::sync::Arc::new(()),
             #[cfg(test)]
             fail_sync: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            lock_observer: std::sync::Mutex::new(None),
         };
         let _lock = store.lock()?;
         let data = store.read()?;
@@ -699,6 +704,16 @@ impl Store {
             .create(true)
             .truncate(false)
             .open(self.dir.join("store.lock"))?;
+        #[cfg(test)]
+        if let Some(observer) = self.lock_observer.lock().expect("lock observer").as_ref() {
+            match lock.try_lock() {
+                Ok(()) => return Ok(lock),
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    observer.send(true).expect("blocked lock observed");
+                }
+                Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
+            }
+        }
         lock.lock()?;
         Ok(lock)
     }

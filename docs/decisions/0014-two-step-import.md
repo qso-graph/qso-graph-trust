@@ -19,12 +19,21 @@ include certificate metadata. A backup can have a different password for every k
 uses each preview index, call, and serial to ask for that key's password, then calls
 `PendingImport::unlock_key(index, password)`. This completes inspection of that key, including
 matching its private key to its actual certificate. Failure identifies the entry, leaves both
-stores unchanged, and permits another password attempt. Commit refuses unchecked protected keys.
+stores unchanged, and permits another password attempt. Commit refuses unchecked protected keys
+that will be installed. A Present entry deliberately keeps its stored certificate and credential
+as they are; its unused backup key is discarded without unlocking or validating it. Its preview
+does not request a password. New keys, including keys added to existing keyless certificates,
+still require all key and certificate checks. A PKCS#12 file still needs its authentication
+password to read the certificate metadata, even when the certificate is already present.
 Malformed input fails inspection; readable certificates with invalid chains appear as refused
 entries with reasons. Unanswered backup requests are refused entries that callers can explicitly
 skip; they do not become signing certificates.
 
-The preview exposes no encoded certificate, email, private key, or password. Private keys and
+The preview exposes no encoded certificate, email, private key, or password. Commit returns refused
+entries as their preview index and a fixed `ImportRefusal` category. It retains no underlying
+certificate error, so neither formatting, public error fields nor an error source reveals issuer
+names or email. Both one-step wrappers return the same redacted refusal.
+Private keys and
 private-key envelopes remain in library-private wiping buffers. Passwords are borrowed and never
 retained. Pending imports implement neither Debug, Clone nor Serialize. Dropping one cancels the
 operation and zeroizes its key buffers. The wiping allocator remains mandatory for applications;
@@ -64,6 +73,9 @@ Backup locations are returned to the caller by default so Desktop can place them
 Locations. The CLI chooses `store_locations`, preserving existing names and default-location
 behavior in the same transaction. The older one-step certificate methods are convenience wrappers
 around inspection and commit. The CLI uses this shared path for all three formats.
+The CLI keeps the original backup password prompt wording and key-error text. Already installed
+backup keys require no prompt. A failed fresh backup now publishes nothing, instead of keeping
+successful entries from a per-certificate loop; this is an intentional CLI behavior change.
 
 ## Evidence
 
@@ -73,9 +85,19 @@ availability with the preview, change and delete source files, plant concurrent 
 changes, give one backup key the other key's password, plant an untrusted chain, omit or mistype
 root fingerprints in each format, and refuse publication after staging several keys. Removing
 each planted fault allows the operation to succeed. Existing CLI import tests run unchanged.
+The issuer-email regression checks preview, commit, and both one-step wrappers, including exact
+Display and Debug representations and the absence of an error source. The CLI compatibility probe
+reimports an installed protected backup with wrong password answers and verifies unchanged public
+bytes and usable stored keys. A failed fresh import verifies that no public sections are published.
+The lock test observes an actual OS WouldBlock result before checking the held-lock state, with
+delayed worker startup and a generous hang watchdog. Removing commit's lock acquisition fails that
+test even with the worker delayed.
 
 The Linux custody test separately scans cancellation and commit after inspecting a protected
 PKCS#12 file and the standard backup, including both independently protected backup keys. It
 searches all process memory for the keys and passwords, in debug and release, with the existing
 live-key, unwiped-allocator and planted-secret controls. It also exercises the provider's fallback
 AES path on x86_64. All certificates and keys are generated corpus data; no test contacts ARRL.
+The helper atomically reserves an owner-only export directory and retries occupied names without
+touching them. A shell-exec probe preserves the child's PID while planting stale directory names,
+checks readiness, and verifies cleanup leaves the stale directories and their sentinels intact.

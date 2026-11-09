@@ -17,6 +17,16 @@ versions follow [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - `qg-trust import` uses the same inspection and commit path for all three file formats.
+- A failed fresh TQSL backup import now leaves all certificates, keys, roots, locations, and
+  signed-QSO records unchanged instead of retaining entries imported before the failure.
+  Reimporting an installed backup keeps existing certificates and keys without asking for their
+  backup passwords; keys being installed still receive all checks. Backup password prompts and
+  key-error text retain their original wording.
+- Refused inspected imports and the one-step certificate wrappers return only a preview index
+  and fixed category, keeping issuer names and email out of commit errors.
+- Import-lock regression coverage synchronizes on a blocked OS acquisition and rejects a missing
+  lock even with delayed worker startup. Custody helpers reserve unique owner-only export
+  directories atomically, so stale PID-named directories cannot prevent a run.
 
 
 

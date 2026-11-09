@@ -465,4 +465,4 @@ fn read_inner(bytes: &[u8], password: &[u8], trust: &Trust) -> Result<Loaded, Im
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

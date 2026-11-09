@@ -34,6 +34,27 @@ pub const MAX_PASSWORD_LEN: usize = 1024;
 /// Maximum iteration count for each PBKDF2 or PKCS#12 derivation.
 pub const MAX_ITERATIONS: u32 = 1_000_000;
 
+/// Fixed refusal categories, without any certificate contents or underlying error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImportRefusal {
+    /// The certificate did not verify under the selected trust.
+    Certificate,
+    /// The store cannot hold another certificate.
+    CertificateLimit,
+    /// The backup entry is an unanswered certificate request.
+    PendingRequest,
+}
+
+impl fmt::Display for ImportRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Certificate => "the certificate does not chain to a trusted LoTW root",
+            Self::CertificateLimit => "the store exceeds its limit: certificates",
+            Self::PendingRequest => "a request still waiting for ARRL",
+        })
+    }
+}
+
 /// Why a certificate import failed. No variant contains passwords or key material.
 #[derive(Debug)]
 pub enum ImportError {
@@ -69,6 +90,13 @@ pub enum ImportError {
     UnsupportedProtection,
     /// The store or a referenced credential changed after inspection. Inspect again.
     Conflict,
+    /// A refused preview entry. Carries only its index and a fixed category.
+    Refused {
+        /// Index in `ImportPreview::certificates`.
+        index: usize,
+        /// Redacted category; no original certificate error is retained.
+        reason: ImportRefusal,
+    },
     /// The backup could not be read.
     Backup(crate::tbk::TbkError),
     /// This key could not be checked. The index identifies its preview entry.
@@ -112,6 +140,7 @@ impl fmt::Display for ImportError {
                 f.write_str("the store changed after inspection; inspect the import again")
             }
             Self::Backup(e) => e.fmt(f),
+            Self::Refused { index, reason } => write!(f, "import entry {index}: {reason}"),
             Self::KeyAt { index, error } => write!(f, "import key {index}: {error}"),
             Self::Store(e) => e.fmt(f),
         }

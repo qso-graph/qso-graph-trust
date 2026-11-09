@@ -9,8 +9,8 @@ use super::roots::{self, RootSource};
 use super::{
     Data, MAX_KEY_LEN, Store, StoreError, StoredCertificate, StoredLocation, format, keys,
 };
-use crate::certificate::{Certificate, FoundRoot, Trust, parse_fingerprint};
-use crate::import::{self, ImportError, ImportedCertificate};
+use crate::certificate::{Certificate, CertificateError, FoundRoot, Trust, parse_fingerprint};
+use crate::import::{self, ImportError, ImportRefusal, ImportedCertificate};
 use crate::qso::Date;
 use crate::signing::{KeyEntry, KeyError, TqslKey};
 use crate::station::StationLocation;
@@ -137,8 +137,9 @@ struct PendingKey {
 /// fn change_preview(pending: &PendingImport) { pending.preview().certificates.clear(); }
 /// ```
 ///
-/// Protected backup keys require `unlock_key` to complete inspection. A password failure names
-/// its preview index, changes neither store, and leaves this value available to retry.
+/// Protected backup keys being installed require `unlock_key` to complete inspection. Present
+/// entries keep their stored keys and need no backup password. A password failure names its
+/// preview index, changes neither store, and leaves this value available to retry.
 pub struct PendingImport {
     owner: std::sync::Arc<()>,
     before: String,
@@ -147,7 +148,7 @@ pub struct PendingImport {
     keys: Vec<PendingKey>,
     presence: Vec<(String, bool)>,
     request_keys: Vec<(String, Zeroizing<Vec<u8>>)>,
-    refusals: Vec<(usize, ImportError)>,
+    refusals: Vec<(usize, ImportRefusal)>,
     reports: Vec<ImportedCertificate>,
     added_roots: Vec<super::TrustedRoot>,
     signed_added: usize,
@@ -243,7 +244,7 @@ impl PendingImport {
         &mut self,
         owner: &Store,
         certificate: Certificate,
-        refusal: Option<ImportError>,
+        refusal: Option<CertificateError>,
         key: Option<KeyEntry>,
         der: Option<Zeroizing<Vec<u8>>>,
         attach_request: bool,
@@ -256,15 +257,6 @@ impl PendingImport {
             spki: certificate.public_key_der().to_vec(),
             target: None,
         };
-        if let Some(key) = &material.locked
-            && !key.is_encrypted()
-        {
-            material.der = Some(
-                checked_key(key, None, &material.spki)
-                    .map_err(|error| ImportError::KeyAt { index, error })?,
-            );
-            material.locked = None;
-        }
         let existing = self
             .after
             .certificates
@@ -295,20 +287,19 @@ impl PendingImport {
         let already_here = existing.is_some_and(|i| {
             self.after.certificates[i].key_name.is_some() || (!file_has_key && request.is_none())
         });
-        let refusal = refusal.or_else(|| {
+        let refusal = refusal.map(|_| ImportRefusal::Certificate).or_else(|| {
             (existing.is_none() && self.after.certificates.len() >= super::MAX_CERTIFICATES)
-                .then_some(ImportError::Store(StoreError::Limit("certificates")))
+                .then_some(ImportRefusal::CertificateLimit)
         });
-        let disposition = if let Some(error) = refusal {
-            let reason = match &error {
-                ImportError::Certificate(crate::certificate::CertificateError::Untrusted {
-                    ..
-                }) => "the certificate does not chain to a trusted LoTW root".into(),
-                _ => error.to_string(),
-            };
-            self.refusals.push((index, error));
+        let disposition = if let Some(category) = refusal {
+            let reason = category.to_string();
+            self.refusals.push((index, category));
             ImportDisposition::Refused { reason }
         } else if already_here {
+            // Present means keep the stored certificate and credential exactly as they are.
+            // The file's unused key needs neither a password nor key validation.
+            material.locked = None;
+            material.der = None;
             let existing = &self.after.certificates[existing.expect("existing certificate")];
             self.reports.push(ImportedCertificate {
                 id: existing.id.clone(),
@@ -318,6 +309,15 @@ impl PendingImport {
             });
             ImportDisposition::Present
         } else {
+            if let Some(key) = &material.locked
+                && !key.is_encrypted()
+            {
+                material.der = Some(
+                    checked_key(key, None, &material.spki)
+                        .map_err(|error| ImportError::KeyAt { index, error })?,
+                );
+                material.locked = None;
+            }
             let key_name = if file_has_key {
                 let name = keys::new_name("key:")?;
                 if owner.keys.exists(&name).map_err(StoreError::from)? {
@@ -393,14 +393,7 @@ impl Store {
         let mut pending = PendingImport::new(self, data)?;
         pending.roots(&found, RootSource::Tq6)?;
         for (certificate, refusal) in certificates {
-            pending.certificate(
-                self,
-                certificate,
-                refusal.map(ImportError::Certificate),
-                None,
-                None,
-                true,
-            )?;
+            pending.certificate(self, certificate, refusal, None, None, true)?;
         }
         format::write(&pending.after)?;
         Ok(pending)
@@ -422,7 +415,7 @@ impl Store {
         pending.certificate(
             self,
             loaded.certificate,
-            loaded.refusal.map(ImportError::Certificate),
+            loaded.refusal,
             None,
             Some(loaded.key),
             false,
@@ -432,7 +425,8 @@ impl Store {
     }
 
     /// Inspect a TQSL backup without mutation. Protected keys are identified by preview index,
-    /// callsign and serial; complete their checks with `PendingImport::unlock_key`. Unanswered
+    /// callsign and serial; complete their checks with `PendingImport::unlock_key` when installing
+    /// them. Present entries retain their stored keys without checking unused backup keys. Unanswered
     /// requests are refused entries, which the caller can explicitly skip. Locations are returned
     /// by commit unless its choices ask to store them here.
     pub fn inspect_tbk(&self, bytes: &[u8], trust: &Trust) -> Result<PendingImport, ImportError> {
@@ -446,10 +440,7 @@ impl Store {
         pending.roots(&found, RootSource::Tbk)?;
         for entry in backup.certificates {
             if let Some(certificate) = entry.certificate {
-                let refusal = certificate
-                    .verify(&trust, &backup.authorities)
-                    .err()
-                    .map(ImportError::Certificate);
+                let refusal = certificate.verify(&trust, &backup.authorities).err();
                 pending.certificate(self, certificate, refusal, entry.key, None, false)?;
             } else {
                 let index = pending.keys.len();
@@ -472,10 +463,9 @@ impl Store {
                     spki: Vec::new(),
                     target: None,
                 });
-                pending.refusals.push((
-                    index,
-                    ImportError::Store(StoreError::Invalid("a request still waiting for ARRL")),
-                ));
+                pending
+                    .refusals
+                    .push((index, ImportRefusal::PendingRequest));
             }
         }
         let signed: Vec<super::SignedQso> = backup
@@ -561,8 +551,10 @@ impl Store {
                 });
             }
         }
-        if !choices.skip_refused && !pending.refusals.is_empty() {
-            return Err(pending.refusals.remove(0).1);
+        if !choices.skip_refused
+            && let Some(&(index, reason)) = pending.refusals.first()
+        {
+            return Err(ImportError::Refused { index, reason });
         }
         for root in &pending.preview.roots {
             if !choices

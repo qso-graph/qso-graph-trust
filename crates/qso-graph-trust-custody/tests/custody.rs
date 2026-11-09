@@ -299,6 +299,55 @@ fn found_in(program: &str, case: &str, mode: &str) -> Vec<String> {
     found_with_cpu(program, case, mode, false)
 }
 
+#[test]
+fn stale_pid_export_directory_does_not_prevent_custody_readiness() {
+    let folder = SecretsFolder::new();
+    let secrets = folder.0.join("test-only-secrets");
+    // As in the review probe, exec preserves the shell PID after planting its old directory.
+    // Also plant the first suffixed candidate to exercise collision retries, retaining sentinels.
+    let script = r#"
+set -eu
+mkdir "$TMPDIR/qgt-custody-export-$$"
+mkdir "$TMPDIR/qgt-custody-export-$$-0"
+printf sentinel > "$TMPDIR/qgt-custody-export-$$/sentinel"
+printf sentinel > "$TMPDIR/qgt-custody-export-$$-0/sentinel"
+exec "$@"
+"#;
+    let output = Command::new("sh")
+        .args(["-c", script, "stale-directory-probe", WIPED])
+        .arg(corpus("1024-password", "tqsl/keys/QG0TEST"))
+        .arg(corpus("1024-password", "tqsl/certs/user"))
+        .arg(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus/adif/qg0test-small.adi"),
+        )
+        .arg(corpus("1024-password", "key-password"))
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus/pki/p12-password"))
+        .arg(secrets)
+        .arg("inspect-drop")
+        .env("TMPDIR", &folder.0)
+        .stdin(Stdio::null())
+        .output()
+        .expect("custody probe");
+    assert!(
+        output.status.success(),
+        "custody child failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"ready\n");
+    let stale: Vec<_> = std::fs::read_dir(&folder.0)
+        .expect("root")
+        .map(|entry| entry.expect("entry").path())
+        .filter(|path| path.is_dir())
+        .collect();
+    assert_eq!(stale.len(), 2, "fresh export directory was not cleaned up");
+    for path in stale {
+        assert_eq!(
+            std::fs::read(path.join("sentinel")).expect("stale sentinel"),
+            b"sentinel"
+        );
+    }
+}
+
 fn found_with_cpu(program: &str, case: &str, mode: &str, disable_aesni: bool) -> Vec<String> {
     let arg = |p: &Path| p.to_str().expect("a UTF-8 path").to_string();
     let folder = SecretsFolder::new();

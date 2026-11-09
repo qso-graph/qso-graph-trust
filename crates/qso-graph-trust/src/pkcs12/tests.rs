@@ -88,6 +88,24 @@ fn key_bag(name: &str, password: Option<&[u8]>) -> Zeroizing<Vec<u8>> {
     bag(KEY_BAG, &key.pkcs8_der(password).expect("DER"))
 }
 
+// Authenticated file with a matching key but an intentionally invalid certificate chain.
+pub(crate) fn with_certificate_issuer(issuer: x509_cert::name::Name) -> Zeroizing<Vec<u8>> {
+    let mut cert =
+        x509_cert::Certificate::from_pem(file("tqsl/1024/tqsl/certs/user")).expect("cert");
+    cert.tbs_certificate.issuer = issuer;
+    let cert = bag(
+        CERT_BAG,
+        &seq(&[
+            &tlv(6, X509_BAG),
+            &tlv(0xa0, &tlv(4, &cert.to_der().expect("DER"))),
+        ]),
+    );
+    pfx(&seq(&[&data(&seq(&[
+        &cert,
+        &key_bag("tqsl/1024/tqsl/keys/QG0TEST", None),
+    ]))]))
+}
+
 #[test]
 fn pkcs12_sha1_3des_pbe_loads_and_matches_the_corpus_key() {
     // The weak corpus has RC2 certificates, refused by policy. Keep its actual 3DES shrouded

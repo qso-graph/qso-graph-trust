@@ -1482,13 +1482,8 @@ fn import_tbk(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit>
             return Err(Exit::TqslError);
         }
         if entry.needs_password {
-            let serial = entry
-                .serial
-                .iter()
-                .map(|b| format!("{b:02X}"))
-                .collect::<String>();
             let password = (env.ask_password)(&format!(
-                "Password for {}'s key (serial {serial}), as set in TQSL: ",
+                "Password for {}'s key, as set in TQSL: ",
                 entry.callsign
             ))
             .map_err(|e| {
@@ -1499,7 +1494,14 @@ fn import_tbk(store: &Store, path: &Path, env: &mut Env<'_>) -> Result<(), Exit>
                 Exit::TqslError
             })?;
             pending.unlock_key(index, &password).map_err(|e| {
-                env.message(Tone::Error, format_args!("{}'s key: {e}", entry.callsign));
+                let error = match &e {
+                    ImportError::KeyAt { error, .. } => error as &dyn std::fmt::Display,
+                    _ => &e,
+                };
+                env.message(
+                    Tone::Error,
+                    format_args!("{}'s key: {error}", entry.callsign),
+                );
                 Exit::TqslError
             })?;
         }

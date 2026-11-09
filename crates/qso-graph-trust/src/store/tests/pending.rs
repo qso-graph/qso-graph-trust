@@ -433,7 +433,10 @@ fn an_untrusted_certificate_is_previewed_with_its_refusal_reason() {
             );
             assert!(matches!(
                 store.commit(pending, ImportChoices::default()),
-                Err(ImportError::Certificate(_))
+                Err(ImportError::Refused {
+                    index: 0,
+                    reason: crate::import::ImportRefusal::Certificate
+                })
             ));
             assert!(
                 snapshot(&store) == before,
@@ -710,6 +713,41 @@ fn refusal_previews_do_not_expose_an_issuer_email() {
         !format!("{:?}", pending.preview()).contains('@'),
         "issuer email leaked into preview"
     );
+    let before = snapshot(&store);
+    let p12 = crate::pkcs12::tests::with_certificate_issuer(leaf.tbs_certificate.issuer);
+    let p12_pending = store
+        .inspect_pkcs12(&p12, &p12_password(), &Trust::lotw())
+        .expect("authenticated preview");
+    for error in [
+        store
+            .commit(pending, ImportChoices::default())
+            .expect_err("refused"),
+        store
+            .import_tq6(bytes.as_bytes(), &Trust::lotw(), None)
+            .expect_err("refused wrapper"),
+        store
+            .commit(p12_pending, ImportChoices::default())
+            .expect_err("refused p12"),
+        store
+            .import_pkcs12(&p12, &p12_password(), &Trust::lotw(), None)
+            .expect_err("refused p12 wrapper"),
+    ] {
+        // Exact representations exclude all certificate details, including nested public fields.
+        assert!(
+            error.to_string()
+                == "import entry 0: the certificate does not chain to a trusted LoTW root",
+            "commit error was not redacted"
+        );
+        assert!(
+            format!("{error:?}") == "Refused { index: 0, reason: Certificate }",
+            "nested error was not redacted"
+        );
+        assert!(std::error::Error::source(&error).is_none());
+        assert!(
+            snapshot(&store) == before,
+            "store bytes or credentials changed"
+        );
+    }
     // The normal corpus certificate, without that planted issuer, is accepted under test trust.
     let pending = store
         .inspect_tq6(&corpus("certs/KC4QPQ.tq6"), &trust())
@@ -783,28 +821,42 @@ fn a_changed_request_key_cannot_be_attached_even_with_the_same_public_snapshot()
 
 #[test]
 fn commit_waits_for_the_store_lock() {
-    let folder = Folder::new();
-    let (store, _) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
-    let pending = store
-        .inspect_tq6(&corpus("certs/KC4QPQ.tq6"), &trust())
-        .expect("inspect");
-    let lock = store.lock().expect("plant held lock");
-    let (send, receive) = mpsc::channel();
-    let store_ref = &store;
-    std::thread::scope(|scope| {
-        scope.spawn(move || {
-            send.send(store_ref.commit(pending, ImportChoices::default()))
-                .expect("send");
+    // Exercise delayed startup, including a delay beyond the former five-second deadline.
+    for delay in [Duration::from_millis(150), Duration::from_secs(6)] {
+        let folder = Folder::new();
+        let (store, _) = Store::open(&folder.0, KeyBackend::Memory).expect("open");
+        let pending = store
+            .inspect_tq6(&corpus("certs/KC4QPQ.tq6"), &trust())
+            .expect("inspect");
+        let lock = store.lock().expect("plant held lock");
+        let (send, receive) = mpsc::channel();
+        let (events, observed) = mpsc::channel();
+        *store.lock_observer.lock().expect("observer") = Some(events.clone());
+        let store_ref = &store;
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                std::thread::sleep(delay);
+                let result = store_ref.commit(pending, ImportChoices::default());
+                // A missing lock sends completion first, regardless of the worker's startup delay.
+                events.send(false).expect("completion observed");
+                send.send(result).expect("send");
+            });
+            // Watchdogs diagnose hangs; event ordering and WouldBlock establish the invariant.
+            assert!(
+                observed
+                    .recv_timeout(Duration::from_secs(120))
+                    .expect("lock attempt or completion"),
+                "commit completed without a blocked lock acquisition"
+            );
+            assert!(matches!(receive.try_recv(), Err(mpsc::TryRecvError::Empty)));
+            assert!(!store.dir.join("store.xml").exists());
+            drop(lock);
+            receive
+                .recv_timeout(Duration::from_secs(120))
+                .expect("lock released")
+                .expect("committed");
         });
-        std::thread::sleep(Duration::from_millis(50));
-        assert!(matches!(receive.try_recv(), Err(mpsc::TryRecvError::Empty)));
-        assert!(!store.dir.join("store.xml").exists());
-        drop(lock);
-        receive
-            .recv_timeout(Duration::from_secs(5))
-            .expect("lock released")
-            .expect("committed");
-    });
+    }
 }
 
 #[test]
