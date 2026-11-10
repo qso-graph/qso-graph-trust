@@ -64,7 +64,115 @@ impl fmt::Display for StationError {
 
 impl std::error::Error for StationError {}
 
+/// The field ADIF's `MY_STATE` fills for this DXCC entity, if it has one.
+pub(crate) fn primary_subdivision(dxcc: u32) -> Option<&'static str> {
+    lotw::loc_fields_for(dxcc).find(|id| {
+        matches!(
+            *id,
+            "US_STATE"
+                | "CA_PROVINCE"
+                | "RU_OBLAST"
+                | "CN_PROVINCE"
+                | "AU_STATE"
+                | "JA_PREFECTURE"
+                | "FI_KUNTA"
+        )
+    })
+}
+
+/// The field ADIF's `MY_CNTY` fills for this DXCC entity, if it has one.
+pub(crate) fn secondary_subdivision(dxcc: u32) -> Option<&'static str> {
+    lotw::loc_fields_for(dxcc).find(|id| matches!(*id, "US_COUNTY" | "JA_CITY_GUN_KU"))
+}
+
+/// LoTW's value for an ADIF subdivision code, where the two differ (tqslconvert.cpp's aliases).
+pub(crate) fn lotw_value<'a>(field: &str, adif: &'a str) -> &'a str {
+    match (field, adif) {
+        ("CA_PROVINCE", "QC") => "PQ",
+        ("CA_PROVINCE", "NL") => "NF",
+        ("RU_OBLAST", "YR") => "JA",
+        ("RU_OBLAST", "YN") => "JN",
+        _ => adif,
+    }
+}
+
 impl StationLocation {
+    /// A station location from a station's ADIF fields, as a logging program keeps them: `MY_DXCC`
+    /// (required), `MY_GRIDSQUARE` or `MY_VUCC_GRIDS`, `MY_STATE`, `MY_CNTY` (ADIF's `ST,County`),
+    /// `MY_ITU_ZONE`, `MY_CQ_ZONE` and `MY_IOTA`, with the station's call. ADIF has no field for
+    /// LoTW's park, which is given on its own. Each value goes to the field signing compares it
+    /// with, converted as signing converts it, so a log carrying the same ADIF fields agrees with
+    /// the result. A subdivision or park this entity has no field for is left out, as signing leaves
+    /// it; any other field is refused.
+    pub fn from_adif(
+        call: &str,
+        adif: &[(&str, &str)],
+        park: Option<&str>,
+    ) -> Result<Self, StationError> {
+        let get = |name: &str| {
+            adif.iter()
+                .find(|(n, _)| n.eq_ignore_ascii_case(name))
+                .map(|(_, v)| v.trim())
+                .filter(|v| !v.is_empty())
+        };
+        if let Some((name, _)) = adif.iter().find(|(n, _)| {
+            ![
+                "MY_DXCC",
+                "MY_GRIDSQUARE",
+                "MY_VUCC_GRIDS",
+                "MY_STATE",
+                "MY_CNTY",
+                "MY_ITU_ZONE",
+                "MY_CQ_ZONE",
+                "MY_IOTA",
+            ]
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(n))
+        }) {
+            return Err(StationError::NotAField(
+                name.chars().take(MAX_LEN).collect(),
+            ));
+        }
+        let dxcc_text = get("MY_DXCC").ok_or(StationError::Missing("DXCC"))?;
+        let dxcc = dxcc_text
+            .parse::<u32>()
+            .map_err(|_| StationError::Invalid {
+                field: "DXCC",
+                value: dxcc_text.chars().take(MAX_LEN).collect(),
+            })?;
+        let dxcc_text = dxcc.to_string();
+        let mut fields: Vec<(&str, String)> = vec![("CALL", call.to_owned()), ("DXCC", dxcc_text)];
+        if let Some(grid) = get("MY_VUCC_GRIDS").or_else(|| get("MY_GRIDSQUARE")) {
+            fields.push(("GRIDSQUARE", grid.to_owned()));
+        }
+        if let (Some(field), Some(value)) = (primary_subdivision(dxcc), get("MY_STATE")) {
+            fields.push((field, lotw_value(field, value).to_owned()));
+        }
+        if let (Some(field), Some(value)) = (secondary_subdivision(dxcc), get("MY_CNTY")) {
+            let county = value.split_once(',').map_or(value, |(_, c)| c.trim());
+            fields.push((field, county.to_owned()));
+        }
+        for (field, name) in [("ITUZ", "MY_ITU_ZONE"), ("CQZ", "MY_CQ_ZONE")] {
+            if let Some(value) = get(name) {
+                let number = value
+                    .parse::<u32>()
+                    .map_or(value.to_owned(), |n| n.to_string());
+                fields.push((field, number));
+            }
+        }
+        if let Some(iota) = get("MY_IOTA") {
+            fields.push(("IOTA", iota.to_owned()));
+        }
+        if let Some(park) = park.map(str::trim).filter(|p| !p.is_empty())
+            && let Some(field) = lotw::loc_fields_for(dxcc)
+                .find(|id| matches!(*id, "US_PARK" | "CA_US_PARK" | "DX_US_PARK"))
+        {
+            fields.push((field, park.to_owned()));
+        }
+        let given: Vec<(&str, &str)> = fields.iter().map(|(n, v)| (*n, v.as_str())).collect();
+        Self::new(&given)
+    }
+
     /// A station location from its fields, named as LoTW names them (`CALL`, `DXCC`,
     /// `GRIDSQUARE`, `US_STATE`, …). Empty values are left out.
     pub fn new(given: &[(&str, &str)]) -> Result<Self, StationError> {
