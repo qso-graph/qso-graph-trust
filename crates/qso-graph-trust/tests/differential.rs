@@ -262,3 +262,38 @@ fn a_log_is_signed_only_for_the_certificates_station_and_dates() {
     )];
     assert!(sign(&kansas(), &ours, SystemTime::now()).is_ok());
 }
+
+#[test]
+fn cabrillo_and_adi_sign_identical_records() {
+    let cert = Certificate::from_pem_or_der(&corpus("1024", "tqsl/certs/user")).unwrap();
+    let signer = key("1024").unlock(None).unwrap();
+    let station = StationLocation::new(&[
+        ("CALL", "QG0TEST"),
+        ("DXCC", "291"),
+        ("US_STATE", "KS"),
+        ("US_COUNTY", "Sedgwick"),
+        ("GRIDSQUARE", "EM17"),
+        ("CQZ", "4"),
+        ("ITUZ", "7"),
+    ])
+    .unwrap();
+    let cabrillo = include_bytes!("../../../tests/corpus/cabrillo/synthetic-00.log");
+    let adi = b"<CALL:6>Z0TEST<STATION_CALLSIGN:7>QG0TEST<QSO_DATE:8>20261103<TIME_ON:4>1830<BAND:3>20m<MODE:2>CW<FREQ:9>14.042000<eor>";
+    let sign = |bytes: &[u8]| {
+        let qsos = records::parse(bytes)
+            .unwrap()
+            .iter()
+            .map(Qso::from_adif)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        tq8(&sign_log(
+            &cert,
+            &signer,
+            &station,
+            &qsos,
+            cert.validity().0 + std::time::Duration::from_secs(3600),
+        )
+        .unwrap())
+    };
+    assert_eq!(sign(cabrillo), sign(adi));
+}

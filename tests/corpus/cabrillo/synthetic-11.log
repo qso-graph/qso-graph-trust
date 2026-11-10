@@ -1,0 +1,6 @@
+START-OF-LOG: 2.0
+X-COMMENT: SPDX-License-Identifier: GPL-3.0-or-later
+CONTEST: CQ-WW-CW
+QSO: 10100 DG 2026-11-03 1830 QG0TEST 599 4 Z0TEST 599 5
+X-QSO: deliberately ignored
+END-OF-LOG:

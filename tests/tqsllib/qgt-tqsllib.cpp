@@ -12,6 +12,8 @@
 //   qgt-tqsllib export-p12 CALL FILE P12PASS [KEYPASS] [weak]
 //   qgt-tqsllib location NAME CALL DXCC [FIELD=VALUE ...]
 //   qgt-tqsllib sign LOCATION IN.adi OUT.tq7 [KEYPASS]
+//   qgt-tqsllib sign-cabrillo LOCATION IN.log OUT.tq7
+//   qgt-tqsllib read-cabrillo IN.log OUT.records
 //
 // tqsllib reads and writes the folder TQSLDIR names. Every error ends the run with tqsllib's own
 // message and a nonzero exit, so a reference file is never made from a step that failed.
@@ -25,6 +27,7 @@
 
 #include "tqsllib.h"
 #include "tqslconvert.h"
+#include "cabrillo.h"
 #include "tqslerrno.h"
 
 namespace {
@@ -198,8 +201,10 @@ int sign(int argc, char** argv) {
 		return 1;
 	}
 	tQSL_Converter conv = nullptr;
-	if (tqsl_beginADIFConverter(&conv, argv[3], certs, ncerts, loc)) fail(std::string("reading ") + argv[3]);
-	tqsl_setConverterAllowDuplicates(conv, false);
+	if (std::string(argv[1]) == "sign-cabrillo") {
+		if (tqsl_beginCabrilloConverter(&conv, argv[3], certs, ncerts, loc)) fail("reading Cabrillo");
+	} else if (tqsl_beginADIFConverter(&conv, argv[3], certs, ncerts, loc)) fail("reading ADIF");
+	tqsl_setConverterAllowDuplicates(conv, std::string(argv[1]) == "sign-cabrillo");
 	// Optional settings for the signing-options differential corpus. No process-global map
 	// survives a run. TQSL's app installs these after opening the converter (tqsl.cpp:2286–2295).
 	if (const char* value = std::getenv("QGT_IGNORE_SECONDS"))
@@ -263,6 +268,29 @@ int sign(int argc, char** argv) {
 
 }  // namespace
 
+// Private TSV for the offline differential; no log data is printed on stdout.
+int read_cabrillo(int argc, char** argv) {
+	if (argc != 4) usage();
+	std::ofstream out(argv[3], std::ios::binary);
+	tQSL_Cabrillo cab = nullptr;
+	if (tqsl_beginCabrillo(&cab, argv[2])) { out << "REFUSED\n"; return 0; }
+	std::map<std::string, std::string> record;
+	for (;;) {
+		tqsl_cabrilloField field;
+		TQSL_CABRILLO_ERROR_TYPE status;
+		if (tqsl_getCabrilloField(cab, &field, &status)) { out << "REFUSED\n"; break; }
+		if (status == TQSL_CABRILLO_EOF) break;
+		record[field.name] = field.value;
+		if (status == TQSL_CABRILLO_EOR) {
+			out << record["CALL"] << '\t' << record["BAND"] << '\t' << record["MODE"] << '\t'
+				<< record["QSO_DATE"] << '\t' << record["TIME_ON"] << '\t' << record["FREQ"] << '\n';
+			record.clear();
+		}
+	}
+	tqsl_endCabrillo(&cab);
+	return 0;
+}
+
 int main(int argc, char** argv) {
 	if (argc < 2) usage();
 	// tqsllib's own trace, to the file QGT_TQSL_TRACE names, for finding why a step failed.
@@ -274,6 +302,7 @@ int main(int argc, char** argv) {
 	if (cmd == "import-p12") return import_p12(argc, argv);
 	if (cmd == "export-p12") return export_p12(argc, argv);
 	if (cmd == "location") return location(argc, argv);
-	if (cmd == "sign") return sign(argc, argv);
+	if (cmd == "sign" || cmd == "sign-cabrillo") return sign(argc, argv);
+	if (cmd == "read-cabrillo") return read_cabrillo(argc, argv);
 	usage();
 }

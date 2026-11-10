@@ -218,10 +218,14 @@ pub fn sign_like_the_cli(data: &[u8]) {
     let Ok(records) = records::parse(data) else {
         return;
     };
-    let accepted: Vec<Qso> = records
-        .iter()
-        .filter_map(|r| Qso::from_adif_with_options(r, &options).ok())
-        .collect();
+    let mut accepted = Vec::new();
+    for record in &records {
+        match Qso::from_adif_with_options(record, &options) {
+            Ok(qso) => accepted.push(qso),
+            Err(_) if record.source_line().is_some() => return,
+            Err(_) => {}
+        }
+    }
     let (first, last) = s.certificate.qso_dates();
     let mut qsos: Vec<Qso> = accepted
         .iter()

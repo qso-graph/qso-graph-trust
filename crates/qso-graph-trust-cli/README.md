@@ -34,7 +34,7 @@ qg-trust location list                # your station locations
 qg-trust send log.adi -l Home         # sign log.adi for Home and upload it to LoTW
 ```
 
-`qg-trust sign log.adi -l Home` signs an ADIF log (`.adi` or `.adx`) without uploading, into `log.tq8`; `qg-trust upload log.tq8`
+`qg-trust sign log.adi -l Home` signs an ADIF (`.adi` or `.adx`) or Cabrillo log without uploading, into `log.tq8`; `qg-trust upload log.tq8`
 uploads one later. A key that TQSL protected with a password is asked for once, when you import it.
 
 | Command | |

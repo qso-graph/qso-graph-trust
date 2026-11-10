@@ -20,9 +20,9 @@ listed once below in header order. `tqslerrno.h` declares error numbers only.
 
 | | Names | QG Trust has it, with a test | Not needed | Not applicable |
 |---|---|---|---|---|
-| Functions | 204 | 117 | 51 | 36 |
-| Variables | 11 | 4 | 2 | 5 |
-| **All** | **215** | **121** | **53** | **41** |
+| Functions | 201 | 128 | 41 | 32 |
+| Variables | 11 | 5 | 1 | 5 |
+| **All** | **212** | **133** | **42** | **37** |
 
 **Not needed** means QG Trust leaves it out on purpose or for later, with the reason; the decisions
 are FEATURE-PARITY.md's. **Not applicable** means the call manages something QG Trust does not have:
@@ -43,7 +43,7 @@ source with `--tqsl-src`), and every Rust path, `qg-trust` command and test name
 | `tQSL_RsrcDir` | The folder its configuration (`config.xml`) is read from | Not needed: ARRL's configuration is generated into the library when it is built (`scripts/gen-lotw-tables.py`); nothing is read at run time |  |
 | `tQSL_Error` | The last error's code | Not applicable: no global state; each call returns its own error value (`qso_graph_trust::store::StoreError` and the others) |  |
 | `tQSL_ADIF_Error` | The last ADIF reading error | Not applicable: no global state; each call returns its own error value (`qso_graph_trust::records::RecordError`) |  |
-| `tQSL_Cabrillo_Error` | The last Cabrillo reading error | Not needed: Cabrillo is not read; most loggers export ADIF (FEATURE-PARITY.md, Nice to have) |  |
+| `tQSL_Cabrillo_Error` | The last Cabrillo reading error | `qso_graph_trust::records::parse` maps Cabrillo v2/v3 to ADIF records for `qso_graph_trust::qso::Qso::from_adif` and shared signing; errors use `qso_graph_trust::records::RecordError` (decision 0016) | `qso-graph-trust/src/cabrillo.rs::equivalent_adi_values_and_content_detection` |
 | `tQSL_ErrorFile` | The file the last error concerns | Not applicable: no global state; each call returns its own error value; the command line names the file in its message |  |
 | `tQSL_CustomError` | Text for the last error | Not applicable: no global state; each call returns its own error value |  |
 | `tQSL_Errno` | The system error behind the last error | Not applicable: no global state; each call returns its own error value, which carries the system's error where there is one |  |
@@ -204,9 +204,9 @@ source with `--tqsl-src`), and every Rust path, `qg-trust` command and test name
 | `tqsl_getPropagationMode` | One propagation mode | `qso_graph_trust::lotw::is_prop_mode` (internal) | `qso-graph-trust/src/qso.rs::what_lotw_would_refuse_is_refused` |
 | `tqsl_getNumSatellite` | How many satellites there are | `qso_graph_trust::lotw::is_satellite` (internal) | `qso-graph-trust/src/qso.rs::what_lotw_would_refuse_is_refused` |
 | `tqsl_getSatellite` | One satellite | `qso_graph_trust::lotw::is_satellite` (internal) | `qso-graph-trust/src/qso.rs::what_lotw_would_refuse_is_refused` |
-| `tqsl_clearCabrilloMap` | Forget the custom Cabrillo contests | Not needed: Cabrillo is not read; most loggers export ADIF (FEATURE-PARITY.md, Nice to have) |  |
-| `tqsl_setCabrilloMapEntry` | Add a custom Cabrillo contest | Not needed: Cabrillo is not read; most loggers export ADIF (FEATURE-PARITY.md, Nice to have) |  |
-| `tqsl_getCabrilloMapEntry` | Look up a Cabrillo contest | Not needed: Cabrillo is not read; most loggers export ADIF (FEATURE-PARITY.md, Nice to have) |  |
+| `tqsl_clearCabrilloMap` | Forget the custom Cabrillo contests | Not needed: ADIF Contest_ID exchanges are pinned at build time; custom aliases are deliberately unsupported (decision 0016) |  |
+| `tqsl_setCabrilloMapEntry` | Add a custom Cabrillo contest | Not needed: ADIF Contest_ID exchanges are pinned at build time; custom aliases are deliberately unsupported (decision 0016) |  |
+| `tqsl_getCabrilloMapEntry` | Look up a Cabrillo contest | `qso_graph_trust::records::parse` maps Cabrillo v2/v3 to ADIF records for `qso_graph_trust::qso::Qso::from_adif` and shared signing; errors use `qso_graph_trust::records::RecordError` (decision 0016) | `qso-graph-trust/src/cabrillo.rs::ambiguous_guess_is_refused_on_every_line` |
 | `tqsl_clearADIFModes` | Forget the custom mode mappings | `qso_graph_trust::options::SigningOptions::adif_modes`, given for each log, so there is nothing global to clear | `qso-graph-trust/tests/signing_options.rs::settings_sign_and_record_exactly_as_tqsllib` |
 | `tqsl_setADIFMode` | Add a custom mode mapping | `qso_graph_trust::options::SigningOptions::adif_modes`; `qg-trust sign --mode` | `qso-graph-trust/tests/signing_options.rs::settings_sign_and_record_exactly_as_tqsllib` |
 | `tqsl_getADIFMode` | The LoTW mode for an ADIF mode | `qso_graph_trust::lotw::lotw_mode` (internal), `qso_graph_trust::qso::Qso::mode` | `qso-graph-trust/src/lotw/mod.rs::modes_map_from_adif_as_the_configuration_says` |
@@ -224,14 +224,14 @@ source with `--tqsl-src`), and every Rust path, `qg-trust` command and test name
 | `utf8_to_wchar` | UTF-8 to Windows' wide characters | Not applicable: Rust strings are UTF-8, and its standard library converts at the operating system's boundary |  |
 | `wchar_to_utf8` | Windows' wide characters to UTF-8 | Not applicable: as `utf8_to_wchar` |  |
 | `free_wchar` | Free a wide-character string | Not applicable: Rust frees a value when it is dropped; there is nothing to free by hand |  |
-| `tqsl_cabrilloGetError` | A Cabrillo error, in words | Not needed: Cabrillo is not read; most loggers export ADIF (FEATURE-PARITY.md, Nice to have) |  |
-| `tqsl_beginCabrillo` | Open a Cabrillo file | Not needed: Cabrillo is not read; most loggers export ADIF (FEATURE-PARITY.md, Nice to have) |  |
-| `tqsl_getCabrilloContest` | Its contest | Not needed: Cabrillo is not read; most loggers export ADIF (FEATURE-PARITY.md, Nice to have) |  |
-| `tqsl_getCabrilloFreqType` | Whether the contest is HF or VHF | Not needed: Cabrillo is not read; most loggers export ADIF (FEATURE-PARITY.md, Nice to have) |  |
-| `tqsl_getCabrilloLine` | The line being read | Not needed: Cabrillo is not read; most loggers export ADIF (FEATURE-PARITY.md, Nice to have) |  |
-| `tqsl_getCabrilloRecordText` | The record being read | Not needed: Cabrillo is not read; most loggers export ADIF (FEATURE-PARITY.md, Nice to have) |  |
-| `tqsl_getCabrilloField` | The record's next field | Not needed: Cabrillo is not read; most loggers export ADIF (FEATURE-PARITY.md, Nice to have) |  |
-| `tqsl_endCabrillo` | Close the Cabrillo file | Not needed: Cabrillo is not read; most loggers export ADIF (FEATURE-PARITY.md, Nice to have) |  |
+| `tqsl_cabrilloGetError` | A Cabrillo error, in words | `qso_graph_trust::records::parse` maps Cabrillo v2/v3 to ADIF records for `qso_graph_trust::qso::Qso::from_adif` and shared signing; errors use `qso_graph_trust::records::RecordError` (decision 0016) | `qso-graph-trust/src/cabrillo.rs::equivalent_adi_values_and_content_detection` |
+| `tqsl_beginCabrillo` | Open a Cabrillo file | `qso_graph_trust::records::parse` maps Cabrillo v2/v3 to ADIF records for `qso_graph_trust::qso::Qso::from_adif` and shared signing; errors use `qso_graph_trust::records::RecordError` (decision 0016) | `qso-graph-trust/src/cabrillo.rs::equivalent_adi_values_and_content_detection` |
+| `tqsl_getCabrilloContest` | Its contest | `qso_graph_trust::records::parse` maps Cabrillo v2/v3 to ADIF records for `qso_graph_trust::qso::Qso::from_adif` and shared signing; errors use `qso_graph_trust::records::RecordError` (decision 0016) | `qso-graph-trust/src/cabrillo.rs::equivalent_adi_values_and_content_detection` |
+| `tqsl_getCabrilloFreqType` | Whether the contest is HF or VHF | `qso_graph_trust::records::parse` maps Cabrillo v2/v3 to ADIF records for `qso_graph_trust::qso::Qso::from_adif` and shared signing; errors use `qso_graph_trust::records::RecordError` (decision 0016) | `qso-graph-trust/src/cabrillo.rs::equivalent_adi_values_and_content_detection` |
+| `tqsl_getCabrilloLine` | The line being read | `qso_graph_trust::records::parse` maps Cabrillo v2/v3 to ADIF records for `qso_graph_trust::qso::Qso::from_adif` and shared signing; errors use `qso_graph_trust::records::RecordError` (decision 0016) | `qso-graph-trust/src/cabrillo.rs::equivalent_adi_values_and_content_detection` |
+| `tqsl_getCabrilloRecordText` | The record being read | `qso_graph_trust::records::parse` maps Cabrillo v2/v3 to ADIF records for `qso_graph_trust::qso::Qso::from_adif` and shared signing; errors use `qso_graph_trust::records::RecordError` (decision 0016) | `qso-graph-trust/src/cabrillo.rs::equivalent_adi_values_and_content_detection` |
+| `tqsl_getCabrilloField` | The record's next field | `qso_graph_trust::records::parse` maps Cabrillo v2/v3 to ADIF records for `qso_graph_trust::qso::Qso::from_adif` and shared signing; errors use `qso_graph_trust::records::RecordError` (decision 0016) | `qso-graph-trust/src/cabrillo.rs::equivalent_adi_values_and_content_detection` |
+| `tqsl_endCabrillo` | Close the Cabrillo file | `qso_graph_trust::records::parse` maps Cabrillo v2/v3 to ADIF records for `qso_graph_trust::qso::Qso::from_adif` and shared signing; errors use `qso_graph_trust::records::RecordError` (decision 0016) | `qso-graph-trust/src/cabrillo.rs::equivalent_adi_values_and_content_detection` |
 | `tqsl_adifGetError` | An ADIF error, in words | `qso_graph_trust::records::RecordError`'s `Display`, which says where | `qso-graph-trust/src/records.rs::malformed_input_is_refused_and_says_where` |
 | `tqsl_beginADIF` | Open an ADI or ADX file | `qso_graph_trust::records::parse` | `qso-graph-trust/src/adx.rs::equivalent_fields_and_detection` |
 | `tqsl_getADIFField` | The next field | `qso_graph_trust::records::Record::get`, `qso_graph_trust::records::Record::text` | `qso-graph-trust/src/records.rs::fields_records_and_types_are_read_exactly` |
@@ -245,7 +245,7 @@ source with `--tqsl-src`), and every Rust path, `qg-trust` command and test name
 |---|---|---|---|
 | `tqsl_beginConverter` | Start signing QSOs a caller supplies | `qso_graph_trust::signed_log::sign_log`, given the QSOs (`qso_graph_trust::qso::Qso`) | `qso-graph-trust/tests/differential.rs::the_signed_log_is_tqsllibs` |
 | `tqsl_beginADIFConverter` | Start signing an ADIF file | `qso_graph_trust::records::parse`, `qso_graph_trust::qso::Qso::from_adif`, `qso_graph_trust::store::Store::prepare_signing`; `qg-trust sign` | `qso-graph-trust/src/store/tests/signed.rs::choices_write_only_the_selected_qsos_and_record_only_after_success` `qso-graph-trust-cli/src/commands/tests.rs::every_location_signs_from_the_store_as_tqsllib_signs_it` |
-| `tqsl_beginCabrilloConverter` | Start signing a Cabrillo file | Not needed: Cabrillo is not read; most loggers export ADIF (FEATURE-PARITY.md, Nice to have) |  |
+| `tqsl_beginCabrilloConverter` | Start signing a Cabrillo file | `qso_graph_trust::records::parse` maps Cabrillo v2/v3 to ADIF records for `qso_graph_trust::qso::Qso::from_adif` and shared signing; errors use `qso_graph_trust::records::RecordError` (decision 0016) | `qso-graph-trust-cli/src/commands/tests.rs::sign_cabrillo_from_the_store` |
 | `tqsl_endConverter` | Finish signing | Not applicable: Rust frees a value when it is dropped; there is nothing to free by hand |  |
 | `tqsl_setConverterAllowBadCall` | Sign calls that are not amateur calls | `qso_graph_trust::options::SigningOptions::allow_bad_calls`; `qg-trust sign --allow-bad-calls` | `qso-graph-trust/tests/signing_options.rs::calls_refuse_controls_and_xml_forbidden_characters_with_any_options` |
 | `tqsl_setConverterQTHDetails` | What the log's own location details do | `qso_graph_trust::options::SigningOptions::qth`; `qg-trust -f`, `qg-trust sign --qth` | `qso-graph-trust/tests/signing_options.rs::settings_sign_and_record_exactly_as_tqsllib` `qso-graph-trust-cli/src/commands/tests.rs::a_logger_chooses_what_the_logs_own_location_details_do_with_f` |

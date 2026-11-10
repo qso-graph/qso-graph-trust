@@ -30,7 +30,7 @@
 use std::fmt;
 
 use base64ct::{Base64, Encoding};
-use x509_cert::der::{DecodePem, Encode};
+use x509_cert::der::Encode;
 use zeroize::Zeroizing;
 
 use crate::certificate::{
@@ -390,8 +390,9 @@ fn read_certificates(section: &Element, backup: &mut Backup) -> Result<(), TbkEr
                 if pem.len() > MAX_CERTIFICATE_LEN {
                     return Err(TbkError::Authority { index });
                 }
-                let der = x509_cert::Certificate::from_pem(pem.as_bytes())
-                    .and_then(|c| c.to_der())
+                let der = crate::certificate::x509_from_pem(pem.as_bytes())
+                    .map_err(|_| TbkError::Authority { index })?
+                    .to_der()
                     .map_err(|_| TbkError::Authority { index })?;
                 let list = if kind == "RootCert" {
                     &mut backup.roots

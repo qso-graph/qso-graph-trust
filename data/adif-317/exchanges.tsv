@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Contest identifier, zero-based received-call token (frequency = 0), source or guessed.
+# ARRL-160: 6 without a sent section, 7 with a sent section or maritime region.
+# WRTC and WRTC-2018 are sponsor identifiers outside ADIF 3.1.7.
+CQ-WW-CW	7	https://www.cqww.com/cabrillo.htm
+CQ-WW-SSB	7	https://www.cqww.com/cabrillo.htm
+CQ-WPX-CW	7	https://cqwpx.com/cabrillo.htm
+CQ-WPX-SSB	7	https://cqwpx.com/cabrillo.htm
+CQ-160-CW	7	https://cq160.com/cabrillo.htm
+CQ-160-SSB	7	https://cq160.com/cabrillo.htm
+ARRL-SS-CW	9	https://www.arrl.org/cabrillo-format-tutorial
+ARRL-SS-SSB	9	https://www.arrl.org/cabrillo-format-tutorial
+NAQP-CW	7	https://ncjweb.com/NAQP_Cabrillo_Template.txt
+NAQP-SSB	7	https://ncjweb.com/NAQP_Cabrillo_Template.txt
+NAQP-RTTY	7	https://ncjweb.com/NAQP_Cabrillo_Template.txt
+RSGB-IOTA	8	https://www.rsgbcc.org/hf/formats/templates.shtml
+CQ-WW-RTTY	8	https://cqwwrtty.com/cabrillo.htm
+ARRL-DIGI	6	https://contests.arrl.org/ContestRules/Digital-Rules.pdf
+ARRL-VHF-JAN	6	guessed
+ARRL-VHF-JUN	6	guessed
+ARRL-VHF-SEP	6	guessed
+CQ-WPX-RTTY	7	https://cqwpxrtty.com/cabrillo.htm
+WW-DIGI	6	https://ww-digi.com/cabrillo.htm
+IARU-HF	7	https://contests.arrl.org/ContestRules/IARU-HF-Rules.pdf
+ARRL-DX-CW	7	https://contests.arrl.org/ContestRules/DX-Rules.pdf
+ARRL-DX-SSB	7	https://contests.arrl.org/ContestRules/DX-Rules.pdf
+ARRL-RTTY	7	https://contests.arrl.org/ContestRules/RTTY-RU-Rules.pdf
+ARRL-10	7	https://contests.arrl.org/ContestRules/10M-Rules.pdf
+ARRL-160	6/7	https://contests.arrl.org/ContestRules/160M-Rules.pdf
+WRTC	7	https://wrtc.info/wrtc-2010-rules/
+WRTC-2018	7	https://www.wrtc2018.de/competition/rules/wrtc2018_CompetitionRules_20180111.pdf

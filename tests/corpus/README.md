@@ -123,3 +123,11 @@ for one that does not fit). `MANIFEST` says when it was made.
 
 W4W's certificate is in force for a month only, so tests sign at a time inside each certificate,
 never at the time they run.
+
+## fuzz-regressions
+
+Inputs a fuzzer found that once failed, kept as seeds so every later fuzz run starts from them.
+
+| File | What it is |
+| --- | --- |
+| `tq6-truncated-pem-1.tq6`, `tq6-truncated-pem-2.tq6` | `.tq6` files the `tq6` target made, whose certificates are truncated PEM (one body is just `MIID`). `der` 0.7.10's streaming PEM reader never returned on them; QG Trust now decodes PEM whole (`certificate::x509_from_pem`) and refuses them at once. |

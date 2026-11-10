@@ -53,3 +53,5 @@ mod tests {
 }
 
 mod adx;
+mod cabrillo;
+mod cabrillo_tables;

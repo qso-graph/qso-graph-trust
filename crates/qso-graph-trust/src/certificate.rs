@@ -26,7 +26,7 @@ use qso_graph_trust_awslc::{Digest, ImportDigest, import_digest, verify_rsa};
 use x509_cert::Certificate as X509;
 use x509_cert::der::Tagged;
 use x509_cert::der::asn1::ObjectIdentifier;
-use x509_cert::der::{Decode, DecodePem, Encode};
+use x509_cert::der::{Decode, Encode};
 use x509_cert::ext::pkix::{BasicConstraints, KeyUsage, KeyUsages};
 
 use crate::qso::Date;
@@ -103,13 +103,26 @@ impl fmt::Display for CertificateError {
 
 impl std::error::Error for CertificateError {}
 
+/// One certificate from PEM. `der` 0.7.10's streaming PEM reader, which `DecodePem::from_pem` uses,
+/// can loop without end on a truncated body: a certificate whose base64 is just `MIID` never
+/// returns. So the PEM is decoded whole by `pem::decode_vec`, which is bounded by its input, and the
+/// DER parsed after. Every PEM certificate QG Trust reads comes through here.
+pub(crate) fn x509_from_pem(bytes: &[u8]) -> Result<X509, CertificateError> {
+    let (label, der) =
+        x509_cert::der::pem::decode_vec(bytes).map_err(|_| CertificateError::NotACertificate)?;
+    if label != "CERTIFICATE" {
+        return Err(CertificateError::NotACertificate);
+    }
+    X509::from_der(&der).map_err(|_| CertificateError::NotACertificate)
+}
+
 impl Certificate {
     /// A certificate from PEM, as tqsllib stores it, or DER.
     pub fn from_pem_or_der(bytes: &[u8]) -> Result<Self, CertificateError> {
         if bytes.len() > MAX_CERTIFICATE_LEN {
             return Err(CertificateError::TooLarge);
         }
-        let cert = X509::from_pem(bytes)
+        let cert = x509_from_pem(bytes)
             .or_else(|_| X509::from_der(bytes))
             .map_err(|_| CertificateError::NotACertificate)?;
         let der = cert
@@ -252,7 +265,7 @@ impl Trust {
         use crate::lotw::arrl::{
             PUBLIC_CA_2019, PUBLIC_CA_2023, PUBLIC_ROOT_2015, PUBLIC_ROOT_2023,
         };
-        let pem = |p: &str| X509::from_pem(p.as_bytes()).expect("LoTW's pinned certificates parse");
+        let pem = |p: &str| x509_from_pem(p.as_bytes()).expect("LoTW's pinned certificates parse");
         Trust {
             roots: vec![pem(PUBLIC_ROOT_2015), pem(PUBLIC_ROOT_2023)],
             authorities: vec![pem(PUBLIC_CA_2019), pem(PUBLIC_CA_2023)],
@@ -265,7 +278,7 @@ impl Trust {
     pub fn with_roots(roots: &[&[u8]]) -> Result<Trust, CertificateError> {
         let roots = roots
             .iter()
-            .map(|r| X509::from_pem(r).or_else(|_| X509::from_der(r)))
+            .map(|r| x509_from_pem(r).or_else(|_| X509::from_der(r)))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| CertificateError::NotACertificate)?;
         Ok(Trust {
@@ -680,6 +693,32 @@ fn text_of(value: &[u8]) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// A truncated PEM body is refused at once. `der` 0.7.10's streaming PEM reader never returns
+    /// on these (fuzz finds `timeout-ca28e339` and `timeout-edda3152`, tq6 target); each is run on its
+    /// own thread so a regression fails this test in seconds instead of hanging the suite.
+    #[test]
+    fn a_truncated_pem_certificate_is_refused_promptly() {
+        for body in ["MIID", "MIIDxzCCAq+g", "MA==", "MIIB"] {
+            let pem = format!("-----BEGIN CERTIFICATE-----\n{body}\n-----END CERTIFICATE-----\n");
+            let (done, finished) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = done.send((
+                    x509_from_pem(pem.as_bytes()).is_err(),
+                    Certificate::from_pem_or_der(pem.as_bytes()).is_err(),
+                    Trust::with_roots(&[pem.as_bytes()]).is_err(),
+                ));
+            });
+            let outcome = finished
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap_or_else(|_| panic!("PEM body {body:?} did not finish within 5 s"));
+            assert_eq!(outcome, (true, true, true), "PEM body {body:?}");
+        }
+        assert!(
+            x509_from_pem(b"-----BEGIN PRIVATE KEY-----\nMA==\n-----END PRIVATE KEY-----\n")
+                .is_err()
+        );
+    }
+
     fn corpus() -> Vec<u8> {
         std::fs::read(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -712,7 +751,7 @@ mod tests {
     }
 
     fn der_of(pem: &[u8]) -> Vec<u8> {
-        X509::from_pem(pem).expect("PEM").to_der().expect("DER")
+        x509_from_pem(pem).expect("PEM").to_der().expect("DER")
     }
 
     #[test]
@@ -741,7 +780,7 @@ mod tests {
         let ca = der_of(crate::lotw::arrl::PUBLIC_CA_2023.as_bytes());
         let only_2015 = Trust {
             roots: vec![
-                X509::from_pem(crate::lotw::arrl::PUBLIC_ROOT_2015.as_bytes()).expect("root"),
+                x509_from_pem(crate::lotw::arrl::PUBLIC_ROOT_2015.as_bytes()).expect("root"),
             ],
             authorities: Vec::new(),
         };
@@ -832,7 +871,7 @@ mod tests {
         // Found in review: a CA's basic constraints given twice, no limit then pathlen 0; only
         // the first was read. (openssl will not issue one, so it is made here: its signature no
         // longer checks, so the rule is tested on its own.)
-        let ca = X509::from_pem(chain("ca-good")).expect("a CA");
+        let ca = x509_from_pem(&chain("ca-good")).expect("a CA");
         assert!(extensions_well_formed(&ca));
         let mut twice = ca.clone();
         let mut extensions = twice.tbs_certificate.extensions.take().expect("extensions");

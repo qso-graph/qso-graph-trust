@@ -80,7 +80,7 @@ How each is tested, and how to report a security problem privately: [SECURITY.md
 
 ## What it does
 
-`qg-trust` signs your ADIF log (`.adi` or `.adx`) with your LoTW callsign certificate and uploads it to LoTW, in one
+`qg-trust` signs your ADIF (`.adi` or `.adx`) or Cabrillo log with your LoTW callsign certificate and uploads it to LoTW, in one
 command. It brings over everything you have in TQSL from a TQSL backup: certificates, keys, station
 locations and the record of what you have already signed. It also requests and renews certificates and
 manages station locations. Loggers that run `tqsl` can run `qg-trust` with the same options, exit

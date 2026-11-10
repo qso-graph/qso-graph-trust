@@ -368,16 +368,23 @@ fn found_with_cpu(program: &str, case: &str, mode: &str, disable_aesni: bool) ->
     } else {
         command.env_remove("OPENSSL_ia32cap");
     }
+    let log = if mode == "cabrillo" {
+        "cabrillo/synthetic-00.log"
+    } else {
+        "adif/qg0test-small.adi"
+    };
+    let child_mode = if mode == "cabrillo" { "done" } else { mode };
     let mut child = command
         .args([
             arg(&corpus(case, "tqsl/keys/QG0TEST")),
             arg(&corpus(case, "tqsl/certs/user")),
             arg(&PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../tests/corpus/adif/qg0test-small.adi")),
+                .join("../../tests/corpus")
+                .join(log)),
             arg(&corpus(case, "key-password")),
             arg(&import_password_file),
             arg(&secrets_file),
-            mode.to_string(),
+            child_mode.to_string(),
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -457,6 +464,13 @@ fn found_with_cpu(program: &str, case: &str, mode: &str, disable_aesni: bool) ->
 
 const WIPED: &str = env!("CARGO_BIN_EXE_qgt-custody");
 const UNWIPED: &str = env!("CARGO_BIN_EXE_qgt-custody-unwiped");
+
+#[test]
+fn no_key_data_is_left_after_cabrillo_signing() {
+    for case in ["1024", "1024-password"] {
+        assert_eq!(found_in(WIPED, case, "cabrillo"), Vec::<String>::new());
+    }
+}
 
 #[test]
 fn no_key_data_is_left_once_the_log_is_signed() {
@@ -995,6 +1009,19 @@ fn what_qg_trust_writes(plant: bool) -> Vec<String> {
             .into_iter()
             .chain(["-o", &out("qg0test.tq8")])
             .collect::<Vec<_>>(),
+        "",
+        0,
+    );
+    runs.qg_trust(
+        "sign Cabrillo with the .p12's key",
+        &[
+            "sign",
+            &at("cabrillo/synthetic-00.log"),
+            "-l",
+            "QG0TEST-HOME",
+            "-o",
+            &out("cabrillo.tq8"),
+        ],
         "",
         0,
     );

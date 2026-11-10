@@ -1,0 +1,18 @@
+<?xml version="1.0" encoion="1.0" encoding="UTF-8"?>
+<tqsldata>
+<tqslcerts>
+<rootcert>
+-----BEGIN CERTIFICATE-----
+MIID
+
+-----END CERTIFICATE-----
+</rootcert>
+<cacert>
+-----BEGIN CERTIFICATE-----
+MIIDjzCCAneg.AwIBATIFICATE---
+</cacert>
+<usercert>
+-----P0jpqk3yHCERTIFICATE-----
+</usercert>
+</tqslcerts>
+</tqsldata>

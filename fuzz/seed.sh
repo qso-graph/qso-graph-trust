@@ -27,6 +27,8 @@ seed() { # seed <target> <corpus file>...
 mkdir -p "$to/adx"
 printf '%s' '<ADX><HEADER/><RECORDS><RECORD><CALL>QG0TEST</CALL><QSO_DATE>20261103</QSO_DATE><TIME_ON>183055</TIME_ON><BAND>20m</BAND><MODE>CW</MODE></RECORD></RECORDS></ADX>' >"$to/adx/synthetic.adx"
 seed adif "$from"/adif/*.adi "$from"/standard/adif/*.adi "$from"/signing-options/*.adi
-seed tq6 "$from"/pki/*.tq6 "$from"/tqsl/*/*.tq6 "$from"/standard/certs/*.tq6
+seed tq6 "$from"/pki/*.tq6 "$from"/tqsl/*/*.tq6 "$from"/standard/certs/*.tq6 "$from"/fuzz-regressions/*.tq6
 seed p12 "$from"/pki/*.p12 "$from"/roots/*.p12 "$from"/tqsl/*/*.p12
 seed tbk "$from"/standard/standard.tbk
+
+seed cabrillo "$from"/cabrillo/*.log
