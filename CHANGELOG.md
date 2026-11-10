@@ -7,6 +7,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `StationLocation::from_adif` makes a station location from a station's ADIF fields (`MY_DXCC`, `MY_GRIDSQUARE`, `MY_STATE`, `MY_CNTY` and the rest), converted as signing converts a log's, so a log carrying the same fields agrees with it. It is checked against the standard set's TQSL-written locations.
+- `SigningOptions::station_refusals` names each QSO signing would refuse as another station's, with the reason, so a program can leave those out and sign the rest. The rest sign exactly as they would in a log without the refused ones.
 - `qg-trust location tqsl` lists TQSL's own station locations as new, the same, different or refused, and adds the new ones you choose. TQSL's files are only read, never changed, and a stored location is never overwritten. The library reads them through `tqsl_locations`.
 
 ## [0.1.8] - 2026-11-10

@@ -81,6 +81,27 @@ impl SigningOptions {
         Ok(locations)
     }
 
+    /// The QSOs signing would refuse as another station's, each by its place in the log from 0 with
+    /// the reason, so a caller can leave them out and sign the rest. Each QSO is checked against the
+    /// station as `sign_log_with_options` checks it, in order, carrying forward what earlier QSOs
+    /// filled in, except that a refused QSO changes nothing: signing the QSOs left gives the same
+    /// stations, and so the same signed log, as though the refused ones had never been in it.
+    pub fn station_refusals(
+        &self,
+        qsos: &[Qso],
+        station: &StationLocation,
+    ) -> Vec<(usize, LogError)> {
+        let mut current = station.clone();
+        let mut refused = Vec::new();
+        for (index, qso) in qsos.iter().enumerate() {
+            match self.location(qso, &current, index) {
+                Ok(next) => current = next,
+                Err(error) => refused.push((index, error)),
+            }
+        }
+        refused
+    }
+
     fn location(
         &self,
         qso: &Qso,
@@ -114,20 +135,8 @@ impl SigningOptions {
         // Converter order matters: grid, primary subdivision (refreshing dependent fields),
         // secondary subdivision, ITU zone, CQ zone, IOTA. MY_VUCC_GRIDS takes precedence.
         let get = |name| qso.station().find(|(n, _)| *n == name).map(|(_, v)| v);
-        let primary = lotw::loc_fields_for(station.dxcc()).find(|id| {
-            matches!(
-                *id,
-                "US_STATE"
-                    | "CA_PROVINCE"
-                    | "RU_OBLAST"
-                    | "CN_PROVINCE"
-                    | "AU_STATE"
-                    | "JA_PREFECTURE"
-                    | "FI_KUNTA"
-            )
-        });
-        let secondary = lotw::loc_fields_for(station.dxcc())
-            .find(|id| matches!(*id, "US_COUNTY" | "JA_CITY_GUN_KU"));
+        let primary = crate::station::primary_subdivision(station.dxcc());
+        let secondary = crate::station::secondary_subdivision(station.dxcc());
         let vucc = (index != 0).then(|| get("MY_VUCC_GRIDS")).flatten();
         let grid = vucc.or_else(|| get("MY_GRIDSQUARE"));
         let changes = [
@@ -156,13 +165,7 @@ impl SigningOptions {
             } else {
                 value
             };
-            let value = match (field, value) {
-                ("CA_PROVINCE", "QC") => "PQ",
-                ("CA_PROVINCE", "NL") => "NF",
-                ("RU_OBLAST", "YR") => "JA",
-                ("RU_OBLAST", "YN") => "JN",
-                _ => value,
-            };
+            let value = crate::station::lotw_value(field, value);
             let number = matches!(field, "ITUZ" | "CQZ")
                 .then(|| value.parse::<u32>().ok().map(|v| v.to_string()))
                 .flatten();

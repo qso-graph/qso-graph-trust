@@ -377,3 +377,162 @@ fn equivalent_adi_and_adx_sign_to_the_same_tq8() {
     }
     assert_eq!(results[0], results[1]);
 }
+
+#[test]
+fn refused_qsos_are_named_and_the_rest_sign_as_if_they_were_never_there() {
+    let trust = Trust::with_roots(&[&corpus("standard/pki/root.pem")]).expect("test root");
+    let backup = tbk::read(&corpus("standard/standard.tbk"), &trust).expect("test backup");
+    let cert = backup
+        .certificates
+        .iter()
+        .find(|c| c.callsign == "KC4QPQ")
+        .and_then(|c| c.certificate.as_ref())
+        .expect("certificate");
+    let station = &backup
+        .locations
+        .iter()
+        .find(|l| l.name == "KC4QPQ-HOME")
+        .expect("home")
+        .station;
+    let key = KeyEntry::read_key_file(&corpus("standard/tqsl/keys/KC4QPQ"))
+        .expect("key")
+        .remove(0)
+        .unlock(Some(&corpus("standard/keys/KC4QPQ.password")))
+        .expect("unlock test key");
+    let at = cert.validity().0 + Duration::from_secs(3600);
+    let options = SigningOptions {
+        qth: QthHandling::Refuse,
+        ..SigningOptions::default()
+    };
+    let qso = |extra: &str| {
+        let adif = format!(
+            "<CALL:5>KN4YU<QSO_DATE:8>20261103<TIME_ON:6>183055<BAND:3>20m<MODE:2>CW{extra}<EOR>"
+        );
+        Qso::from_adif_with_options(&records::parse(adif.as_bytes()).expect("ADIF")[0], &options)
+            .expect("QSO")
+    };
+    // The first fills the empty IOTA; the second names another state; the third an IOTA that
+    // disagrees only with what the first filled in; the fourth agrees with it.
+    let log = [
+        qso("<MY_IOTA:6>NA-110"),
+        qso("<MY_STATE:2>KS"),
+        qso("<MY_IOTA:6>OC-001"),
+        qso("<MY_IOTA:6>NA-110"),
+    ];
+    let refused = options.station_refusals(&log, station);
+    let named: Vec<_> = refused
+        .iter()
+        .map(|(index, error)| match error {
+            qso_graph_trust::signed_log::LogError::QsoFromAnotherStation { field, .. } => {
+                (*index, *field)
+            }
+            other => panic!("unexpected refusal {other}"),
+        })
+        .collect();
+    assert_eq!(named, [(1, "MY_STATE"), (2, "MY_IOTA")]);
+    assert!(sign_log_with_options(cert, &key, station, &log, at, &options).is_err());
+    let kept: Vec<Qso> = log
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !refused.iter().any(|(r, _)| r == index))
+        .map(|(_, q)| q.clone())
+        .collect();
+    assert!(options.station_refusals(&kept, station).is_empty());
+    let signed =
+        sign_log_with_options(cert, &key, station, &kept, at, &options).expect("the rest sign");
+    let alone = sign_log_with_options(
+        cert,
+        &key,
+        station,
+        &[log[0].clone(), log[3].clone()],
+        at,
+        &options,
+    )
+    .expect("the same QSOs alone");
+    assert_eq!(signed, alone);
+}
+
+#[test]
+fn a_station_from_adif_fields_is_tqsls_and_a_log_with_those_fields_agrees() {
+    use qso_graph_trust::station::{StationError, StationLocation};
+    let trust = Trust::with_roots(&[&corpus("standard/pki/root.pem")]).expect("test root");
+    let backup = tbk::read(&corpus("standard/standard.tbk"), &trust).expect("test backup");
+    let tqsl = |name: &str| {
+        &backup
+            .locations
+            .iter()
+            .find(|l| l.name == name)
+            .expect(name)
+            .station
+    };
+    let home = [
+        ("MY_DXCC", "291"),
+        ("MY_GRIDSQUARE", "FM02"),
+        ("MY_STATE", "SC"),
+        ("MY_CNTY", "SC,Charleston"),
+        ("MY_ITU_ZONE", "08"),
+        ("MY_CQ_ZONE", "5"),
+    ];
+    let ours = StationLocation::from_adif("KC4QPQ", &home, None).expect("home");
+    assert_eq!(&ours, tqsl("KC4QPQ-HOME"));
+    // A park has no ADIF field and is given on its own.
+    let park = StationLocation::from_adif("KC4QPQ", &home, Some("MN35")).expect("park");
+    assert_eq!(&park, tqsl("KC4QPQ-MN35"));
+
+    let options = SigningOptions {
+        qth: QthHandling::Refuse,
+        ..SigningOptions::default()
+    };
+    let qso = |extra: &str| {
+        let adif = format!(
+            "<CALL:5>KN4YU<QSO_DATE:8>20261103<TIME_ON:6>183055<BAND:3>20m<MODE:2>CW{extra}<EOR>"
+        );
+        Qso::from_adif_with_options(&records::parse(adif.as_bytes()).expect("ADIF")[0], &options)
+            .expect("QSO")
+    };
+    let same = qso("<MY_STATE:2>SC<MY_CNTY:13>SC,Charleston<MY_GRIDSQUARE:4>FM02<MY_CQ_ZONE:1>5");
+    assert!(options.station_refusals(&[same], &ours).is_empty());
+    // A finer grid in the log than the station gives is another place, as tqsllib has it.
+    let finer = options.station_refusals(&[qso("<MY_GRIDSQUARE:6>FM02aa")], &ours);
+    assert!(matches!(
+        finer[..],
+        [(
+            0,
+            qso_graph_trust::signed_log::LogError::QsoFromAnotherStation {
+                field: "MY_GRIDSQUARE",
+                ..
+            }
+        )]
+    ));
+
+    // ADIF's Quebec is LoTW's PQ, both ways.
+    let quebec =
+        StationLocation::from_adif("VA2QGT", &[("MY_DXCC", "1"), ("MY_STATE", "QC")], None)
+            .expect("Quebec");
+    assert_eq!(quebec.get("CA_PROVINCE"), Some("PQ"));
+    assert!(
+        options
+            .station_refusals(&[qso("<MY_STATE:2>QC")], &quebec)
+            .is_empty()
+    );
+    assert_eq!(
+        options
+            .station_refusals(&[qso("<MY_STATE:2>ON")], &quebec)
+            .len(),
+        1
+    );
+
+    // A field that is not a station's is refused; one this entity has no field for is left out.
+    assert_eq!(
+        StationLocation::from_adif("KC4QPQ", &[("MY_DXCC", "291"), ("MY_RIG", "IC-7300")], None),
+        Err(StationError::NotAField("MY_RIG".into()))
+    );
+    assert_eq!(
+        StationLocation::from_adif("KC4QPQ", &[("MY_GRIDSQUARE", "FM02")], None),
+        Err(StationError::Missing("DXCC"))
+    );
+    let germany =
+        StationLocation::from_adif("DL1QGT", &[("MY_DXCC", "230"), ("MY_STATE", "BY")], None)
+            .expect("an entity without a state field");
+    assert_eq!(germany.fields().count(), 2);
+}
