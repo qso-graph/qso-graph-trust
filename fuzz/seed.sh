@@ -32,3 +32,4 @@ seed p12 "$from"/pki/*.p12 "$from"/roots/*.p12 "$from"/tqsl/*/*.p12
 seed tbk "$from"/standard/standard.tbk
 
 seed cabrillo "$from"/cabrillo/*.log
+seed station_data "$from"/standard/tqsl/station_data "$from"/tqsl/1024/tqsl/station_data "$from"/tqsl/1024-password/tqsl/station_data

@@ -25,6 +25,7 @@ pub mod signing;
 pub mod station;
 pub mod store;
 pub mod tbk;
+pub mod tqsl_locations;
 pub mod upload;
 mod xml;
 

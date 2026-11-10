@@ -26,7 +26,7 @@ use qso_graph_trust::store::{
     StoredCertificate, TrustedRoot,
 };
 use qso_graph_trust::upload::{UploadOutcome, UploadRequest};
-use qso_graph_trust::{VERSION, records, tbk};
+use qso_graph_trust::{VERSION, records, tbk, tqsl_locations};
 
 use crate::cli::{Action, Env, Exit, LeftOut, Tone, UploadFailure, Verify, read_file};
 
@@ -373,6 +373,11 @@ enum Kind {
 
 #[derive(Debug, Subcommand)]
 enum Location {
+    /// Compare locations in TQSL and optionally add new ones.
+    #[command(
+        after_help = "Examples:\n  qg-trust location tqsl\n  qg-trust location tqsl --folder ~/Library/Application\\ Support/TrustedQSL\n  qg-trust location tqsl --add Home\n  qg-trust location tqsl --all"
+    )]
+    Tqsl(TqslLocationArgs),
     /// List your station locations.
     #[command(after_help = "Example:\n  qg-trust location list")]
     List(ListArgs),
@@ -398,6 +403,22 @@ enum Location {
     /// The fields a DXCC entity's station locations take.
     #[command(after_help = "Example:\n  qg-trust location fields 291")]
     Fields(FieldsArgs),
+}
+
+#[derive(Debug, Args)]
+struct TqslLocationArgs {
+    /// TQSL's folder, if different from the default.
+    #[arg(long, value_name = "FOLDER")]
+    folder: Option<PathBuf>,
+    /// Print JSON, for scripts.
+    #[arg(long)]
+    json: bool,
+    /// Add this new location by name; repeat to choose more.
+    #[arg(long, value_name = "NAME", conflicts_with = "all")]
+    add: Vec<String>,
+    /// Add every new location.
+    #[arg(long)]
+    all: bool,
 }
 
 #[derive(Debug, Args)]
@@ -2379,6 +2400,7 @@ fn location(l: Location, env: &mut Env<'_>) -> Done {
     let find = |name: &str| locations.iter().find(|l| l.name == name);
     match l {
         Location::Fields(_) => unreachable!("answered above"),
+        Location::Tqsl(a) => tqsl_locations_command(a, store, &locations, env),
         Location::List(a) => {
             if a.json {
                 let mut s = String::from("[");
@@ -2556,6 +2578,114 @@ fn location(l: Location, env: &mut Env<'_>) -> Done {
             Ok(Exit::Success)
         }
     }
+}
+
+fn tqsl_locations_command(
+    a: TqslLocationArgs,
+    store: &Store,
+    stored: &[qso_graph_trust::store::StoredLocation],
+    env: &mut Env<'_>,
+) -> Done {
+    use tqsl_locations::Status;
+    let folder = a.folder.unwrap_or_else(tqsl_locations::default_folder);
+    let locations = tqsl_locations::read(&folder).map_err(|e| {
+        env.message(Tone::Error, format_args!("{e}"));
+        Exit::CommandError
+    })?;
+    let statuses: Vec<_> = locations
+        .iter()
+        .map(|l| tqsl_locations::compare(l, stored))
+        .collect();
+    for name in &a.add {
+        if !locations
+            .iter()
+            .zip(&statuses)
+            .any(|(l, s)| &l.name == name && *s == Status::New)
+        {
+            env.message(
+                Tone::Error,
+                format_args!("{name:?} is not a new TQSL station location"),
+            );
+            return Err(Exit::CommandError);
+        }
+    }
+    if a.json {
+        let mut out = String::from("[");
+        for (index, (l, status)) in locations.iter().zip(&statuses).enumerate() {
+            if index != 0 {
+                out.push(',');
+            }
+            let (label, detail) = match status {
+                Status::New => ("new", String::new()),
+                Status::Same => ("same", String::new()),
+                Status::Refused(reason) => ("refused", format!(",\"reason\":{}", json_str(reason))),
+                Status::Differs(diffs) => {
+                    let fields = diffs
+                        .iter()
+                        .map(|d| {
+                            format!(
+                                "{{\"field\":{},\"tqsl\":{},\"stored\":{}}}",
+                                json_str(&d.field),
+                                d.tqsl.as_deref().map_or_else(|| "null".into(), json_str),
+                                d.stored.as_deref().map_or_else(|| "null".into(), json_str)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    ("differs", format!(",\"differences\":[{fields}]"))
+                }
+            };
+            let _ = write!(
+                out,
+                "{{\"name\":{},\"status\":{}{}}}",
+                json_str(&l.name),
+                json_str(label),
+                detail
+            );
+        }
+        out.push(']');
+        let _ = writeln!(env.out, "{out}");
+    } else if locations.is_empty() {
+        let _ = writeln!(env.out, "TQSL has no station locations here.");
+    } else {
+        for (l, status) in locations.iter().zip(&statuses) {
+            match status {
+                Status::New => {
+                    let _ = writeln!(env.out, "{}: new", l.name);
+                }
+                Status::Same => {
+                    let _ = writeln!(env.out, "{}: same", l.name);
+                }
+                Status::Refused(reason) => {
+                    let _ = writeln!(env.out, "{}: refused: {reason}", l.name);
+                }
+                Status::Differs(diffs) => {
+                    let _ = writeln!(env.out, "{}: differs", l.name);
+                    for d in diffs {
+                        let _ = writeln!(
+                            env.out,
+                            "  {}: TQSL {:?}, stored {:?}",
+                            d.field, d.tqsl, d.stored
+                        );
+                    }
+                }
+            }
+        }
+    }
+    for (l, status) in locations.iter().zip(&statuses) {
+        if *status == Status::New
+            && (a.all || a.add.contains(&l.name))
+            && let Ok(station) = &l.station
+        {
+            store
+                .add_location(&l.name, station)
+                .map_err(|e| store_error(env, "the station location", &e))?;
+            if !a.json {
+                let _ = writeln!(env.out, "Added {}.", l.name);
+            }
+        }
+    }
+    Ok(Exit::Success)
 }
 
 fn make_station(fields: &[(String, String)], env: &mut Env<'_>) -> Result<StationLocation, Exit> {
