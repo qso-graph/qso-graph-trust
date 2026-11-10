@@ -1999,6 +1999,111 @@ fn sign_adx_from_the_store() {
 }
 
 #[test]
+fn sign_cabrillo_from_the_store() {
+    let ham = Ham::imported();
+    let dir = scratch();
+    let input = dir.join("log.log");
+    let output = dir.join("log.tq8");
+    std::fs::write(&input, format!("START-OF-LOG: 3.0\nCONTEST: CQ-WW-CW\nQSO: 14000 CW 2026-11-03 1830 {} 599 4 Z0TEST 599 5\nEND-OF-LOG:\n", "KC4QPQ").as_bytes()).expect("test log");
+    let ran = ham.run(&[
+        "sign",
+        path(&input),
+        "-l",
+        "KC4QPQ-HOME",
+        "-o",
+        path(&output),
+    ]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(!signed(&output).is_empty());
+}
+
+#[test]
+fn arrl_160_short_call_signs_and_invalid_call_names_its_line() {
+    let ham = Ham::imported();
+    let dir = scratch();
+    let input = dir.join("log.log");
+    let output = dir.join("log.tq8");
+    let log = "START-OF-LOG: 3.0\nCONTEST: ARRL-160\n\
+QSO: 1800 CW 2026-11-03 1830 KC4QPQ 599 EMA K2AAA 599 5\n\
+QSO: 1800 CW 2026-11-03 1831 KC4QPQ 599 9AA Z9Z 599 5\n\
+QSO: 1800 CW 2026-11-03 1832 KC4QPQ 599 EMA K2BBB 599 5\nEND-OF-LOG:\n";
+    std::fs::write(&input, log).unwrap();
+    let run = || {
+        ham.run(&[
+            "sign",
+            path(&input),
+            "-l",
+            "KC4QPQ-HOME",
+            "-o",
+            path(&output),
+        ])
+    };
+    let result = run();
+    assert_eq!(result.code, 0, "{}", result.err);
+    assert!(String::from_utf8_lossy(&signed(&output)).contains("Z9Z"));
+    std::fs::remove_file(&output).unwrap();
+    std::fs::write(&input, log.replace("Z9Z", "0AA")).unwrap();
+    let result = run();
+    assert_ne!(result.code, 0);
+    assert!(
+        result.err.contains("line 4: QSO must meet LoTW"),
+        "{}",
+        result.err
+    );
+    assert!(!output.exists());
+}
+
+#[test]
+fn sign_cabrillo_conversion_refuses_whole_log_with_physical_line() {
+    let ham = Ham::imported();
+    let dir = scratch();
+    let input = dir.join("log.log");
+    let output = dir.join("log.tq8");
+    std::fs::write(
+        &input,
+        include_bytes!("../../../../tests/corpus/cabrillo/refused/call-prefix.log"),
+    )
+    .unwrap();
+    let ran = ham.run(&[
+        "-l",
+        "KC4QPQ-HOME",
+        "-a",
+        "all",
+        "-o",
+        path(&output),
+        path(&input),
+    ]);
+    assert_ne!(ran.code, 0);
+    assert!(
+        ran.err.contains("line 6: QSO must meet LoTW"),
+        "{}",
+        ran.err
+    );
+    assert!(!ran.err.contains("Q0TEST"));
+    assert!(!output.exists());
+}
+
+#[test]
+fn sign_cabrillo_prints_requirement_and_line_without_log_content() {
+    let ham = Ham::imported();
+    let dir = scratch();
+    let input = dir.join("log.log");
+    std::fs::write(
+        &input,
+        b"START-OF-LOG: PRIVATE-SENTINEL\nCONTEST: UNKNOWN\nEND-OF-LOG:\n",
+    )
+    .unwrap();
+    let ran = ham.run(&["sign", path(&input), "-l", "KC4QPQ-HOME"]);
+    assert_ne!(ran.code, 0);
+    assert!(
+        ran.err.contains("line 1: START-OF-LOG must be 2.0 or 3.0"),
+        "{}",
+        ran.err
+    );
+    assert!(!format!("{}{}", ran.err, ran.out).contains("PRIVATE-SENTINEL"));
+}
+
+#[test]
 fn test_signing_writes_without_recording_and_with_u_signs_and_uploads_as_tqsl() {
     let ham = Ham::unsigned();
     let dir = scratch();

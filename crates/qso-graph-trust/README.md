@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # qso-graph-trust
 
-LoTW signing for your own programs: sign ADIF logs (`.adi` or `.adx`) with your LoTW certificate, so ARRL's
+LoTW signing for your own programs: sign ADIF (`.adi` or `.adx`) and Cabrillo logs with your LoTW certificate, so ARRL's
 [Logbook of The World](https://lotw.arrl.org) (LoTW) accepts them.
 
 - **Memory-safe Rust**, with signatures made by AWS-LC, Amazon's open-source cryptography library.

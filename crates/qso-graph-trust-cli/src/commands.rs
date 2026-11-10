@@ -78,7 +78,7 @@ fn signs_again(a: &SignArgs) -> bool {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Sign an ADIF log for a station location, into a .tq8 for LoTW.
+    /// Sign an ADIF or Cabrillo log for a station location, into a .tq8 for LoTW.
     #[command(
         after_help = "Example:\n  qg-trust sign log.adi -l Home -b 2026-01-01\n\n\
         Every QSO in the log is signed, as it is, including any signed before; -d leaves those \
@@ -88,7 +88,7 @@ enum Command {
     /// Upload a signed log (.tq8) to LoTW.
     #[command(after_help = "Example:\n  qg-trust upload log.tq8")]
     Upload(UploadArgs),
-    /// Sign an ADIF log and upload it to LoTW, in one step.
+    /// Sign an ADIF or Cabrillo log and upload it to LoTW, in one step.
     #[command(after_help = "Example:\n  qg-trust send log.adi -l Home\n\n\
         The signed log is kept beside the log, with .tq8, in case the upload has to be tried again.")]
     Send(SignArgs),
@@ -148,8 +148,8 @@ struct RootRemoveArgs {
 
 #[derive(Debug, Args)]
 struct SignArgs {
-    /// The ADIF log (.adi or .adx).
-    #[arg(value_name = "LOG.adi|adx")]
+    /// The ADIF or Cabrillo log (.adi, .adx, or .log).
+    #[arg(value_name = "LOG.adi|adx|log")]
     log: PathBuf,
     /// The station location to sign for, by name (qg-trust location list).
     #[arg(short = 'l', long, value_name = "NAME")]
@@ -742,6 +742,10 @@ fn sign_inner(a: &SignArgs, env: &mut Env<'_>, test_sign: bool) -> Result<Signed
                 qsos.push(qso);
             }
             Err(e) => {
+                if let Some(err) = record.cabrillo_conversion_error() {
+                    env.message(Tone::Error, format_args!("{err}"));
+                    return Err(Exit::InputError);
+                }
                 if stops_on_refusal(a) {
                     return Err(abort(env, a, i + 1, &e.to_string()));
                 }

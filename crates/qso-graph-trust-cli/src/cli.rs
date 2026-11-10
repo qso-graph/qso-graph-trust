@@ -139,7 +139,7 @@ qg-trust. The last line on standard error is \"Final Status: <name>(<code>)\", f
              your computer's credential store.",
     after_help = AFTER_HELP,
     override_usage = "qg-trust <COMMAND> [ARGS]                      (Commands, below)\n       \
-                      qg-trust [-l <NAME>] [OPTIONS] <LOG.adi|adx>   (for loggers)\n       \
+                      qg-trust [-l <NAME>] [OPTIONS] <LOG.adi|adx|log>   (for loggers)\n       \
                       qg-trust --completions <SHELL>",
     disable_version_flag = true,
     disable_help_flag = true,
@@ -192,8 +192,8 @@ struct Options {
         help_heading = "Signing"
     )]
     output: Option<PathBuf>,
-    /// The ADIF log to sign (.adi or .adx).
-    #[arg(value_name = "LOG.adi|adx")]
+    /// The ADIF or Cabrillo log to sign (.adi, .adx, or .log).
+    #[arg(value_name = "LOG.adi|adx|log")]
     input: Option<PathBuf>,
     /// Upload the signed log to LoTW.
     #[arg(short = 'u', long, help_heading = "Signing")]

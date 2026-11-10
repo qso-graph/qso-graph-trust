@@ -140,6 +140,10 @@ jobs:
         run: cargo test -p qso-graph-trust-custody --release --locked
       # LoTW's tables are generated from ARRL's configuration, never edited by hand, and the crate
       # carries ARRL's terms unchanged.
+      - name: Cabrillo ADIF tables match pinned sources
+        run: uv run --no-project python scripts/gen-cabrillo-tables.py --check
+      - name: Cabrillo offline artifact regressions
+        run: uv run --no-project python scripts/test_cabrillo_differential.py
       - name: LoTW tables match config.xml
         run: python3 scripts/gen-lotw-tables.py --check
       # Each published crate carries the GPL's text and the notices, as the repository has them.
@@ -218,7 +222,7 @@ jobs:
           SECONDS_EACH: ${{ github.event_name == 'schedule' && '600' || '60' }}
         run: |
           for target in $(cargo fuzz list); do
-            case "$target" in adif|adx) len=16384 ;; *) len=65536 ;; esac
+            case "$target" in adif|adx|cabrillo) len=16384 ;; *) len=65536 ;; esac
             cargo fuzz run "$target" -- -max_total_time="$SECONDS_EACH" -max_len="$len" \
               -timeout=20 -rss_limit_mb=4096 -print_final_stats=1
           done

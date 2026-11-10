@@ -1521,6 +1521,30 @@ fn logger_signs_adx_by_content_even_with_adi_extension() {
 }
 
 #[test]
+fn logger_signs_cabrillo_by_content_even_with_adi_extension() {
+    let dir = scratch();
+    let input = dir.join("log.adi");
+    let output = dir.join("log.tq8");
+    std::fs::write(&input, format!("START-OF-LOG: 3.0\nCONTEST: CQ-WW-CW\nQSO: 14000 CW 2026-11-03 1830 {} 599 4 Z0TEST 599 5\nEND-OF-LOG:\n", "KC4QPQ").as_bytes()).expect("test log");
+    let pw = password("KC4QPQ");
+    let ran = qg_trust(
+        &[
+            "-x",
+            "-i",
+            path(&set("standard.tbk")),
+            "-l",
+            "KC4QPQ-HOME",
+            "-o",
+            path(&output),
+            path(&input),
+        ],
+        Some(&pw),
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(!signed(&output).is_empty());
+}
+
+#[test]
 fn test_signing_from_a_backup_writes_the_uncompressed_log() {
     let dir = scratch();
     let output = dir.join("test.tq8");

@@ -5,6 +5,21 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Resolve ARRL 160 Meter received-call positions by a strict majority across the log, allowing short calls through to LoTW validation.
+- Refuse misplaced Cabrillo markers instead of reading an empty ADIF log, and refuse whole Cabrillo logs on QSO conversion failures with physical line numbers.
+- Cite sponsor exchanges for IARU HF, ARRL DX, RTTY Roundup, International Digital, 10 Meter, 160 Meter, and WRTC, including both sides of asymmetric exchanges.
+
+- Give Cabrillo refusals a physical line number and a fixed correction requirement without log content.
+- Enforce a consistent received-call field across unknown-contest QSOs and document WWROF's contest identifier restrictions.
+- Compare Cabrillo differential times at matching UTC precision and classify specification refusals by fixed reason kind in counts-only reports.
+
+### Added
+
+- Read and sign Cabrillo v2 and v3 logs by content, using pinned ADIF 3.1.7 values; refuse ambiguous call guesses and ignore `X-QSO` records.
+- Add Cabrillo fuzzing, custody coverage, and an offline reading and signing differential.
+
 ## [0.1.7] - 2026-11-09
 
 ### Added

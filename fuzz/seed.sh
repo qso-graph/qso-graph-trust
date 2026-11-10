@@ -30,3 +30,5 @@ seed adif "$from"/adif/*.adi "$from"/standard/adif/*.adi "$from"/signing-options
 seed tq6 "$from"/pki/*.tq6 "$from"/tqsl/*/*.tq6 "$from"/standard/certs/*.tq6
 seed p12 "$from"/pki/*.p12 "$from"/roots/*.p12 "$from"/tqsl/*/*.p12
 seed tbk "$from"/standard/standard.tbk
+
+seed cabrillo "$from"/cabrillo/*.log

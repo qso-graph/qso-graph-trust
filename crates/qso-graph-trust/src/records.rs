@@ -54,9 +54,25 @@ impl fmt::Debug for Field {
 pub struct Record {
     /// The fields, in the order written.
     pub(crate) fields: Vec<Field>,
+    /// Physical Cabrillo line, when this record came from Cabrillo.
+    pub(crate) source_line: Option<usize>,
 }
 
 impl Record {
+    /// The one-based physical source line for a Cabrillo QSO; absent for ADIF records.
+    pub fn source_line(&self) -> Option<usize> {
+        self.source_line
+    }
+
+    /// A content-free, line-numbered refusal if a Cabrillo record cannot become a signing QSO.
+    /// Callers must refuse the whole Cabrillo log on conversion failure, before writing output.
+    pub fn cabrillo_conversion_error(&self) -> Option<RecordError> {
+        self.source_line.map(|line| RecordError::Cabrillo {
+            line,
+            problem: CabrilloError::QsoConversion,
+        })
+    }
+
     /// The first field with this name, compared without regard to case, as tqsllib compares them.
     /// The value is returned as the input gave it: parse logs with this, never key material.
     pub fn get(&self, name: &str) -> Option<&[u8]> {
@@ -69,6 +85,160 @@ impl Record {
     /// The first field with this name, as UTF-8 text.
     pub fn text(&self, name: &str) -> Option<&str> {
         self.get(name).and_then(|v| std::str::from_utf8(v).ok())
+    }
+}
+
+/// A fixed Cabrillo refusal reason. Contains positions only, never input text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CabrilloError {
+    /// Input must be at most 67108864 bytes.
+    InputLimit,
+    /// Log must have at most 200020 lines, each at most 65536 bytes.
+    LineLimit,
+    /// Header text must be UTF-8.
+    Encoding,
+    /// END-OF-LOG must be the last nonempty line.
+    AfterEnd,
+    /// Each header or QSO line must have a tag followed by a colon.
+    Separator,
+    /// Tags must contain only ASCII letters, digits, or hyphens, at most 64 bytes.
+    Tag,
+    /// Header values must be at most 65536 bytes.
+    ValueLimit,
+    /// START-OF-LOG must be 2.0 or 3.0 and precede all headers and QSOs.
+    Start,
+    /// START-OF-LOG must appear only once.
+    RepeatedStart,
+    /// END-OF-LOG must have an empty value.
+    End,
+    /// CONTEST must appear once, before every QSO.
+    ContestOrder,
+    /// CONTEST must contain 1 to 32 ASCII letters, digits, or hyphens.
+    Contest,
+    /// QSO must follow CONTEST.
+    BeforeContest,
+    /// Log must contain at most 100010 QSOs.
+    RecordLimit,
+    /// Log must emit at most 2000200 ADIF fields.
+    FieldLimit,
+    /// Log must begin with START-OF-LOG: 2.0 or 3.0.
+    MissingStart,
+    /// Log must have one CONTEST header before its QSOs.
+    MissingContest,
+    /// Log must end with an empty END-OF-LOG:.
+    MissingEnd,
+    /// QSO must have at most 256 fields, each at most 64 bytes.
+    QsoFields,
+    /// QSO must contain frequency, mode, UTC date, UTC time, sent call, and sent and received exchanges.
+    IncompleteQso,
+    /// Received exchange must have one call candidate: letters, digits, or slash, at least four letters or digits including one of each, excluding four-character locators.
+    NoCall,
+    /// Received exchange must have exactly one call candidate; remove ambiguity or use an ADIF Contest_ID with a documented exchange.
+    AmbiguousCall,
+    /// Received-call field must match the guessed ADIF Contest_ID exchange; correct the exchange or supply ADIF.
+    GuessedCall,
+    /// QSO must include the received-call field required by the contest exchange.
+    MissingCall,
+    /// QSO sent and received calls must contain only ASCII letters, digits, or slash.
+    Call,
+    /// QSO date must be a valid UTC YYYY-MM-DD and time must be a valid UTC HHMM.
+    DateTime,
+    /// QSO mode must be one of CW, PH, FM, RY, DG.
+    Mode,
+    /// QSO frequency must be numeric kHz with at most three decimal places, or a WWROF band designator.
+    Frequency,
+    /// QSO frequency must fall within an ADIF 3.1.7 band.
+    Band,
+    /// QSO syntax must be ASCII with space or tab field delimiters.
+    QsoAscii,
+    /// QSO fields must meet LoTW validation under the selected signing options.
+    QsoConversion,
+    /// Unknown contest exchanges place the received call in different fields.
+    DifferentCallField {
+        /// The first QSO's one-based physical line.
+        first_line: usize,
+        /// The conflicting QSO's one-based physical line.
+        other_line: usize,
+    },
+}
+
+impl CabrilloError {
+    /// Stable, content-free reason kind for offline differential classification.
+    pub fn kind(self) -> &'static str {
+        match self {
+            Self::InputLimit => "input_limit",
+            Self::LineLimit => "line_limit",
+            Self::Encoding => "encoding",
+            Self::AfterEnd => "after_end",
+            Self::Separator => "separator",
+            Self::Tag => "tag",
+            Self::ValueLimit => "value_limit",
+            Self::Start => "start",
+            Self::RepeatedStart => "repeated_start",
+            Self::End => "end",
+            Self::ContestOrder => "contest_order",
+            Self::Contest => "contest",
+            Self::BeforeContest => "before_contest",
+            Self::RecordLimit => "record_limit",
+            Self::FieldLimit => "field_limit",
+            Self::MissingStart => "missing_start",
+            Self::MissingContest => "missing_contest",
+            Self::MissingEnd => "missing_end",
+            Self::QsoFields => "qso_fields",
+            Self::IncompleteQso => "incomplete_qso",
+            Self::NoCall => "no_received_call",
+            Self::AmbiguousCall => "ambiguous_received_call",
+            Self::GuessedCall => "guessed_exchange",
+            Self::MissingCall => "missing_received_call",
+            Self::Call => "call_syntax",
+            Self::DateTime => "date_time",
+            Self::Mode => "mode",
+            Self::Frequency => "frequency",
+            Self::Band => "band",
+            Self::QsoAscii => "qso_ascii",
+            Self::QsoConversion => "qso_conversion",
+            Self::DifferentCallField { .. } => "different_received_call_field",
+        }
+    }
+}
+
+impl fmt::Display for CabrilloError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InputLimit => f.write_str("input must be at most 67108864 bytes"),
+            Self::LineLimit => f.write_str("log must have at most 200020 lines, each at most 65536 bytes"),
+            Self::Encoding => f.write_str("header text must be UTF-8"),
+            Self::AfterEnd => f.write_str("END-OF-LOG must be the last nonempty line"),
+            Self::Separator => f.write_str("each header or QSO line must have a tag followed by a colon"),
+            Self::Tag => f.write_str("tags must contain only ASCII letters, digits, or hyphens, at most 64 bytes"),
+            Self::ValueLimit => f.write_str("header values must be at most 65536 bytes"),
+            Self::Start => f.write_str("START-OF-LOG must be 2.0 or 3.0 and precede all headers and QSOs"),
+            Self::RepeatedStart => f.write_str("START-OF-LOG must appear only once"),
+            Self::End => f.write_str("END-OF-LOG must have an empty value"),
+            Self::ContestOrder => f.write_str("CONTEST must appear once, before every QSO"),
+            Self::Contest => f.write_str("CONTEST must contain 1 to 32 ASCII letters, digits, or hyphens"),
+            Self::BeforeContest => f.write_str("QSO must follow CONTEST"),
+            Self::RecordLimit => f.write_str("log must contain at most 100010 QSOs"),
+            Self::FieldLimit => f.write_str("log must emit at most 2000200 ADIF fields"),
+            Self::MissingStart => f.write_str("log must begin with START-OF-LOG: 2.0 or 3.0"),
+            Self::MissingContest => f.write_str("log must have one CONTEST header before its QSOs"),
+            Self::MissingEnd => f.write_str("log must end with an empty END-OF-LOG:"),
+            Self::QsoFields => f.write_str("QSO must have at most 256 fields, each at most 64 bytes"),
+            Self::IncompleteQso => f.write_str("QSO must contain frequency, mode, UTC date, UTC time, sent call, and sent and received exchanges"),
+            Self::NoCall => f.write_str("received exchange must have one call candidate: letters, digits, or slash, at least four letters or digits including one of each, excluding four-character locators"),
+            Self::AmbiguousCall => f.write_str("received exchange must have exactly one call candidate; remove ambiguity or use an ADIF Contest_ID with a documented exchange"),
+            Self::GuessedCall => f.write_str("received-call field must match the guessed ADIF Contest_ID exchange; correct the exchange or supply ADIF"),
+            Self::MissingCall => f.write_str("QSO must include the received-call field required by the contest exchange"),
+            Self::Call => f.write_str("QSO sent and received calls must contain only ASCII letters, digits, or slash"),
+            Self::DateTime => f.write_str("QSO date must be a valid UTC YYYY-MM-DD and time must be a valid UTC HHMM"),
+            Self::Mode => f.write_str("QSO mode must be one of CW, PH, FM, RY, DG"),
+            Self::Frequency => f.write_str("QSO frequency must be numeric kHz with at most three decimal places, or a WWROF band designator"),
+            Self::Band => f.write_str("QSO frequency must fall within an ADIF 3.1.7 band"),
+            Self::QsoConversion => f.write_str("QSO must meet LoTW call, band, mode, date, time, and frequency requirements under the selected signing options; a received amateur call must have 3 to 20 letters, digits, or slashes, a letter and a digit, no leading or trailing slash, and no 0, Q, or unassigned 1 prefix"),
+            Self::QsoAscii => f.write_str("QSO syntax must be ASCII with space or tab field delimiters"),
+            Self::DifferentCallField { first_line, other_line } => write!(f,
+                "CONTEST is not in ADIF 3.1.7's Contest_ID list and no single received-call field fits every QSO (lines {first_line} and {other_line} differ); correct the exchanges or supply ADIF"),
+        }
     }
 }
 
@@ -105,6 +275,13 @@ pub enum RecordError {
     Unterminated,
     /// An ADX document could not be read.
     Adx(&'static str),
+    /// A Cabrillo log could not be read.
+    Cabrillo {
+        /// One-based physical line, including blank lines and counting CRLF once.
+        line: usize,
+        /// Fixed requirement and, when needed, related QSO line numbers.
+        problem: CabrilloError,
+    },
 }
 
 impl fmt::Display for RecordError {
@@ -119,21 +296,29 @@ impl fmt::Display for RecordError {
             }
             Self::Unterminated => write!(f, "the last record has no <eor>"),
             Self::Adx(problem) => write!(f, "ADX: {problem}"),
+            Self::Cabrillo { line, problem } => write!(f, "line {line}: {problem}"),
         }
     }
 }
 
 impl std::error::Error for RecordError {}
 
-/// Every record in `input`, detected by content as ADX or ADI after an optional UTF-8 BOM and
-/// whitespace. An ADX claim that fails is not retried as ADI. In ADI, text outside fields is
+/// Every record in `input`, detected by content as Cabrillo, ADX, or ADI after an optional UTF-8 BOM and
+/// whitespace. An ADX or Cabrillo claim that fails is not retried as ADI. In ADI, text outside fields is
 /// ignored and `<eoh>` ends a header whose fields are dropped; fields after the last `<eor>` are an
 /// error. ADX headers are discarded as well.
 pub fn parse(input: &[u8]) -> Result<Vec<Record>, RecordError> {
-    let content = input.strip_prefix(b"\xef\xbb\xbf").unwrap_or(input);
+    let input_start = input.trim_ascii_start();
+    let content = input_start
+        .strip_prefix(b"\xef\xbb\xbf")
+        .unwrap_or(input_start);
     let content = content.trim_ascii_start();
     if content.starts_with(b"<?xml") || content.starts_with(b"<ADX") {
         return crate::adx::parse(content);
+    }
+    // Explicit ADIF markup takes precedence over marker text inside an ADIF field value.
+    if !content.starts_with(b"<") && crate::cabrillo::claims(content) {
+        return crate::cabrillo::parse(input);
     }
     parse_adi(input)
 }
