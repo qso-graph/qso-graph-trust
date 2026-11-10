@@ -7,6 +7,7 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A `.tq6`, `.tbk` or certificate with a truncated PEM body no longer hangs: `der` 0.7.10's streaming PEM reader never returned on such a body (a five-character `MIID`), which a crafted file could use to hang an import once its root was accepted. PEM is now decoded whole and the DER parsed after, and the inputs the fuzzer found are kept as seeds.
 - Resolve ARRL 160 Meter received-call positions by a strict majority across the log, allowing short calls through to LoTW validation.
 - Refuse misplaced Cabrillo markers instead of reading an empty ADIF log, and refuse whole Cabrillo logs on QSO conversion failures with physical line numbers.
 - Cite sponsor exchanges for IARU HF, ARRL DX, RTTY Roundup, International Digital, 10 Meter, 160 Meter, and WRTC, including both sides of asymmetric exchanges.

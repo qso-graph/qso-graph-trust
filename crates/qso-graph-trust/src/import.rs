@@ -23,7 +23,7 @@ use crate::signing::KeyError;
 use crate::store::StoreError;
 use crate::xml;
 use std::fmt;
-use x509_cert::der::{Decode, DecodePem, Encode};
+use x509_cert::der::{Decode, Encode};
 
 /// Maximum input and decompressed certificate-file size (4 MiB).
 pub const MAX_IMPORT_LEN: usize = 4 * 1024 * 1024;
@@ -243,8 +243,9 @@ pub(crate) fn tq6_contents(bytes: &[u8]) -> Result<CertificateContents, ImportEr
         if pem.len() > MAX_CERTIFICATE_LEN {
             return Err(ImportError::Limit);
         }
-        let der = x509_cert::Certificate::from_pem(pem.trim().as_bytes())
-            .and_then(|c| c.to_der())
+        let der = crate::certificate::x509_from_pem(pem.trim().as_bytes())
+            .map_err(|_| ImportError::Malformed)?
+            .to_der()
             .map_err(|_| ImportError::Malformed)?;
         match entry.name {
             "usercert" => users.push(der),
