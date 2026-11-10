@@ -3,6 +3,12 @@
 All notable changes to QSO Graph Trust. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `qg-trust location tqsl` lists TQSL's own station locations as new, the same, different or refused, and adds the new ones you choose. TQSL's files are only read, never changed, and a stored location is never overwritten. The library reads them through `tqsl_locations`.
+
 ## [0.1.8] - 2026-11-10
 
 ### Fixed

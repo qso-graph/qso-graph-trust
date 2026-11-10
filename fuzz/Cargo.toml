@@ -64,3 +64,10 @@ path = "fuzz_targets/cabrillo.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "station_data"
+path = "fuzz_targets/station_data.rs"
+test = false
+doc = false
+bench = false

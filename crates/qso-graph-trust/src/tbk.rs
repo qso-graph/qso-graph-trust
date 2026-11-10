@@ -543,6 +543,12 @@ fn read_key(text: &str, callsign: &str) -> Result<KeyEntry, TbkError> {
     Ok(keys.remove(0))
 }
 
+pub(crate) fn location_name(name: Option<&str>, trim: bool) -> Option<String> {
+    name.map(|name| if trim { name.trim() } else { name })
+        .filter(|name| !name.trim().is_empty() && name.len() <= MAX_NAME_LEN)
+        .map(str::to_owned)
+}
+
 fn read_locations(section: &Element, backup: &mut Backup) -> Result<(), TbkError> {
     for entry in &section.children {
         if entry.name != "Location" {
@@ -551,10 +557,7 @@ fn read_locations(section: &Element, backup: &mut Backup) -> Result<(), TbkError
         if backup.locations.len() == MAX_LOCATIONS {
             return Err(TbkError::TooMany("station locations"));
         }
-        let name = entry
-            .attribute("name")
-            .map(|n| n.trim().to_string())
-            .filter(|n| !n.is_empty() && n.len() <= MAX_NAME_LEN)
+        let name = location_name(entry.attribute("name").as_deref().map(String::as_str), true)
             .ok_or_else(|| malformed("station location's name"))?;
         if backup.locations.iter().any(|l| l.name == name) {
             return Err(TbkError::RepeatedLocation { name });

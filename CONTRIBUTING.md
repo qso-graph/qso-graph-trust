@@ -38,7 +38,7 @@ when you run cargo there:
 cargo install cargo-fuzz --version 0.13.2 --locked
 fuzz/seed.sh                      # seeds fuzz/corpus/<target>/ from tests/corpus
 cd fuzz
-cargo fuzz list                   # adif, tq6, p12, tbk
+cargo fuzz list                   # adif, adx, cabrillo, tq6, p12, tbk, station_data
 cargo fuzz run adif -- -max_total_time=300 -max_len=16384 -timeout=20
 ```
 

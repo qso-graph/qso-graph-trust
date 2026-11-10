@@ -2207,3 +2207,101 @@ fn clearing_signed_records_needs_approval_or_yes() {
         assert_eq!(ham.run(&sign).code, 0);
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn tqsl_locations_are_read_only_and_only_new_names_are_added() {
+    use std::os::unix::fs::PermissionsExt;
+    let ham = Ham::new();
+    let folder = scratch().join(format!(
+        "tqsl-{}",
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir(&folder).expect("folder");
+    let data = b"<StationDataFile><StationData name='home'><CALL>QG0TEST</CALL><DXCC>291</DXCC><GRIDSQUARE>EM17</GRIDSQUARE></StationData><StationData name='away'><CALL>QG0TEST</CALL><DXCC>291</DXCC></StationData></StationDataFile>";
+    std::fs::write(folder.join("station_data"), data).expect("data");
+    let mut planted_times = Vec::new();
+    for name in ["keys", "certs"] {
+        let dir = folder.join(name);
+        std::fs::create_dir(&dir).expect("dir");
+        std::fs::write(dir.join("planted"), b"do not read").expect("file");
+        planted_times.push(
+            std::fs::metadata(dir.join("planted"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+        );
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o0)).expect("mode");
+    }
+    let before = std::fs::metadata(folder.join("station_data"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).expect("mode");
+    let folder_arg = path(&folder);
+    let listed = ham.run(&["location", "tqsl", "--folder", folder_arg, "--json"]);
+    assert_eq!(listed.code, 0, "{}", listed.err);
+    assert!(listed.out.contains("\"status\":\"new\""));
+    let added = ham.run(&["location", "tqsl", "--folder", folder_arg, "--add", "home"]);
+    assert_eq!(added.code, 0, "{}", added.err);
+    assert_ne!(
+        ham.run(&["location", "tqsl", "--folder", folder_arg, "--add", "home"])
+            .code,
+        0
+    );
+    let changed = qso_graph_trust::station::StationLocation::new(&[
+        ("CALL", "QG0TEST"),
+        ("DXCC", "291"),
+        ("GRIDSQUARE", "EM18"),
+    ])
+    .unwrap();
+    ham.store.replace_location("home", &changed).unwrap();
+    let diff = ham.run(&["location", "tqsl", "--folder", folder_arg, "--all"]);
+    assert_eq!(diff.code, 0, "{}", diff.err);
+    assert!(diff.out.contains("differs") && diff.out.contains("EM17") && diff.out.contains("EM18"));
+    assert_eq!(
+        ham.store
+            .locations()
+            .unwrap()
+            .iter()
+            .find(|l| l.name == "home")
+            .unwrap()
+            .station,
+        changed
+    );
+    assert_eq!(ham.store.locations().unwrap().len(), 2);
+    assert_eq!(std::fs::read(folder.join("station_data")).unwrap(), data);
+    assert_eq!(
+        std::fs::metadata(folder.join("station_data"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        before
+    );
+    assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 3);
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+    for (name, modified) in ["keys", "certs"].into_iter().zip(planted_times) {
+        let dir = folder.join(name);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(std::fs::read(dir.join("planted")).unwrap(), b"do not read");
+        assert_eq!(
+            std::fs::metadata(dir.join("planted"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            modified
+        );
+        assert_eq!(std::fs::read_dir(dir).unwrap().count(), 1);
+    }
+    let missing = ham.run(&[
+        "location",
+        "tqsl",
+        "--folder",
+        path(&folder.join("missing")),
+    ]);
+    assert_eq!(missing.code, 0);
+    assert!(missing.out.contains("TQSL has no station locations here"));
+}
