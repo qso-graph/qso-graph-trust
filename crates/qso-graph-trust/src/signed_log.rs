@@ -62,7 +62,7 @@ pub enum LogError {
     Empty,
     /// The signing itself failed.
     Signing,
-    /// A location resulting from the log is invalid.
+    /// A location resulting from the log is invalid. [`Self::adif_field`] identifies its ADIF field.
     Location {
         /// QSO's zero-based input index.
         index: usize,
@@ -112,6 +112,44 @@ impl fmt::Display for LogError {
 }
 
 impl std::error::Error for LogError {}
+
+impl LogError {
+    /// The ADIF station field responsible for a per-QSO station refusal. Available for every
+    /// error returned by [`SigningOptions::station_refusals`], including invalid location values.
+    /// Errors unrelated to station fields return `None`.
+    pub fn adif_field(&self) -> Option<&'static str> {
+        match self {
+            Self::QsoFromAnotherStation { field, .. } => Some(field),
+            Self::Location { error, .. } => {
+                use crate::station::StationError;
+                let field = match error {
+                    StationError::Invalid { field, .. } | StationError::Missing(field) => *field,
+                    StationError::NotAField(field) | StationError::Repeated(field) => {
+                        field.as_str()
+                    }
+                    StationError::TooManyFields => return None,
+                };
+                match field {
+                    "CALL" => Some("STATION_CALLSIGN"),
+                    "DXCC" => Some("MY_DXCC"),
+                    "GRIDSQUARE" => Some("MY_GRIDSQUARE"),
+                    "ITUZ" => Some("MY_ITU_ZONE"),
+                    "CQZ" => Some("MY_CQ_ZONE"),
+                    "IOTA" => Some("MY_IOTA"),
+                    "US_STATE" | "CA_PROVINCE" | "RU_OBLAST" | "CN_PROVINCE" | "AU_STATE"
+                    | "JA_PREFECTURE" | "FI_KUNTA" => Some("MY_STATE"),
+                    "US_COUNTY" | "JA_CITY_GUN_KU" => Some("MY_CNTY"),
+                    "MY_STATE" => Some("MY_STATE"),
+                    "MY_VUCC_GRIDS" => Some("MY_VUCC_GRIDS"),
+                    "MY_ITU_ZONE" => Some("MY_ITU_ZONE"),
+                    "MY_CQ_ZONE" => Some("MY_CQ_ZONE"),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+}
 
 /// The log, signed, as the bytes of a `.tq7`.
 pub fn sign_log(

@@ -1159,13 +1159,9 @@ fn certificate_for<'a>(
         .max_by_key(|c| c.certificate.as_ref().map(|cert| cert.validity().1))
 }
 
-/// A file read whole, refused past `limit` before it is read.
+/// Read a regular file with bounded actual I/O, refusing special files without waiting on Unix.
 pub(crate) fn read_file(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
-    let len = std::fs::metadata(path)?.len();
-    if usize::try_from(len).map_or(true, |l| l > limit) {
-        return Err(io::Error::other("larger than any file qg-trust reads"));
-    }
-    std::fs::read(path)
+    qso_graph_trust::files::read_regular_file(path, limit)
 }
 
 pub(crate) fn test_sign_message(env: &mut Env<'_>) {

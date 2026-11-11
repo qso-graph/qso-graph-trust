@@ -45,7 +45,7 @@ use keys::{KeyStore, MemoryKeyStore, OsKeyStore};
 
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use crate::certificate::Certificate;
@@ -753,21 +753,17 @@ impl Store {
 }
 
 /// Read and check `store.xml` at `path`: the one reader, for [`Store`] and [`Listing`]. An absent
-/// file is an empty store. It opens the file read-only and creates nothing.
+/// file is an empty store. It opens the file read-only and creates nothing. Special files are
+/// refused without blocking on Unix, and both metadata and actual reads enforce the byte limit.
 fn read_file(path: &Path) -> Result<Data, StoreError> {
-    let file = match File::open(path) {
-        Ok(file) => file,
+    let bytes = match crate::files::read_regular_file(path, MAX_FILE_LEN) {
+        Ok(bytes) => bytes,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Data::default()),
+        Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+            return Err(StoreError::Limit("file bytes"));
+        }
         Err(e) => return Err(e.into()),
     };
-    if file.metadata()?.len() > MAX_FILE_LEN as u64 {
-        return Err(StoreError::Limit("file bytes"));
-    }
-    let mut bytes = Vec::new();
-    file.take(MAX_FILE_LEN as u64 + 1).read_to_end(&mut bytes)?;
-    if bytes.len() > MAX_FILE_LEN {
-        return Err(StoreError::Limit("file bytes"));
-    }
     format::read(std::str::from_utf8(&bytes).map_err(|_| StoreError::Invalid("not UTF-8"))?)
 }
 

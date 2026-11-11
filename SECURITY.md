@@ -44,7 +44,21 @@ being true.
   run under cargo-fuzz and libFuzzer in CI, for a minute each on every pull request and ten minutes
   each every week, checking that nothing panics and that no record the library refuses is ever signed
   (decision 0012). Every reader caps each length, count and depth before allocating, and input past a
-  limit is refused, never cut short. A crash found becomes a regression test.
+  limit is refused, never cut short. File-path readers share one regular-file check: on Unix they
+  open nonblocking before checking the opened handle, so a named pipe needs no writer and is
+  refused without waiting. Metadata and actual reads both enforce the byte limit, including file
+  growth during reading. This covers TQSL's `station_data`, QGT's `store.xml`, and every CLI input
+  read (logs, signed logs, certificates, and backups). XML declarations require XML 1.0 and UTF-8;
+  malformed comments and forbidden character-data delimiters are refused by every XML reader.
+  Review inputs become permanent regressions and reproducible fuzz seeds.
+- **Exact station signing preserves the selected location.** When the caller selects
+  `SigningOptions::with_exact_station(true)` for conversion and signing, each QSO's named station
+  fields must agree with that location. Empty station fields are never filled from the log; VUCC
+  lists compare as sets on every QSO, including the first. Every accepted QSO signs with the input
+  station unchanged. The default retains TQSL-compatible station handling (decision 0018).
+- **Signed-log upload checks require signatures.** Each signature must be nonempty base64 decoding
+  to exactly the RSA modulus length of the certificate its station references. This is an encoding
+  and structure check, not cryptographic signature verification or certificate-chain validation.
 - **Memory-safe Rust.** The library, the command line and the custody test are `#![forbid(unsafe_code)]`.
   Signatures and certificate checks are made by AWS-LC, Amazon's open-source cryptography library,
   through one small crate, `qso-graph-trust-awslc`, whose every call into AWS-LC is checked and

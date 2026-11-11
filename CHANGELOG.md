@@ -3,6 +3,35 @@
 All notable changes to QSO Graph Trust. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Choose exact station signing with `SigningOptions::with_exact_station(true)`. Every station
+  field named by a QSO must agree with the selected location, including fields the location leaves
+  empty. Grid lists are checked on every QSO, and the station stays unchanged throughout the log.
+  A `MY_STATE` or `MY_CNTY` for an entity where LoTW has no such field is left out, as TQSL does.
+- `LogError::adif_field` identifies the ADIF field for every station refusal, including invalid
+  location values, so applications can show the field alongside the QSO's position.
+
+### Fixed
+
+- Removing refused QSOs no longer changes which accepted QSO receives the first-QSO VUCC handling
+  in TQSL-compatible station checking.
+- Refuse named pipes and other special files when reading station locations, the public store,
+  logs, imports, or other CLI inputs. Unix readers open without waiting for a pipe writer, check
+  the opened file, and cap actual reads even if the file grows after its size is checked.
+- Refuse empty or malformed base64 signatures and signatures whose decoded length differs from
+  the signing certificate's RSA modulus when checking a signed log for upload.
+- Apply XML 1.0 declaration, comment, and character-data checks consistently to certificate files,
+  backups, station locations, the public store, and ADX logs.
+
+### Changed
+
+- This change requires version 0.2.0: adding the exact station setting breaks exhaustive
+  `SigningOptions` struct literals. Use the default with the builder, or add
+  `exact_station: false` to an existing exhaustive literal. `QthHandling` is unchanged.
+
 ## [0.1.9] - 2026-11-10
 
 ### Added

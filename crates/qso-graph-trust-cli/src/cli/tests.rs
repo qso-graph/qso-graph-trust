@@ -1577,3 +1577,62 @@ fn test_signing_from_a_backup_writes_the_uncompressed_log() {
             .contains("these QSOs were not recorded as signed")
     );
 }
+
+#[test]
+fn review_cli_read_file_enforces_the_actual_limit() {
+    let path = std::env::temp_dir().join(format!("qgt-cli-read-limit-{}", std::process::id()));
+    std::fs::write(&path, [b'x'; 2048]).unwrap();
+    assert!(super::read_file(&path, 1024).is_err());
+    assert_eq!(super::read_file(&path, 2048).unwrap().len(), 2048);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn review_cli_fifo_reader_child() {
+    if let Some(path) = std::env::var_os("QGT_REVIEW_CLI_FIFO") {
+        assert!(super::read_file(std::path::Path::new(&path), 1024).is_err());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn review_cli_read_file_refuses_a_fifo_without_waiting() {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    let path = std::env::temp_dir().join(format!("qgt-cli-fifo-{}", std::process::id()));
+    assert!(
+        Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "cli::tests::review_cli_fifo_reader_child",
+            "--nocapture",
+        ])
+        .env("QGT_REVIEW_CLI_FIFO", &path)
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break Some(status);
+        }
+        if start.elapsed() > Duration::from_secs(10) {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    std::fs::remove_file(path).unwrap();
+    assert!(
+        status.is_some_and(|s| s.success()),
+        "CLI reader blocked or accepted a FIFO"
+    );
+}
