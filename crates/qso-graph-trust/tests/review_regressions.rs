@@ -181,7 +181,11 @@ mod tests {
         assert!(Certificate::from_pem_or_der(b"bad DER").is_err());
         assert!(Certificate::from_pem_or_der(&vec![0; 16385]).is_err());
         assert!(store.inspect_tq6(b"<bad>", &trust).is_err());
-        assert!(store.inspect_pkcs12(b"bad p12", b"", &trust).is_err());
+        assert!(
+            store
+                .inspect_pkcs12(b"bad p12", &corpus("pki/p12-password"), &trust)
+                .is_err()
+        );
         assert!(tbk::read(b"<bad>", &trust).is_err());
         assert!(tqsl_locations::parse(b"<bad>").is_err());
         assert!(records::parse(b"<CALL:99999999999999>x<eor>").is_err());
