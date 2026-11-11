@@ -185,6 +185,7 @@ pub fn signer() -> &'static Signer {
 pub fn options_for(data: &[u8]) -> SigningOptions {
     let n = data.len();
     SigningOptions {
+        exact_station: n & 32 != 0,
         adif_modes: Vec::new(),
         ignore_seconds: n & 1 != 0,
         allow_bad_calls: n & 2 != 0,

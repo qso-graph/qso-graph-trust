@@ -4,7 +4,9 @@
 //! A reader for the XML TQSL writes, and nothing more: elements, attributes, text, comments and an
 //! XML declaration. A DTD, CDATA, processing instructions after the declaration, and any entity but
 //! XML's five and character references are refused, so nothing can expand; so is any character XML
-//! does not allow. Text and attribute values are normalized as XML says: line ends become `\n`, and
+//! does not allow. Declarations follow XML 1.0 with UTF-8 encoding; comments cannot contain `--`
+//! or end in `-`, and character data cannot contain `]]>`. Text and attribute values are normalized
+//! as XML says: line ends become `\n`, and
 //! in an attribute each literal tab or line end becomes a space.
 //!
 //! It reads untrusted input that can hold private keys, so it is bounded as it goes, never after:
@@ -266,6 +268,62 @@ impl<'a> Reader<'a> {
         self.at += len;
         Ok(&rest[..len])
     }
+
+    /// XML 1.0 sections 2.8 and 4.3.3: ordered, quoted pseudo-attributes, without references.
+    /// This reader accepts UTF-8 only, and never allocates declaration-sized buffers.
+    fn declaration(&mut self) -> Result<(), XmlError> {
+        if self.rest().find("?>").is_some_and(|end| end > 64 * 1024) {
+            return Err(self.error("the XML declaration is too long"));
+        }
+        self.at += 5; // <?xml
+        let mut version = false;
+        let mut encoding = false;
+        let mut standalone = false;
+        loop {
+            let before = self.at;
+            self.skip_space();
+            if self.rest().starts_with("?>") && version {
+                self.at += 2;
+                return Ok(());
+            }
+            if before == self.at {
+                return Err(self.error("invalid XML declaration"));
+            }
+            let name = self
+                .name()
+                .map_err(|_| self.error("invalid XML declaration"))?;
+            self.skip_space();
+            if !self.rest().starts_with('=') {
+                return Err(self.error("invalid XML declaration"));
+            }
+            self.at += 1;
+            self.skip_space();
+            let quote = match self.rest().chars().next() {
+                Some(q @ ('\'' | '"')) => q,
+                _ => return Err(self.error("invalid XML declaration")),
+            };
+            self.at += 1;
+            let value = self.past(
+                if quote == '"' { "\"" } else { "'" },
+                "the XML declaration does not end",
+            )?;
+            match name {
+                "version" if !version && value == "1.0" => version = true,
+                "encoding"
+                    if version
+                        && !encoding
+                        && !standalone
+                        && value.eq_ignore_ascii_case("UTF-8") =>
+                {
+                    encoding = true
+                }
+                "standalone" if version && !standalone && matches!(value, "yes" | "no") => {
+                    standalone = true
+                }
+                _ => return Err(self.error("invalid XML declaration")),
+            }
+        }
+    }
 }
 
 /// The root element of an XML document.
@@ -306,7 +364,7 @@ pub(crate) fn parse_with_processing_instructions<'a>(
     if r.rest().starts_with("<?xml")
         && (!allow_pi || r.rest()[5..].starts_with([' ', '\t', '\r', '\n', '?']))
     {
-        r.past("?>", "the XML declaration does not end")?;
+        r.declaration()?;
     }
     // Open elements, innermost last; the root is taken out when it closes.
     let mut open: Vec<Element> = Vec::new();
@@ -317,6 +375,9 @@ pub(crate) fn parse_with_processing_instructions<'a>(
         // Text up to the next tag: kept only inside an element.
         let text_end = r.rest().find('<').unwrap_or(r.rest().len());
         let text = &r.rest()[..text_end];
+        if text.contains("]]>") {
+            return Err(r.error("invalid XML character data"));
+        }
         if !text.is_empty() {
             match open.last_mut() {
                 Some(parent) => {
@@ -348,7 +409,10 @@ pub(crate) fn parse_with_processing_instructions<'a>(
         let rest = r.rest();
         if rest.starts_with("<!--") {
             r.at += 4;
-            r.past("-->", "a comment does not end")?;
+            let comment = r.past("-->", "a comment does not end")?;
+            if comment.contains("--") || comment.ends_with('-') {
+                return Err(r.error("invalid XML comment"));
+            }
         } else if rest.starts_with("<!") {
             return Err(r.error("a DTD or CDATA, which TQSL does not write"));
         } else if rest.starts_with("<?") {
@@ -669,5 +733,71 @@ mod tests {
             "too many elements"
         );
         assert!(parse_with_limits("<a><b/><c/></a>", &limits).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod review_tests {
+    use super::parse;
+
+    #[test]
+    fn declarations_follow_xml_10_pseudo_attribute_grammar() {
+        for declaration in [
+            "<?xml nonsense?>",
+            "<?xml?>",
+            "<?xml version='1.0' nonsense='x'?>",
+            "<?xml version='1.0' version='1.0'?>",
+            "<?xml encoding='UTF-8' version='1.0'?>",
+            "<?xml version='1.0' standalone='yes' encoding='UTF-8'?>",
+            "<?xml version='1.0'encoding='UTF-8'?>",
+            "<?xml version=1.0?>",
+            "<?xml version='1.0' standalone='YES'?>",
+            "<?xml version='1.0' encoding='UTF-16'?>",
+            "<?xml version='1.&#48;'?>",
+            "<?xml version='1.0' encoding='UTF&#45;8'?>",
+            "<?xml version='1.0' standalone='y&#101;s'?>",
+            "<?xml version='1.1'?>",
+            " <?xml version='1.0'?>",
+            "<!-- ok --><?xml version='1.0'?>",
+        ] {
+            assert!(
+                parse(&format!("{declaration}<A/>")).is_err(),
+                "{declaration}"
+            );
+        }
+        for declaration in [
+            "<?xml version='1.0'?>",
+            "\u{feff}<?xml\nversion = \"1.0\" encoding='utf-8' standalone = 'no' ?>",
+            "<?xml version='1.0' standalone='yes'?>",
+        ] {
+            assert!(
+                parse(&format!("{declaration}<A/>")).is_ok(),
+                "{declaration}"
+            );
+        }
+    }
+
+    #[test]
+    fn comments_and_character_data_follow_xml_10_grammar() {
+        for bad in ["<!-- bad -- comment -->", "<!-- bad --->", "<!-- -- -->"] {
+            for input in [
+                format!("{bad}<A/>"),
+                format!("<A>{bad}</A>"),
+                format!("<A/>{bad}"),
+            ] {
+                assert!(parse(&input).is_err(), "{input}");
+            }
+        }
+        for good in [
+            "<!---->",
+            "<!---good-->",
+            "<!-- good-comment -->",
+            "<!-- ]]> -->",
+        ] {
+            assert!(parse(&format!("<A>{good}</A>")).is_ok(), "{good}");
+        }
+        assert!(parse("<A>forbidden ]]></A>").is_err());
+        assert!(parse("<A>escaped ]]&gt;</A>").is_ok());
+        assert!(parse("<A attr=']]>'/>").is_ok());
     }
 }

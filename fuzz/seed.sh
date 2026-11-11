@@ -33,3 +33,26 @@ seed tbk "$from"/standard/standard.tbk
 
 seed cabrillo "$from"/cabrillo/*.log
 seed station_data "$from"/standard/tqsl/station_data "$from"/tqsl/1024/tqsl/station_data "$from"/tqsl/1024-password/tqsl/station_data
+
+# Keep the verification review's malformed declarations and comments reachable in every XML
+# format. Strip only the leading declaration from these known synthetic/corpus controls.
+xml_regressions() { # xml_regressions <target> <plain XML control>
+  target=$1
+  control=$2
+  for defect in declaration comment comment-ending declaration-reference; do
+    {
+      case "$defect" in
+        declaration) printf '%s' '<?xml nonsense?>' ;;
+        comment) printf '%s' '<!-- forbidden -- comment -->' ;;
+        comment-ending) printf '%s' '<!-- bad --->' ;;
+        declaration-reference) printf '%s' '<?xml version="1.&#48;"?>' ;;
+      esac
+      sed '1s/^<?xml[^?]*?>//' "$control"
+    } >"$to/$target/review-$defect.xml"
+  done
+}
+xml_regressions adx "$to/adx/synthetic.adx"
+xml_regressions tq6 "$to/tq6/tqsl_1024_QG0TEST.tq6.xml"
+xml_regressions tbk "$to/tbk/standard_standard.tbk.xml"
+xml_regressions station_data "$to/station_data/standard_tqsl_station_data"
+printf '%s' '<ADX><HEADER/><RECORDS><RECORD><CALL>Z0TEST]]></CALL></RECORD></RECORDS></ADX>' >"$to/adx/review-character-data.xml"

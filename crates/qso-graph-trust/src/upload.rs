@@ -17,6 +17,7 @@
 //! `config.xml` (`providers/provider/url`) is not the upload endpoint. QGT fixes the endpoint
 //! here; neither an imported backup nor a caller can override it on a request.
 
+use base64ct::{Base64, Encoding};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use qso_graph_trust_awslc::{Error, random};
@@ -52,7 +53,10 @@ pub const MAX_SIGNED_LOG_BYTES: usize = 64 * 1024 * 1024;
 /// TQSL write one: gzip of a `TQSL_IDENT` line, then `tCERT`, `tSTATION` and `tCONTACT` records
 /// only, each of only the fields its kind has, with nothing between them but white space; at least
 /// one QSO; every certificate an X.509 certificate; every other value printable text within its
-/// bound and every signature the size a LoTW key makes. A TQSL backup (gzip too, holding private
+/// bound and every signature nonempty base64 decoding to exactly its signing certificate's RSA
+/// modulus length, reached through the contact's station and certificate identifiers. This checks
+/// signature encoding and length, not cryptographic validity or certificate trust.
+/// A TQSL backup (gzip too, holding private
 /// keys) or any other file is refused. [`UploadRequest`] does not check its input; call this first,
 /// and upload what it returns: the checked log, gzipped afresh, so nothing the check did not read
 /// (gzip's name, comment and extra fields, or data after the stream) can be sent with it.
@@ -64,7 +68,8 @@ pub fn check_signed_log(tq8: &[u8]) -> Result<Vec<u8>, NotASignedLog> {
         Some(Token::Field("TQSL_IDENT", v)) if printable(v, 256) => {}
         _ => return Err(NotASignedLog),
     }
-    let (mut certs, mut contacts) = (0usize, 0usize);
+    let mut contacts = 0usize;
+    let mut certs = std::collections::HashMap::new();
     let mut stations: std::collections::HashMap<&[u8], Record<'_>> = Default::default();
     let mut record: Option<(Kind, Record<'_>)> = None;
     while let Some(token) = fields.next()? {
@@ -91,8 +96,13 @@ pub fn check_signed_log(tq8: &[u8]) -> Result<Vec<u8>, NotASignedLog> {
                 let get = |n: &str| got.iter().find(|(f, _)| *f == n).map(|(_, v)| *v);
                 match kind {
                     Kind::Cert => {
-                        get("CERTIFICATE").ok_or(NotASignedLog)?;
-                        certs += 1;
+                        let uid = get("CERT_UID")
+                            .filter(|v| !v.is_empty())
+                            .ok_or(NotASignedLog)?;
+                        let len = rsa_signature_len(get("CERTIFICATE").ok_or(NotASignedLog)?)?;
+                        if certs.insert(uid, len).is_some() {
+                            return Err(NotASignedLog);
+                        }
                     }
                     Kind::Station => {
                         let uid = get("STATION_UID").ok_or(NotASignedLog)?;
@@ -100,12 +110,27 @@ pub fn check_signed_log(tq8: &[u8]) -> Result<Vec<u8>, NotASignedLog> {
                     }
                     Kind::Contact => {
                         // Before any QSO, a certificate that signs it.
-                        if certs == 0 || get(lotw::SIGNATURE_FIELD).is_none() {
+                        if certs.is_empty() || get(lotw::SIGNATURE_FIELD).is_none() {
                             return Err(NotASignedLog);
                         }
                         let station = get("STATION_UID")
                             .and_then(|uid| stations.get(uid))
                             .ok_or(NotASignedLog)?;
+                        let len = station
+                            .iter()
+                            .find(|(f, _)| *f == "CERT_UID")
+                            .and_then(|(_, uid)| certs.get(uid))
+                            .ok_or(NotASignedLog)?;
+                        let signature: String = get(lotw::SIGNATURE_FIELD)
+                            .ok_or(NotASignedLog)?
+                            .iter()
+                            .filter(|b| !b.is_ascii_whitespace())
+                            .map(|b| char::from(*b))
+                            .collect();
+                        let decoded = Base64::decode_vec(&signature).map_err(|_| NotASignedLog)?;
+                        if decoded.is_empty() || decoded.len() != *len {
+                            return Err(NotASignedLog);
+                        }
                         // What was signed is exactly this QSO's and its station's fields, in
                         // ARRL's order, as the signer builds it: nothing else can be carried here.
                         let mut expected = Vec::new();
@@ -132,6 +157,38 @@ pub fn check_signed_log(tq8: &[u8]) -> Result<Vec<u8>, NotASignedLog> {
         return Err(NotASignedLog);
     }
     Ok(crate::signed_log::tq8(&tq7))
+}
+
+/// RSA's signature length is the modulus length in bytes, excluding DER's sign-padding byte.
+fn rsa_signature_len(value: &[u8]) -> Result<usize, NotASignedLog> {
+    use pkcs8::SubjectPublicKeyInfoRef;
+    use pkcs8::der::{
+        Decode, Reader,
+        asn1::{AnyRef, ObjectIdentifier, UintRef},
+    };
+    let pem = format!(
+        "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n",
+        std::str::from_utf8(value)
+            .map_err(|_| NotASignedLog)?
+            .trim()
+    );
+    let cert = crate::certificate::Certificate::from_pem_or_der(pem.as_bytes())
+        .map_err(|_| NotASignedLog)?;
+    let spki =
+        SubjectPublicKeyInfoRef::from_der(cert.public_key_der()).map_err(|_| NotASignedLog)?;
+    if spki.algorithm.oid != ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1") {
+        return Err(NotASignedLog);
+    }
+    let key = spki.subject_public_key.as_bytes().ok_or(NotASignedLog)?;
+    AnyRef::from_der(key)
+        .and_then(|key| {
+            key.sequence(|reader| {
+                let modulus = reader.decode::<UintRef<'_>>()?;
+                let _exponent = reader.decode::<UintRef<'_>>()?;
+                Ok(modulus.as_bytes().len())
+            })
+        })
+        .map_err(|_| NotASignedLog)
 }
 
 /// One record's fields, by name, in the order given.
@@ -250,8 +307,8 @@ fn allowed(kind: Kind, name: &str, value: &[u8]) -> bool {
         },
         Kind::Contact => {
             if name == lotw::SIGNATURE_FIELD {
-                // An RSA-1024 signature in TQSL's base64: 172 characters and its line break.
-                value.len() <= 180 && printable(value, 180)
+                // Decode and compare against this contact's certificate at the end of its record.
+                printable(value, crate::certificate::MAX_CERTIFICATE_LEN)
             } else if name == "SIGNDATA" {
                 printable(value, 1024)
             } else {

@@ -137,7 +137,7 @@ pub struct Qso {
 /// The ADIF fields that say which station made a QSO, each checked against the station location
 /// before the QSO is signed.
 /// `OPERATOR` names the station too when `STATION_CALLSIGN` is absent, as ADIF defines it; it is
-/// then kept under its own name.
+/// then kept under its own name. Exact station mode keeps and checks both callsign fields.
 pub const STATION_FIELDS: [&str; 9] = [
     "STATION_CALLSIGN",
     "MY_VUCC_GRIDS",
@@ -317,8 +317,9 @@ impl Qso {
 
         let mut station = Vec::new();
         for name in STATION_FIELDS {
-            if (name == "STATION_CALLSIGN" && options.ignore_log_callsigns)
-                || (name != "STATION_CALLSIGN" && options.qth == QthHandling::Ignore)
+            if !options.exact_station
+                && ((name == "STATION_CALLSIGN" && options.ignore_log_callsigns)
+                    || (name != "STATION_CALLSIGN" && options.qth == QthHandling::Ignore))
             {
                 continue;
             }
@@ -338,11 +339,13 @@ impl Qso {
             }
             station.push((name, v));
         }
-        // OPERATOR is a person's call; only when it looks like one, and STATION_CALLSIGN is
-        // absent, does it name the station.
-        if !options.ignore_log_callsigns
-            && !station.iter().any(|(n, _)| *n == "STATION_CALLSIGN")
-            && let Some(op) = text("OPERATOR")?.filter(|op| is_callsign(op))
+        // In compatibility mode OPERATOR names the station only when it looks like a call and
+        // STATION_CALLSIGN is absent. Exact mode retains every named OPERATOR for comparison.
+        if (options.exact_station
+            || (!options.ignore_log_callsigns
+                && !station.iter().any(|(n, _)| *n == "STATION_CALLSIGN")))
+            && let Some(op) =
+                text("OPERATOR")?.filter(|op| options.exact_station || is_callsign(op))
         {
             station.push(("OPERATOR", op));
         }

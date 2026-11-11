@@ -8,7 +8,8 @@ use crate::{lotw, qso::Qso, signed_log::LogError, station::StationLocation, tbk}
 
 pub use crate::tbk::QthHandling;
 
-/// TQSL's log handling settings. Defaults preserve the existing signing output.
+/// Log handling settings. Defaults preserve TQSL-compatible signing output.
+/// Construct QSOs with these same options before signing.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SigningOptions {
     /// Custom ADIF mode (or `MODE%SUBMODE`) to LoTW mode mappings. Compared without case.
@@ -25,6 +26,10 @@ pub struct SigningOptions {
     /// `Ignore`, like TQSL's, does not compare STATION_CALLSIGN or MY_DXCC, so another station's
     /// QSOs can be signed as the selected location's.
     pub qth: QthHandling,
+    /// Require every station field named by each QSO to agree with the supplied location,
+    /// without filling or changing it. Overrides `qth` and `ignore_log_callsigns`.
+    /// Use [`Self::with_exact_station`] to select this mode.
+    pub exact_station: bool,
 }
 
 impl From<&tbk::Preferences> for SigningOptions {
@@ -35,11 +40,23 @@ impl From<&tbk::Preferences> for SigningOptions {
             allow_bad_calls: prefs.allow_bad_calls,
             ignore_log_callsigns: prefs.ignore_log_callsigns,
             qth: prefs.qth,
+            exact_station: false,
         }
     }
 }
 
 impl SigningOptions {
+    /// Select exact station checking. Every named station field must agree with the input
+    /// location, including fields it leaves empty, on every QSO. Both callsign fields are checked
+    /// even when `ignore_log_callsigns` is set. A four-character grid may abbreviate the station's
+    /// six-character grid; VUCC lists compare as sets, and never match a single grid.
+    /// The supplied station is used unchanged for every signature. Defaults to `false`.
+    #[must_use]
+    pub fn with_exact_station(mut self, exact: bool) -> Self {
+        self.exact_station = exact;
+        self
+    }
+
     pub(crate) fn qsos(
         &self,
         qsos: &[Qso],
@@ -86,6 +103,9 @@ impl SigningOptions {
     /// station as `sign_log_with_options` checks it, in order, carrying forward what earlier QSOs
     /// filled in, except that a refused QSO changes nothing: signing the QSOs left gives the same
     /// stations, and so the same signed log, as though the refused ones had never been in it.
+    /// The first-QSO VUCC exception counts accepted QSOs. In exact mode each check is independent
+    /// against the input station. Every returned error identifies its ADIF field through
+    /// [`LogError::adif_field`], including invalid location values.
     pub fn station_refusals(
         &self,
         qsos: &[Qso],
@@ -93,9 +113,13 @@ impl SigningOptions {
     ) -> Vec<(usize, LogError)> {
         let mut current = station.clone();
         let mut refused = Vec::new();
+        let mut accepted = 0;
         for (index, qso) in qsos.iter().enumerate() {
-            match self.location(qso, &current, index) {
-                Ok(next) => current = next,
+            match self.location_at(qso, &current, index, accepted == 0) {
+                Ok(next) => {
+                    current = next;
+                    accepted += 1;
+                }
                 Err(error) => refused.push((index, error)),
             }
         }
@@ -108,6 +132,19 @@ impl SigningOptions {
         station: &StationLocation,
         index: usize,
     ) -> Result<StationLocation, LogError> {
+        self.location_at(qso, station, index, index == 0)
+    }
+
+    fn location_at(
+        &self,
+        qso: &Qso,
+        station: &StationLocation,
+        index: usize,
+        first: bool,
+    ) -> Result<StationLocation, LogError> {
+        if self.exact_station {
+            return self.exact_location(qso, station, index);
+        }
         if self.qth == QthHandling::Ignore {
             return Ok(station.clone());
         }
@@ -137,7 +174,7 @@ impl SigningOptions {
         let get = |name| qso.station().find(|(n, _)| *n == name).map(|(_, v)| v);
         let primary = crate::station::primary_subdivision(station.dxcc());
         let secondary = crate::station::secondary_subdivision(station.dxcc());
-        let vucc = (index != 0).then(|| get("MY_VUCC_GRIDS")).flatten();
+        let vucc = (!first).then(|| get("MY_VUCC_GRIDS")).flatten();
         let grid = vucc.or_else(|| get("MY_GRIDSQUARE"));
         let changes = [
             (
@@ -241,7 +278,34 @@ impl SigningOptions {
                 .map(|(n, v)| (*n, v.as_str()))
                 .collect::<Vec<_>>(),
         )
-        .map_err(|error| LogError::Location { index, error })?;
+        .map_err(|error| {
+            // Validation's coupled zone error names the last explicitly supplied zone.
+            // Keep the existing variant while giving callers an unambiguous ADIF field.
+            let error = match error {
+                crate::station::StationError::Invalid {
+                    field: "GRIDSQUARE",
+                    value,
+                } if vucc.is_some() => crate::station::StationError::Invalid {
+                    field: "MY_VUCC_GRIDS",
+                    value,
+                },
+                crate::station::StationError::Invalid {
+                    field: "ZONES",
+                    value,
+                } => crate::station::StationError::Invalid {
+                    field: if get("MY_CQ_ZONE").is_some() {
+                        "MY_CQ_ZONE"
+                    } else if get("MY_ITU_ZONE").is_some() {
+                        "MY_ITU_ZONE"
+                    } else {
+                        "MY_STATE"
+                    },
+                    value,
+                },
+                error => error,
+            };
+            LogError::Location { index, error }
+        })?;
         if let Some(county) = get("MY_CNTY")
             && let Some((state, _)) = county.split_once(',')
             && !location
@@ -251,6 +315,91 @@ impl SigningOptions {
             return Err(failure("MY_CNTY", county));
         }
         Ok(location)
+    }
+
+    fn exact_location(
+        &self,
+        qso: &Qso,
+        station: &StationLocation,
+        index: usize,
+    ) -> Result<StationLocation, LogError> {
+        for (adif, given) in qso.station() {
+            let field = match adif {
+                "STATION_CALLSIGN" | "OPERATOR" => Some("CALL"),
+                "MY_DXCC" => Some("DXCC"),
+                "MY_GRIDSQUARE" | "MY_VUCC_GRIDS" => Some("GRIDSQUARE"),
+                // A subdivision LoTW has no field for in this entity can never be signed, so it
+                // can't disagree with the station; tqsllib and `from_adif` leave it out too.
+                "MY_STATE" => match crate::station::primary_subdivision(station.dxcc()) {
+                    Some(field) => Some(field),
+                    None => continue,
+                },
+                "MY_CNTY" => match crate::station::secondary_subdivision(station.dxcc()) {
+                    Some(field) => Some(field),
+                    None => continue,
+                },
+                "MY_ITU_ZONE" => Some("ITUZ"),
+                "MY_CQ_ZONE" => Some("CQZ"),
+                "MY_IOTA" => Some("IOTA"),
+                _ => None,
+            };
+            let failure = || LogError::QsoFromAnotherStation {
+                index,
+                field: adif,
+                value: given.to_owned(),
+            };
+            let field = field.ok_or_else(failure)?;
+            let ours = station.get(field).ok_or_else(failure)?;
+            let mut value = given;
+            if adif == "MY_CNTY"
+                && let Some((state, county)) = given.split_once(',')
+            {
+                if !station
+                    .get("US_STATE")
+                    .is_some_and(|v| v.eq_ignore_ascii_case(state.trim()))
+                {
+                    return Err(failure());
+                }
+                value = county.trim();
+            }
+            value = crate::station::lotw_value(field, value);
+            let dependency = lotw::loc_field(field)
+                .and_then(|f| f.depends_on)
+                .and_then(|f| station.get(f))
+                .unwrap_or("");
+            // Resolve the same list codes and labels as conversion, without changing the station.
+            value = lotw::loc_values(field, dependency)
+                .find(|v| v.eq_ignore_ascii_case(value))
+                .or_else(|| lotw::loc_value_from_label(field, dependency, value))
+                .unwrap_or(value);
+            let agrees = match adif {
+                "MY_DXCC" | "MY_ITU_ZONE" | "MY_CQ_ZONE" => value
+                    .parse::<u32>()
+                    .ok()
+                    .is_some_and(|n| ours.parse() == Ok(n)),
+                "MY_VUCC_GRIDS" => {
+                    let grids = |s: &str| {
+                        s.split(',')
+                            .map(|g| g.trim().to_ascii_uppercase())
+                            .collect::<std::collections::BTreeSet<_>>()
+                    };
+                    ours.contains(',') && value.contains(',') && grids(ours) == grids(value)
+                }
+                "MY_GRIDSQUARE" => {
+                    !ours.contains(',')
+                        && !value.contains(',')
+                        && (ours.eq_ignore_ascii_case(value)
+                            || (value.len() == 4
+                                && ours.len() == 6
+                                && ours[..4].eq_ignore_ascii_case(value)))
+                }
+                _ => ours.eq_ignore_ascii_case(value),
+            };
+            if !agrees {
+                return Err(failure());
+            }
+        }
+        Ok(station.clone())
     }
 
     pub(crate) fn mode(&self, mode: &str, submode: Option<&str>) -> Option<&'static str> {

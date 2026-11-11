@@ -7,6 +7,7 @@
 
 pub mod certificate;
 pub mod export;
+pub mod files;
 // gzip is public for this repository's own tests, which edit TQSL backups; it is not part of the
 // API and may change in any release.
 #[doc(hidden)]

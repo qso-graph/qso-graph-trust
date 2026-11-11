@@ -179,3 +179,125 @@ fn only_a_signed_log_is_one_to_upload() {
     }
     assert!(planted(big).is_ok());
 }
+
+#[test]
+fn every_signature_is_nonempty_base64_of_its_own_certificates_modulus_length() {
+    use pkcs8::der::{
+        Decode, Encode, Tag,
+        asn1::{AnyRef, BitString, UintRef},
+    };
+    let tq7 = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/corpus/tqsl/1024/qg0test-small.tq7"),
+    )
+    .unwrap();
+    let text = String::from_utf8(tq7).unwrap();
+    let check = |text: &str| check_signed_log(&crate::gzip::compress(text.as_bytes()));
+    assert!(check(&text).is_ok());
+    fn replace_field(text: &str, name: &str, value: &str) -> String {
+        let start = text.find(&format!("<{name}:")).unwrap();
+        let close = start + text[start..].find('>').unwrap();
+        let len: usize = text[start + 1..close]
+            .split(':')
+            .nth(1)
+            .unwrap()
+            .parse()
+            .unwrap();
+        let mut result = text.to_owned();
+        result.replace_range(
+            start..close + 1 + len,
+            &format!("<{name}:{}>{value}", value.len()),
+        );
+        result
+    }
+    for bad in [
+        String::new(),
+        " \n\r".to_owned(),
+        "!".repeat(172),
+        Base64::encode_string(&[0; 127]),
+        Base64::encode_string(&[0; 129]),
+        "A".repeat(172),
+        "AA=A".repeat(43),
+    ] {
+        assert!(check(&replace_field(&text, lotw::SIGNATURE_FIELD, &bad)).is_err());
+    }
+    let records = crate::records::parse(text.as_bytes()).unwrap();
+    let cert_text = records[0].text("CERTIFICATE").unwrap();
+    let der = Base64::decode_vec(
+        &cert_text
+            .chars()
+            .filter(|c| !c.is_ascii_whitespace())
+            .collect::<String>(),
+    )
+    .unwrap();
+    let mut cert = x509_cert::Certificate::from_der(&der).unwrap();
+    // A synthetic public certificate with a 2048-bit modulus. This check deliberately does not
+    // verify certificate/signature cryptography; it must bind length to the referenced certificate.
+    let n = [0x81; 256];
+    let integers = [
+        UintRef::new(&n).unwrap().to_der().unwrap(),
+        UintRef::new(&[1, 0, 1]).unwrap().to_der().unwrap(),
+    ]
+    .concat();
+    let public = AnyRef::new(Tag::Sequence, &integers)
+        .unwrap()
+        .to_der()
+        .unwrap();
+    cert.tbs_certificate
+        .subject_public_key_info
+        .subject_public_key = BitString::from_bytes(&public).unwrap();
+    let cert_b64 = crate::signing::tqsl_base64(&cert.to_der().unwrap());
+    assert_eq!(rsa_signature_len(cert_b64.as_bytes()).unwrap(), 256);
+    let cert_at = text.find("<Rec_Type:5>tCERT").unwrap();
+    let cert_end = cert_at + text[cert_at..].find("<eor>").unwrap() + 5;
+    let repeated = format!(
+        "{}{}{}",
+        &text[..cert_end],
+        &text[cert_at..cert_end],
+        &text[cert_end..]
+    );
+    assert!(
+        check(&repeated).is_err(),
+        "certificate identifiers must identify one certificate"
+    );
+    assert!(check(&replace_field(&text, "CERT_UID", "")).is_err());
+    let at = text.find("<Rec_Type:8>tSTATION").unwrap();
+    let second_cert = format!(
+        "<Rec_Type:5>tCERT<CERT_UID:1>2<CERTIFICATE:{}>{cert_b64}<eor>\n",
+        cert_b64.len()
+    );
+    let changed = format!(
+        "{}{}{}",
+        &text[..at],
+        second_cert,
+        replace_field(&text[at..], "CERT_UID", "2")
+    );
+    assert!(
+        check(&changed).is_err(),
+        "128-byte signatures cannot name the 256-byte certificate"
+    );
+    let mut changed = changed;
+    // Replace all signatures, keeping the exact QSO/station SIGNDATA untouched.
+    let mut start = 0;
+    while let Some(relative) = changed[start..].find("<SIGN_LOTW_V2.0:") {
+        let at = start + relative;
+        let value = crate::signing::tqsl_base64(&[0; 256]);
+        let suffix = replace_field(&changed[at..], lotw::SIGNATURE_FIELD, &value);
+        changed.replace_range(at.., &suffix);
+        start = at + format!("<SIGN_LOTW_V2.0:{}>", value.len()).len() + value.len();
+    }
+    assert!(
+        check(&changed).is_ok(),
+        "length is read from the signing certificate, not hardcoded"
+    );
+    let at = changed.find("<Rec_Type:8>tSTATION").unwrap();
+    let unknown = format!(
+        "{}{}",
+        &changed[..at],
+        replace_field(&changed[at..], "CERT_UID", "9")
+    );
+    assert!(
+        check(&unknown).is_err(),
+        "the station must name an existing certificate"
+    );
+}

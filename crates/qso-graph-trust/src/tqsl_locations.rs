@@ -5,7 +5,6 @@
 
 use std::collections::HashSet;
 use std::fmt;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::station::{StationError, StationLocation};
@@ -53,16 +52,14 @@ pub fn default_folder() -> PathBuf {
 }
 
 /// Open only `station_data` in the supplied folder. A missing file is an empty list.
+/// Refuse special files without waiting for a FIFO writer. Both the opened file and the actual
+/// read are bounded by [`MAX_FILE_LEN`], including when the file grows during reading.
 pub fn read(folder: &Path) -> Result<Vec<Location>, Error> {
-    let file = match std::fs::File::open(folder.join("station_data")) {
-        Ok(file) => file,
+    let bytes = match crate::files::read_regular_file(&folder.join("station_data"), MAX_FILE_LEN) {
+        Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(Error(format!("cannot open station_data: {e}"))),
     };
-    let mut bytes = Vec::new();
-    file.take((MAX_FILE_LEN + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| Error(format!("cannot read station_data: {e}")))?;
     parse(&bytes)
 }
 

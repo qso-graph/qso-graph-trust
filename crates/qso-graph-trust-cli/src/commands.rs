@@ -622,6 +622,7 @@ struct Signed {
 
 fn signing_options(a: &OptionArgs) -> SigningOptions {
     SigningOptions {
+        exact_station: false,
         adif_modes: a.modes.clone(),
         ignore_seconds: a.ignore_seconds,
         allow_bad_calls: a.allow_bad_calls,
