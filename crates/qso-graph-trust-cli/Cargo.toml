@@ -14,7 +14,7 @@ categories = ["command-line-utilities"]
 include = ["src/**/*.rs", "README.md", "LICENSE.md", "NOTICE.md", "AUTHORS.md"]
 
 # The command is qg-trust: QSO Graph's commands are qg-<word> (qg-trust, qg-rig,
-# qg-udp, qg-sim), never a short one that can collide, while every package a
+# qg-interop, qg-sim), never a short one that can collide, while every package a
 # registry carries is a full qso-graph-* name.
 [[bin]]
 name = "qg-trust"

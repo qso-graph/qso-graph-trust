@@ -248,9 +248,54 @@ jobs:
       sha: ${{ github.event.pull_request.head.sha || github.sha }}
       sign: false
 
+  # The oldest Rust the workspace declares (rust-version) still builds it. The version is read from
+  # Cargo.toml, so the check follows the declaration rather than a second copy of it. rust-version
+  # "1.99" means 1.99.0; rustup's "1.99" would install the latest 1.99 patch release instead.
+  msrv:
+    name: msrv
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Rust at rust-version
+        run: |
+          declared=$(sed -n 's/^rust-version = "\([0-9.]*\)"$/\1/p' Cargo.toml)
+          case "$declared" in
+            *.*.*) msrv="$declared" ;;
+            *.*) msrv="$declared.0" ;;
+            *) echo "::error::no rust-version in Cargo.toml"; exit 1 ;;
+          esac
+          rustup toolchain install "$msrv" --profile minimal
+          echo "MSRV=$msrv" >> "$GITHUB_ENV"
+      - name: cargo check at rust-version
+        run: cargo "+$MSRV" check --workspace --all-targets --all-features --locked
+
+  # The public API against the last published release: a breaking change needs a version that says so.
+  # Each library is named by its manifest, because the policy fixtures hold a package of the same name.
+  semver:
+    name: semver
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Rust
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: cargo semver-checks
+        run: |
+          cargo install cargo-semver-checks --version 0.51.0 --locked --quiet
+          for crate in qso-graph-trust qso-graph-trust-awslc; do
+            cargo semver-checks --manifest-path "crates/$crate/Cargo.toml"
+          done
+
   ci-all-green:
     name: ci-all-green
-    needs: [check, policy, fuzz, binaries]
+    needs: [check, policy, fuzz, binaries, msrv, semver]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
