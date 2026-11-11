@@ -306,21 +306,59 @@ impl std::error::Error for RecordError {}
 /// Every record in `input`, detected by content as Cabrillo, ADX, or ADI after an optional UTF-8 BOM and
 /// whitespace. An ADX or Cabrillo claim that fails is not retried as ADI. In ADI, text outside fields is
 /// ignored and `<eoh>` ends a header whose fields are dropped; fields after the last `<eor>` are an
-/// error. ADX headers are discarded as well.
+/// error. ADX headers are discarded as well. Detection may look past whitespace, but ADX is
+/// validated as written, apart from one leading UTF-8 BOM: whitespace before an XML declaration,
+/// a misplaced BOM, and XML-forbidden characters are refused. Comments and processing instructions
+/// before the ADX root are recognized within a 64 KiB format lookahead; longer prologs are refused.
 pub fn parse(input: &[u8]) -> Result<Vec<Record>, RecordError> {
-    let input_start = input.trim_ascii_start();
+    // Bound all format lookahead, including whitespace and XML Misc before the root.
+    let lookahead = &input[..input.len().min(MAX_PROLOG_LEN)];
+    let input_start = lookahead.trim_ascii_start();
     let content = input_start
         .strip_prefix(b"\xef\xbb\xbf")
         .unwrap_or(input_start);
     let content = content.trim_ascii_start();
-    if content.starts_with(b"<?xml") || content.starts_with(b"<ADX") {
-        return crate::adx::parse(content);
+    if claims_adx(content, lookahead.len() == MAX_PROLOG_LEN)? {
+        return crate::adx::parse(input);
     }
     // Explicit ADIF markup takes precedence over marker text inside an ADIF field value.
     if !content.starts_with(b"<") && crate::cabrillo::claims(content) {
         return crate::cabrillo::parse(input);
     }
     parse_adi(input)
+}
+
+// Detection only: preserve the original bytes for XML validation, and never classify ADI
+// following XML-looking prose/comments as ADX unless its declaration or root claims it.
+const MAX_PROLOG_LEN: usize = 64 * 1024;
+
+fn claims_adx(mut content: &[u8], at_limit: bool) -> Result<bool, RecordError> {
+    loop {
+        content = content.trim_ascii_start();
+        if content.starts_with(b"<?xml") || content.starts_with(b"<ADX") {
+            return Ok(true);
+        }
+        let end = if content.starts_with(b"<!--") {
+            b"-->".as_slice()
+        } else if content.starts_with(b"<?") {
+            b"?>".as_slice()
+        } else if content.is_empty() && at_limit {
+            return Err(RecordError::TooLong {
+                offset: MAX_PROLOG_LEN,
+            });
+        } else {
+            return Ok(false);
+        };
+        if let Some(at) = content.windows(end.len()).position(|w| w == end) {
+            content = &content[at + end.len()..];
+        } else if at_limit {
+            return Err(RecordError::TooLong {
+                offset: MAX_PROLOG_LEN,
+            });
+        } else {
+            return Ok(false);
+        }
+    }
 }
 
 fn parse_adi(input: &[u8]) -> Result<Vec<Record>, RecordError> {

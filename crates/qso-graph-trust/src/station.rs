@@ -28,7 +28,8 @@ pub struct StationLocation {
 pub enum StationError {
     /// CALL or DXCC is missing.
     Missing(&'static str),
-    /// A field given twice.
+    /// A field given twice. [`StationLocation::from_adif`] accepts identical trimmed values
+    /// and uses this error only for conflicting repetitions, naming the ADIF field.
     Repeated(String),
     /// More than [`MAX_FIELDS`] fields.
     TooManyFields,
@@ -103,7 +104,10 @@ impl StationLocation {
     /// LoTW's park, which is given on its own. Each value goes to the field signing compares it
     /// with, converted as signing converts it, so a log carrying the same ADIF fields agrees with
     /// the result. A subdivision or park this entity has no field for is left out, as signing leaves
-    /// it; any other field is refused.
+    /// it; any other field is refused. Repeated ADIF names (compared without case) must have
+    /// identical trimmed values. A county's state prefix must agree with `MY_STATE`.
+    /// Contradictions use [`StationError::Repeated`] or [`StationError::Invalid`], with a field
+    /// identifiable through [`crate::signed_log::LogError::adif_field`].
     pub fn from_adif(
         call: &str,
         adif: &[(&str, &str)],
@@ -115,23 +119,34 @@ impl StationLocation {
                 .map(|(_, v)| v.trim())
                 .filter(|v| !v.is_empty())
         };
-        if let Some((name, _)) = adif.iter().find(|(n, _)| {
-            ![
-                "MY_DXCC",
-                "MY_GRIDSQUARE",
-                "MY_VUCC_GRIDS",
-                "MY_STATE",
-                "MY_CNTY",
-                "MY_ITU_ZONE",
-                "MY_CQ_ZONE",
-                "MY_IOTA",
-            ]
+        let names = [
+            "MY_DXCC",
+            "MY_GRIDSQUARE",
+            "MY_VUCC_GRIDS",
+            "MY_STATE",
+            "MY_CNTY",
+            "MY_ITU_ZONE",
+            "MY_CQ_ZONE",
+            "MY_IOTA",
+        ];
+        if let Some((name, _)) = adif
             .iter()
-            .any(|known| known.eq_ignore_ascii_case(n))
-        }) {
+            .find(|(n, _)| !names.iter().any(|known| known.eq_ignore_ascii_case(n)))
+        {
             return Err(StationError::NotAField(
                 name.chars().take(MAX_LEN).collect(),
             ));
+        }
+        for name in names {
+            let mut values = adif
+                .iter()
+                .filter(|(n, _)| n.eq_ignore_ascii_case(name))
+                .map(|(_, v)| v.trim());
+            if let Some(first) = values.next()
+                && values.any(|v| v != first)
+            {
+                return Err(StationError::Repeated(name.to_owned()));
+            }
         }
         let dxcc_text = get("MY_DXCC").ok_or(StationError::Missing("DXCC"))?;
         let dxcc = dxcc_text
@@ -170,7 +185,18 @@ impl StationLocation {
             fields.push((field, park.to_owned()));
         }
         let given: Vec<(&str, &str)> = fields.iter().map(|(n, v)| (*n, v.as_str())).collect();
-        Self::new(&given)
+        let location = Self::new(&given)?;
+        if let Some(field) = secondary_subdivision(dxcc)
+            && let Some(value) = get("MY_CNTY")
+            && let Some((state, _)) = value.split_once(',')
+            && let Some(primary) = primary_subdivision(dxcc)
+            && !location
+                .get(primary)
+                .is_some_and(|v| v.eq_ignore_ascii_case(lotw_value(primary, state.trim())))
+        {
+            return Err(invalid(field, value));
+        }
+        Ok(location)
     }
 
     /// A station location from its fields, named as LoTW names them (`CALL`, `DXCC`,

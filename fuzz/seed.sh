@@ -52,6 +52,30 @@ xml_regressions() { # xml_regressions <target> <plain XML control>
   done
 }
 xml_regressions adx "$to/adx/synthetic.adx"
+# Preserve malformed prologs at dispatch: detection must not repair the XML before validation.
+for defect in whitespace whitespace-bom vertical-tab form-feed; do
+  {
+    case "$defect" in
+      whitespace) printf ' \n' ;;
+      whitespace-bom) printf ' \357\273\277' ;;
+      vertical-tab) printf '\013' ;;
+      form-feed) printf '\014' ;;
+    esac
+    printf '%s' '<?xml version="1.0"?>'
+    cat "$to/adx/synthetic.adx"
+  } >"$to/adx/review-prolog-$defect.xml"
+done
+# Legal XML Misc without a declaration must reach the ADX reader too.
+for prolog in comment processing-instruction mixed; do
+  {
+    case "$prolog" in
+      comment) printf '%s' '<!-- exported log -->' ;;
+      processing-instruction) printf '%s' '<?logger synthetic?>' ;;
+      mixed) printf ' \n<!-- first -->\n<?logger synthetic?>' ;;
+    esac
+    cat "$to/adx/synthetic.adx"
+  } >"$to/adx/review-valid-prolog-$prolog.xml"
+done
 xml_regressions tq6 "$to/tq6/tqsl_1024_QG0TEST.tq6.xml"
 xml_regressions tbk "$to/tbk/standard_standard.tbk.xml"
 xml_regressions station_data "$to/station_data/standard_tqsl_station_data"

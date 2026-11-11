@@ -51,6 +51,8 @@ impl SigningOptions {
     /// even when `ignore_log_callsigns` is set. A four-character grid may abbreviate the station's
     /// six-character grid; VUCC lists compare as sets, and never match a single grid.
     /// The supplied station is used unchanged for every signature. Defaults to `false`.
+    /// All named values are validated using signing's conversions before any Location comparison;
+    /// invalid values produce [`LogError::Location`], even when the Location leaves a field empty.
     #[must_use]
     pub fn with_exact_station(mut self, exact: bool) -> Self {
         self.exact_station = exact;
@@ -106,6 +108,8 @@ impl SigningOptions {
     /// The first-QSO VUCC exception counts accepted QSOs. In exact mode each check is independent
     /// against the input station. Every returned error identifies its ADIF field through
     /// [`LogError::adif_field`], including invalid location values.
+    /// Exact mode validates all named values before comparing them with the Location, so only
+    /// valid values can produce [`LogError::QsoFromAnotherStation`] for an empty field.
     pub fn station_refusals(
         &self,
         qsos: &[Qso],
@@ -197,16 +201,6 @@ impl SigningOptions {
             if field.is_empty() {
                 continue;
             }
-            let value = if adif == "MY_CNTY" {
-                value.split_once(',').map_or(value, |(_, c)| c.trim())
-            } else {
-                value
-            };
-            let value = crate::station::lotw_value(field, value);
-            let number = matches!(field, "ITUZ" | "CQZ")
-                .then(|| value.parse::<u32>().ok().map(|v| v.to_string()))
-                .flatten();
-            let value = number.as_deref().unwrap_or(value);
             let previous = fields
                 .iter()
                 .find(|(n, _)| *n == field)
@@ -220,22 +214,13 @@ impl SigningOptions {
                         .map(|(_, v)| v.as_str())
                 })
                 .unwrap_or("");
-            let listed = Some(field) == primary || Some(field) == secondary;
-            let value = if listed
-                && previous.is_some_and(|previous| {
-                    lotw::loc_value_label(field, dependency, previous)
-                        .is_some_and(|label| label.eq_ignore_ascii_case(value))
-                }) {
-                previous.unwrap_or(value)
-            } else if listed && (self.qth == QthHandling::FromLog || previous.is_none()) {
-                lotw::loc_values(field, dependency)
-                    .find(|v| v.eq_ignore_ascii_case(value))
-                    .or_else(|| lotw::loc_value_from_label(field, dependency, value))
-                    .unwrap_or(value)
-            } else {
-                value
-            };
-            let value = value.to_owned();
+            let value = signing_value(
+                field,
+                value,
+                previous,
+                dependency,
+                self.qth == QthHandling::FromLog || previous.is_none(),
+            );
             let value = value.as_str();
             let matches = previous.is_some_and(|v| {
                 if field == "GRIDSQUARE" && (v.contains(',') || value.contains(',')) {
@@ -317,12 +302,150 @@ impl SigningOptions {
         Ok(location)
     }
 
+    /// Validate all named values before comparing the selected location. Build only the log's
+    /// fields and the dependencies needed to interpret them: unrelated selected county/zone
+    /// values must not make a valid log value invalid. A county prefix supplies its own state
+    /// when the log does not name one; otherwise the two must agree.
+    fn validate_exact_values(
+        qso: &Qso,
+        station: &StationLocation,
+        index: usize,
+    ) -> Result<Vec<(&'static str, String)>, LogError> {
+        let get = |name| qso.station().find(|(n, _)| *n == name).map(|(_, v)| v);
+        let dxcc = station.dxcc().to_string();
+        let base = [("CALL", station.call()), ("DXCC", dxcc.as_str())];
+        let validate = |fields: &[(&str, &str)], adif| {
+            StationLocation::new(fields).map_err(|error| LogError::Location {
+                index,
+                error: match error {
+                    crate::station::StationError::Invalid { value, .. } => {
+                        crate::station::StationError::Invalid { field: adif, value }
+                    }
+                    error => error,
+                },
+            })
+        };
+        let mut converted = Vec::new();
+        // These fields have no dependencies. Check both grids and both calls, even where one
+        // would take precedence in compatibility mode. DXCC is validated without adopting it.
+        for (adif, field) in [
+            ("STATION_CALLSIGN", "CALL"),
+            ("OPERATOR", "CALL"),
+            ("MY_DXCC", "DXCC"),
+            ("MY_GRIDSQUARE", "GRIDSQUARE"),
+            ("MY_VUCC_GRIDS", "GRIDSQUARE"),
+        ] {
+            if let Some(value) = get(adif) {
+                let mut fields = base.to_vec();
+                fields.retain(|(name, _)| *name != field);
+                fields.push((field, value));
+                let location = validate(&fields, adif)?;
+                converted.push((adif, location.get(field).unwrap_or(value).to_owned()));
+            }
+        }
+        let primary = crate::station::primary_subdivision(station.dxcc());
+        let secondary = crate::station::secondary_subdivision(station.dxcc());
+        let county_state = secondary
+            .and_then(|_| get("MY_CNTY"))
+            .and_then(|v| v.split_once(','))
+            .map(|(state, _)| state.trim());
+        let state = get("MY_STATE")
+            .or(county_state)
+            .or_else(|| primary.and_then(|field| station.get(field)));
+        let mut fields: Vec<(&str, String)> =
+            base.iter().map(|(n, v)| (*n, (*v).to_owned())).collect();
+        for (field, adif, given) in [
+            (
+                primary,
+                if get("MY_STATE").is_some() {
+                    "MY_STATE"
+                } else {
+                    "MY_CNTY"
+                },
+                state,
+            ),
+            (secondary, "MY_CNTY", get("MY_CNTY")),
+            (Some("ITUZ"), "MY_ITU_ZONE", get("MY_ITU_ZONE")),
+            (Some("CQZ"), "MY_CQ_ZONE", get("MY_CQ_ZONE")),
+            (Some("IOTA"), "MY_IOTA", get("MY_IOTA")),
+        ] {
+            let (Some(field), Some(given)) = (field, given) else {
+                continue;
+            };
+            if adif == "MY_CNTY"
+                && Some(field) == secondary
+                && let (Some(primary), Some(prefix)) = (primary, county_state)
+            {
+                let dependency = lotw::loc_field(primary)
+                    .and_then(|f| f.depends_on)
+                    .and_then(|p| fields.iter().find(|(n, _)| *n == p))
+                    .map_or("", |(_, v)| v.as_str());
+                let prefix = signing_value(primary, prefix, station.get(primary), dependency, true);
+                if !fields
+                    .iter()
+                    .any(|(n, v)| *n == primary && v.eq_ignore_ascii_case(&prefix))
+                {
+                    return Err(LogError::Location {
+                        index,
+                        error: crate::station::StationError::Invalid {
+                            field: "MY_CNTY",
+                            value: given.chars().take(crate::station::MAX_LEN).collect(),
+                        },
+                    });
+                }
+            }
+            let parent = lotw::loc_field(field).and_then(|f| f.depends_on);
+            let dependency = parent
+                .and_then(|p| fields.iter().find(|(n, _)| *n == p))
+                .map_or("", |(_, v)| v.as_str());
+            // A selected label disambiguates only within the same dependency list.
+            let previous = station
+                .get(field)
+                .filter(|_| parent.is_none_or(|p| station.get(p).unwrap_or("") == dependency));
+            let value = signing_value(field, given, previous, dependency, true);
+            if get(adif).is_some() && (Some(field) != primary || adif == "MY_STATE") {
+                converted.push((adif, value.clone()));
+            } else if Some(field) == primary && adif == "MY_CNTY" {
+                // The log names no MY_STATE, so the county's prefix is the only state it gives.
+                // It must equal the selected Location's, like any other station value.
+                converted.push((COUNTY_PREFIX_STATE, value.clone()));
+            }
+            fields.push((field, value));
+            validate(
+                &fields
+                    .iter()
+                    .map(|(n, v)| (*n, v.as_str()))
+                    .collect::<Vec<_>>(),
+                adif,
+            )?;
+        }
+        Ok(converted)
+    }
+
+    /// Compare only after every named value has passed signing's station validation.
     fn exact_location(
         &self,
         qso: &Qso,
         station: &StationLocation,
         index: usize,
     ) -> Result<StationLocation, LogError> {
+        let converted = Self::validate_exact_values(qso, station, index)?;
+        if let Some((_, state)) = converted.iter().find(|(n, _)| *n == COUNTY_PREFIX_STATE) {
+            let agrees = crate::station::primary_subdivision(station.dxcc())
+                .and_then(|field| station.get(field))
+                .is_some_and(|ours| ours.eq_ignore_ascii_case(state));
+            if !agrees {
+                let given = qso
+                    .station()
+                    .find(|(n, _)| *n == "MY_CNTY")
+                    .map_or("", |(_, v)| v);
+                return Err(LogError::QsoFromAnotherStation {
+                    index,
+                    field: "MY_CNTY",
+                    value: given.to_owned(),
+                });
+            }
+        }
         for (adif, given) in qso.station() {
             let field = match adif {
                 "STATION_CALLSIGN" | "OPERATOR" => Some("CALL"),
@@ -350,28 +473,10 @@ impl SigningOptions {
             };
             let field = field.ok_or_else(failure)?;
             let ours = station.get(field).ok_or_else(failure)?;
-            let mut value = given;
-            if adif == "MY_CNTY"
-                && let Some((state, county)) = given.split_once(',')
-            {
-                if !station
-                    .get("US_STATE")
-                    .is_some_and(|v| v.eq_ignore_ascii_case(state.trim()))
-                {
-                    return Err(failure());
-                }
-                value = county.trim();
-            }
-            value = crate::station::lotw_value(field, value);
-            let dependency = lotw::loc_field(field)
-                .and_then(|f| f.depends_on)
-                .and_then(|f| station.get(f))
-                .unwrap_or("");
-            // Resolve the same list codes and labels as conversion, without changing the station.
-            value = lotw::loc_values(field, dependency)
-                .find(|v| v.eq_ignore_ascii_case(value))
-                .or_else(|| lotw::loc_value_from_label(field, dependency, value))
-                .unwrap_or(value);
+            let value = converted
+                .iter()
+                .find(|(name, _)| *name == adif)
+                .map_or(given, |(_, value)| value.as_str());
             let agrees = match adif {
                 "MY_DXCC" | "MY_ITU_ZONE" | "MY_CQ_ZONE" => value
                     .parse::<u32>()
@@ -418,4 +523,48 @@ impl SigningOptions {
             .or_else(|| lookup(mode));
         lotw::native_mode(found.as_deref().unwrap_or(mode))
     }
+}
+
+/// The key under which exact validation returns the state a log's `MY_CNTY` prefix gives when the
+/// log names no `MY_STATE`. Not an ADIF field; it never reaches a signature.
+const COUNTY_PREFIX_STATE: &str = "MY_CNTY state prefix";
+
+/// Convert a log value exactly as compatibility signing does. Exact validation supplies the
+/// selected value only in the same dependency list, then compares this result without converting
+/// it again. County prefixes are validated separately against the entity's primary subdivision.
+fn signing_value(
+    field: &str,
+    value: &str,
+    previous: Option<&str>,
+    dependency: &str,
+    resolve_labels: bool,
+) -> String {
+    let value = if matches!(field, "US_COUNTY" | "JA_CITY_GUN_KU") {
+        value
+            .split_once(',')
+            .map_or(value, |(_, county)| county.trim())
+    } else {
+        value
+    };
+    let value = crate::station::lotw_value(field, value);
+    let number = matches!(field, "ITUZ" | "CQZ")
+        .then(|| value.parse::<u32>().ok().map(|v| v.to_string()))
+        .flatten();
+    let value = number.as_deref().unwrap_or(value);
+    let listed = lotw::is_list(field);
+    let value = if listed
+        && previous.is_some_and(|previous| {
+            lotw::loc_value_label(field, dependency, previous)
+                .is_some_and(|label| label.eq_ignore_ascii_case(value))
+        }) {
+        previous.unwrap_or(value)
+    } else if listed && resolve_labels {
+        lotw::loc_values(field, dependency)
+            .find(|v| v.eq_ignore_ascii_case(value))
+            .or_else(|| lotw::loc_value_from_label(field, dependency, value))
+            .unwrap_or(value)
+    } else {
+        value
+    };
+    value.to_owned()
 }

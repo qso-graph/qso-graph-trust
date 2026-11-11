@@ -452,7 +452,7 @@ mod validation_tests {
     #[test]
     fn equivalent_fields_and_detection() {
         let adi = b"<EOH><CALL:6>QG0ABC<APP_FOO_BAR:1:N>2<USER_FIELD:1>X<EOR>";
-        let adx = b"\xef\xbb\xbf  <?xml version=\"1.0\"?><ADX xmlns=\"urn:test\"><HEADER/><RECORDS><RECORD><CALL>QG0ABC</CALL><APP PROGRAMID=\"FOO\" FIELDNAME=\"BAR\" TYPE=\"N\">2</APP><USERDEF FIELDNAME=\"USER_FIELD\">X</USERDEF></RECORD></RECORDS></ADX>";
+        let adx = b"\xef\xbb\xbf<?xml version=\"1.0\"?><ADX xmlns=\"urn:test\"><HEADER/><RECORDS><RECORD><CALL>QG0ABC</CALL><APP PROGRAMID=\"FOO\" FIELDNAME=\"BAR\" TYPE=\"N\">2</APP><USERDEF FIELDNAME=\"USER_FIELD\">X</USERDEF></RECORD></RECORDS></ADX>";
         assert_eq!(records::parse(adi).unwrap(), records::parse(adx).unwrap());
         assert!(records::parse(b"<ADX><!--good-comment--><HEADER/><RECORDS/></ADX>").is_ok());
         assert!(records::parse(br#"<ADX xmlns="urn:]]>"><HEADER/><RECORDS/></ADX>"#).is_ok());
