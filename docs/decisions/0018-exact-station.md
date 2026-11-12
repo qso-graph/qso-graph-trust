@@ -21,6 +21,16 @@ for case and surrounding whitespace, on every QSO; they never match a single gri
 grid field is checked, even when both are present. The location, including its original grid order
 and formatting, stays unchanged for every QSO and every signature.
 
+Exact mode validates every named station value using signing's conversions before comparing any
+field with the selected Location. Invalid list values, county prefixes, and coupled zones use the
+existing `Location` error and identify the ADIF field, even when the Location leaves that field
+empty. Only a valid value can produce `QsoFromAnotherStation` for an empty Location field; adding
+an invalid log value to the Location cannot resolve it. Preview refusals and signing share this
+order of checks. Compatibility signing and exact validation call one value converter; exact
+comparison consumes its result without converting again. The selected subdivision's own label
+has priority over another code sharing that label, within the same dependency list. A county
+prefix is checked against the entity's primary subdivision, including Japan's prefecture.
+
 `station_refusals` is a pure per-QSO check in exact mode. In the existing modes it carries forward
 only accepted locations and counts the first accepted QSO for the VUCC exception. Every station
 refusal exposes its ADIF field through `LogError::adif_field`, including invalid values reported
@@ -55,7 +65,11 @@ literal. Version numbers remain for the separate release pull request.
 Permanent regressions retain every independent review demonstration, including controls. Exact
 mode tests cover empty fields, aliases, labels, numbers, county prefixes, both callsigns, grid
 precision, grid sets on the first and later QSOs, override precedence, field-bearing errors, and
-refused-prefix independence. A whole log's signed station equals the input station through both
+refused-prefix independence. An exhaustive regression walks every subdivision code and label
+across all 15 entities with subdivisions (8,132 cases in the pinned configuration), requiring exact
+mode and compatibility signing to agree. ADX regressions cover legal comments and processing
+instructions before the root without a declaration, unchanged XML validation, and bounded format
+detection. A whole log's signed station equals the input station through both
 signing APIs. For agreeing inputs, output matches the existing TQSL-compatible signing path; the
 existing corpus differential still checks signatures and records against container-produced
 tqsllib results. No reference library runs on the host and no test contacts ARRL.

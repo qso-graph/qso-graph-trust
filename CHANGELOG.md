@@ -3,6 +3,23 @@
 All notable changes to QSO Graph Trust. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-11-11
+
+### Fixed
+
+- Recognize ADX after comments and processing instructions without an XML declaration, with a
+  bounded 64 KiB format lookahead that preserves the original XML for validation.
+- Use signing's shared value converter for exact station validation and comparison, preserving
+  selected subdivision labels when codes share a label and checking Japanese county prefixes
+  against their prefecture. A county's prefix is compared with the selected Location's state or
+  prefecture even when the log names no `MY_STATE`.
+- Refuse contradictory repeated station fields and county state prefixes when creating a Location
+  from ADIF, identifying the field to correct. Identical repeated values remain accepted.
+- Validate ADX logs as written. Whitespace before an XML declaration, a misplaced byte order mark,
+  and characters XML forbids are refused instead of silently removed.
+- In exact station mode, report invalid log values before differences from the selected Location,
+  including when its field is empty, so applications can direct operators to correct the log.
+
 ## [0.2.0] - 2026-11-11
 
 ### Added

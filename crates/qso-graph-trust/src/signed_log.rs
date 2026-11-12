@@ -116,7 +116,8 @@ impl std::error::Error for LogError {}
 impl LogError {
     /// The ADIF station field responsible for a per-QSO station refusal. Available for every
     /// error returned by [`SigningOptions::station_refusals`], including invalid location values.
-    /// Errors unrelated to station fields return `None`.
+    /// Also identifies contradictory ADIF fields from [`StationLocation::from_adif`] when wrapped
+    /// in [`Self::Location`]. Errors unrelated to station fields return `None`.
     pub fn adif_field(&self) -> Option<&'static str> {
         match self {
             Self::QsoFromAnotherStation { field, .. } => Some(field),
@@ -140,9 +141,14 @@ impl LogError {
                     | "JA_PREFECTURE" | "FI_KUNTA" => Some("MY_STATE"),
                     "US_COUNTY" | "JA_CITY_GUN_KU" => Some("MY_CNTY"),
                     "MY_STATE" => Some("MY_STATE"),
+                    "MY_DXCC" => Some("MY_DXCC"),
+                    "MY_GRIDSQUARE" => Some("MY_GRIDSQUARE"),
+                    "MY_CNTY" => Some("MY_CNTY"),
                     "MY_VUCC_GRIDS" => Some("MY_VUCC_GRIDS"),
                     "MY_ITU_ZONE" => Some("MY_ITU_ZONE"),
                     "MY_CQ_ZONE" => Some("MY_CQ_ZONE"),
+                    "MY_IOTA" => Some("MY_IOTA"),
+                    "OPERATOR" => Some("OPERATOR"),
                     _ => None,
                 }
             }

@@ -315,3 +315,6 @@ mod tests {
         assert!(us.contains(&(7, 4)) && !us.contains(&(45, 25)));
     }
 }
+
+#[cfg(test)]
+mod release_edges;
