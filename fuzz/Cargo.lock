@@ -967,7 +967,7 @@ dependencies = [
 
 [[package]]
 name = "qso-graph-trust"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "base64ct",
  "keyring",
@@ -983,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "qso-graph-trust-awslc"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "aws-lc-rs",
  "aws-lc-sys",
