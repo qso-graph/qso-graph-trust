@@ -3,6 +3,15 @@
 All notable changes to QSO Graph Trust. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Test corpus: `tqsl/<case>/QG0TEST-no-password.p12`, each case's export re-made by OpenSSL 3 with an
+  empty password, so readers can test a passwordless `.p12` without running `openssl`. The
+  test that made one at run time failed wherever the `openssl` on `PATH` was LibreSSL, as on
+  macOS Intel runners.
+
 ## [0.2.1] - 2026-11-11
 
 ### Fixed

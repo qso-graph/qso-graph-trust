@@ -13,6 +13,7 @@
 #   /out/<case>/QG0TEST.tq6     the certificate, as ARRL would send it
 #   /out/<case>/QG0TEST.p12     tqsllib's export, AES-256, password qgt-test
 #   /out/<case>/QG0TEST-weak.p12  the same, its weak-crypto option
+#   /out/<case>/QG0TEST-no-password.p12  QG0TEST.p12 re-exported by OpenSSL 3 with an empty password
 #   /out/<case>/qg0test-small.tq7  the test log, signed
 #   /out/<case>/key-password    the key's password, empty for none: tests read it from here
 #
@@ -111,5 +112,11 @@ for case in 1024 1024-password; do
   else
     qgt-tqsllib export-p12 "$CALL" "$dir/$CALL-weak.p12" "$P12_PASSWORD" "" weak
   fi
+  # The exports above all carry a password, but a ham's .p12 may have none, and a reader must take
+  # it: OpenSSL re-exports the first with an empty one. No password is put on a command line.
+  printf '%s' "$P12_PASSWORD" >"$work/p12-password"
+  openssl pkcs12 -in "$dir/$CALL.p12" -passin "file:$work/p12-password" -nodes -out "$work/nopass.pem"
+  openssl pkcs12 -export -in "$work/nopass.pem" -passout pass: -out "$dir/$CALL-no-password.p12"
+  rm -f "$work/nopass.pem"
 done
 echo "== done"
