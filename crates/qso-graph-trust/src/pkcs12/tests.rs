@@ -139,6 +139,39 @@ fn pkcs12_sha1_3des_pbe_loads_and_matches_the_corpus_key() {
 }
 
 #[test]
+fn pkcs12_with_an_empty_password_loads_the_corpus_key() {
+    for case in ["1024", "1024-password"] {
+        let bytes = file(&format!("tqsl/{case}/QG0TEST-no-password.p12"));
+        assert!(matches!(
+            read(&bytes, &p12_password(), &trust()),
+            Err(ImportError::Authentication)
+        ));
+        let imported = read(&bytes, b"", &trust()).expect("empty-password import");
+        let key = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/corpus/tqsl")
+                .join(case)
+                .join("key-password"),
+        )
+        .expect("key password");
+        let expected = KeyEntry::read_key_file(&file(&format!("tqsl/{case}/tqsl/keys/QG0TEST")))
+            .expect("key")
+            .remove(0)
+            .unlock((!key.is_empty()).then_some(key.as_bytes()))
+            .expect("unlock")
+            .sign(b"test")
+            .expect("sign");
+        assert_eq!(
+            signing::TqslKey::from_pkcs8_der(&imported.key, imported.certificate.public_key_der())
+                .expect("key")
+                .sign(b"test")
+                .expect("sign"),
+            expected
+        );
+    }
+}
+
+#[test]
 fn authenticated_key_certificate_mismatch_is_refused() {
     let safe = seq(&[
         &cert_bag(),
