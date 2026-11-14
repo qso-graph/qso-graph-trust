@@ -106,7 +106,7 @@ from these, and how is QG Trust's own:
   QG Trust's signed records and signatures are tested against, byte for byte.
 - **Other open-source projects:** qso-web, above, and a survey of 126 ham-radio Rust crates on crates.io,
   which found no other LoTW signing crate.
-- **Standards:** [ADIF 3.1.7](https://adif.org/317/ADIF_317.htm); RFC 5280 (X.509 certificates),
+- **Standards:** [ADIF 3.1.8](https://adif.org/318/ADIF_318.htm); RFC 5280 (X.509 certificates),
   RFC 4055 and RFC 8017 (RSA), RFC 1952 (gzip); W3C XML 1.0.
 
 ## Licence

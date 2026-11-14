@@ -6,7 +6,7 @@ Decided 2026-11-09 for qso-graph-desktop#172, Gate C.
 
 ## What was decided
 
-ADIF 3.1.7 is the source of truth for values. WWROF defines structure:
+ADIF 3.1.8 is the source of truth for values. WWROF defines structure:
 [version compatibility](https://wwrof.org/cabrillo/),
 [headers](https://wwrof.org/cabrillo/cabrillo-v3-header/),
 [QSO data](https://wwrof.org/cabrillo/cabrillo-qso-data/), and
@@ -37,28 +37,28 @@ The differential reports LoTW conversion refusals separately from specification 
 
 ## ADIF data and exchanges
 
-The [ADIF 3.1.7 resources](https://adif.org.uk/317/ADIF_317_resources_2026_03_22.zip), released
-2026-03-22, have SHA-256
-`1a70caf3a152c67c23ce9c4681f24b8e5f814862d8153d9a72e741375358e6d9`.
-The source files are its `317/exports/xml/enumerations_contest_id.xml`,
+The [ADIF 3.1.8 resources](https://adif.org.uk/318/ADIF_318_resources_2026_10_12.zip), released
+2026-10-12, have SHA-256
+`d211e1d41adaf7fc341c73a8a3a56c343534aac57043b7474f7df2d528e56d8c`.
+The source files are its `318/exports/xml/enumerations_contest_id.xml`,
 `enumerations_band.xml`, and `enumerations_mode.xml`. The original file hashes are:
 
 | Source | SHA-256 |
 |---|---|
-| Contest_ID | `a01ee6a0e6ff872e49633450ccb3642a5a4681cfce6f8cf1596d259fb1a15cd0` |
-| Band | `8f63fa3586b45b6af3996a954286a200591b2cdbddd43c59ca01d694badd83ea` |
-| Mode | `e79353ca43d38de43598b80040274f6319ee5dc11efd851d7d48e733d72a3663` |
+| Contest_ID | `b96700208505e0ca779518bc176a84f727ebb7a50227fac091ba828268113544` |
+| Band | `a9df805c6ff594fcc99a4b908148ab0ed54f033dc978f50e24745ec95aad008f` |
+| Mode | `7b782b19a46f14ec5146529fd4b9e2ff8227591540ca8aab97f194ce56ca0cba` |
 
-These sources are under `data/adif-317/`, with a project SPDX comment inserted after each XML
+These sources are under `data/adif-318/`, with a project SPDX comment inserted after each XML
 declaration. `scripts/gen-cabrillo-tables.py` removes that exact comment, verifies the original
 hashes and version, and generates the checked-in Rust tables. `--check` verifies regeneration.
-There are exactly **256 identifiers**. Contest matching ignores case and surrounding whitespace;
+There are exactly **260 identifiers**. Contest matching ignores case and surrounding whitespace;
 spelling and punctuation are never repaired. No tqsllib contest aliases or tables were imported.
 
 `exchanges.tsv` records zero-based received-call token positions (frequency is token zero).
-**24 entries cite sponsor exchange templates or rules; 234 are marked guessed.** Of the
-256 ADIF identifiers, 22 are cited and 234 guessed. Two additional, explicitly supported sponsor
-identifiers, `WRTC` and `WRTC-2018`, are absent from ADIF 3.1.7; they are documented exchanges,
+**24 entries cite sponsor exchange templates or rules; 238 are marked guessed.** Of the
+260 ADIF identifiers, 22 are cited and 238 guessed. Two additional, explicitly supported sponsor
+identifiers, `WRTC` and `WRTC-2018`, are absent from ADIF 3.1.8; they are documented exchanges,
 not spelling aliases. The cited entries cover CQ WW CW/SSB/RTTY, CQ WPX CW/SSB/RTTY, CQ 160
 CW/SSB, Sweepstakes CW/SSB, NAQP CW/SSB/RTTY, RSGB IOTA, WW Digi, IARU HF, ARRL DX CW/SSB,
 RTTY Roundup, International Digital, 10 Meter, 160 Meter, and WRTC. Each entry carries its exact
@@ -88,7 +88,7 @@ positions follow the sponsor's exchange rather than candidate inference.
 
 ## Bands, modes, and the tqsllib answer key
 
-The [Band and Mode enumerations](https://www.adif.org.uk/317/ADIF_317.htm#Enumerations)
+The [Band and Mode enumerations](https://www.adif.org.uk/318/ADIF_318.htm#Enumerations)
 provide ADIF output values. Numeric kHz values are converted exactly to integer Hz (up to three
 fractional kHz digits), then matched against inclusive ADIF band edges. WWROF's VHF and microwave
 designators map to their ADIF bands, including `122G` → `2.5mm`, `134G` → `2mm`, and

@@ -3,6 +3,19 @@
 All notable changes to QSO Graph Trust. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **ADIF 3.1.8** (released 2026-10-12) replaces 3.1.7 as the pinned source for Cabrillo's contest
+  IDs, bands and modes, from the archive with SHA-256
+  `d211e1d41adaf7fc341c73a8a3a56c343534aac57043b7474f7df2d528e56d8c`. Cabrillo logs can name four
+  new contest IDs: `SKCC-SKS`, `SKCC-SKSA`, `SKCC-SKSE` and `SKCC-WES`. Bands and fields are
+  unchanged. CI checks against ADIF 3.1.8's published ADI and ADX test logs (6,202 QSOs each).
+- **JTTY signs as LoTW mode DATA.** ADIF 3.1.8 adds `SUBMODE=JTTY` under `MFSK`. TQSL's
+  configuration 11.35 has no JTTY row, so a JTTY contact takes the MFSK row, as in TQSL; a test
+  now holds that mapping.
+
 ## [0.2.2] - 2026-11-14
 
 ### Added

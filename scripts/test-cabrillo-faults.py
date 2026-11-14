@@ -9,7 +9,7 @@ READER = ROOT / 'crates/qso-graph-trust/src/cabrillo.rs'
 DISPATCH = ROOT / 'crates/qso-graph-trust/src/records.rs'
 HARNESS = ROOT / 'scripts/cabrillo-differential.py'
 LAB = ROOT / 'crates/qso-graph-trust-custody/src/bin/qgt-cabrillo-lab.rs'
-EXCHANGES = ROOT / 'data/adif-317/exchanges.tsv'
+EXCHANGES = ROOT / 'data/adif-318/exchanges.tsv'
 TABLES = ROOT / 'crates/qso-graph-trust/src/cabrillo_tables.rs'
 CASES = [
     # ARRL 160's two cited positions are chosen by a strict majority; requiring a plausible call on

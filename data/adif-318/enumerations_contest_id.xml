@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-<adif version="3.1.7" status="Released" date="2026-03-22T00:00:00Z" created="2026-03-22T12:41:36Z">
+<adif version="3.1.8" status="Released" date="2026-10-12T00:00:00Z" created="2026-10-12T10:15:31Z">
   <enumerations>
     <enumeration name="Contest_ID">
       <header>
@@ -1037,6 +1037,26 @@
         <value name="Enumeration Name">Contest_ID</value>
         <value name="Contest-ID">SHORTRY</value>
         <value name="Description">DARC RTTY Short Contest</value>
+      </record>
+      <record>
+        <value name="Enumeration Name">Contest_ID</value>
+        <value name="Contest-ID">SKCC-SKS</value>
+        <value name="Description">SKCC Straight Key Sprint</value>
+      </record>
+      <record>
+        <value name="Enumeration Name">Contest_ID</value>
+        <value name="Contest-ID">SKCC-SKSA</value>
+        <value name="Description">SKCC Straight Key Sprint Asia</value>
+      </record>
+      <record>
+        <value name="Enumeration Name">Contest_ID</value>
+        <value name="Contest-ID">SKCC-SKSE</value>
+        <value name="Description">SKCC Straight Key Sprint Europe</value>
+      </record>
+      <record>
+        <value name="Enumeration Name">Contest_ID</value>
+        <value name="Contest-ID">SKCC-WES</value>
+        <value name="Description">SKCC Weekend Sprintathon</value>
       </record>
       <record>
         <value name="Enumeration Name">Contest_ID</value>

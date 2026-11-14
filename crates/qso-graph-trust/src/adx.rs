@@ -10,7 +10,7 @@ use crate::records::{
 };
 use crate::xml::{self, Element, Limits};
 
-// ADIF 3.1.7 section III.C: QSO field names, not the LoTW station or mode tables.
+// ADIF 3.1.8 section III.C: QSO field names, not the LoTW station or mode tables.
 const QSO_FIELDS: &[&str] = &[
     "ADDRESS",
     "ADDRESS_INTL",
@@ -375,14 +375,14 @@ mod tests {
         };
         let read = |ext| {
             let path =
-                std::path::Path::new(&path).join(format!("ADIF_317_test_QSOs_2026_03_22.{ext}"));
+                std::path::Path::new(&path).join(format!("ADIF_318_test_QSOs_2026_10_12.{ext}"));
             records::parse(&std::fs::read(path).expect("ADIF test file is missing or unreadable"))
                 .expect("ADIF test file must parse")
         };
         let adi = read("adi");
         let adx = read("adx");
-        assert_eq!(adi.len(), 6197);
-        assert_eq!(adx.len(), 6197);
+        assert_eq!(adi.len(), 6202);
+        assert_eq!(adx.len(), 6202);
         // ADIF's own equivalence: field names are case-insensitive (the ADI file mixes case on
         // purpose), values are compared byte for byte, and a type indicator is compared only
         // on application-defined fields: ADI may repeat a standard field's own type (`CALL:..:S`),

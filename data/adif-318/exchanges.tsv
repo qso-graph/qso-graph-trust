@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Contest identifier, zero-based received-call token (frequency = 0), source or guessed.
 # ARRL-160: 6 without a sent section, 7 with a sent section or maritime region.
-# WRTC and WRTC-2018 are sponsor identifiers outside ADIF 3.1.7.
+# WRTC and WRTC-2018 are sponsor identifiers outside ADIF 3.1.8.
 CQ-WW-CW	7	https://www.cqww.com/cabrillo.htm
 CQ-WW-SSB	7	https://www.cqww.com/cabrillo.htm
 CQ-WPX-CW	7	https://cqwpx.com/cabrillo.htm

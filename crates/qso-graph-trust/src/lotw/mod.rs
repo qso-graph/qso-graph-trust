@@ -269,6 +269,10 @@ mod tests {
         assert_eq!(lotw_mode("MFSK", Some("FT8")), Some("FT8"));
         assert_eq!(lotw_mode("MFSK", Some("FT4")), Some("FT4"));
         assert_eq!(lotw_mode("MFSK", Some("JS8")), Some("DATA"));
+        // ADIF 3.1.8 added SUBMODE=JTTY under MFSK. TQSL's configuration 11.35 has no JTTY row,
+        // so it takes the MFSK row, as TQSL itself does. A configuration that maps JTTY to
+        // anything else must fail here, so the change is a decision rather than a surprise.
+        assert_eq!(lotw_mode("MFSK", Some("JTTY")), Some("DATA"));
         assert_eq!(lotw_mode("MFSK", None), Some("DATA"));
         assert_eq!(lotw_mode("SSB", Some("USB")), Some("SSB"));
         assert_eq!(lotw_mode("CW", None), Some("CW"));

@@ -19,7 +19,7 @@ The message contains no calls or values copied from your log.
 | Received exchange must have exactly one call candidate | Correct the exchange layout or export ADIF with an explicit CALL field. |
 | No single received-call field fits every QSO | Correct the exchanges on the two QSO lines named in the message, or export ADIF. |
 
-A contest identifier outside ADIF 3.1.7's Contest_ID list is accepted when its syntax is valid
+A contest identifier outside ADIF 3.1.8's Contest_ID list is accepted when its syntax is valid
 and the same single received-call field fits every QSO. Missing or ambiguous received calls
 refuse the whole log before signing. QG Trust follows the format rules even when another reader
 accepts the file.

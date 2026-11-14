@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-<adif version="3.1.7" status="Released" date="2026-03-22T00:00:00Z" created="2026-03-22T12:41:40Z">
+<adif version="3.1.8" status="Released" date="2026-10-12T00:00:00Z" created="2026-10-12T10:15:36Z">
   <enumerations>
     <enumeration name="Mode">
       <header>
@@ -117,7 +117,7 @@
       <record>
         <value name="Enumeration Name">Mode</value>
         <value name="Mode">MFSK</value>
-        <value name="Submodes">FSQCALL,FST4,FST4W,FT2,FT4,JS8,JTMS,MFSK4,MFSK8,MFSK11,MFSK16,MFSK22,MFSK31,MFSK32,MFSK64,MFSK64L,MFSK128 MFSK128L,Q65</value>
+        <value name="Submodes">FSQCALL,FST4,FST4W,FT2,FT4,JS8,JTMS,JTTY,MFSK4,MFSK8,MFSK11,MFSK16,MFSK22,MFSK31,MFSK32,MFSK64,MFSK64L,MFSK128 MFSK128L,Q65</value>
       </record>
       <record>
         <value name="Enumeration Name">Mode</value>

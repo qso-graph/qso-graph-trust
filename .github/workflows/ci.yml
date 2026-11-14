@@ -76,21 +76,21 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/adif-cache
-          key: adif-317-1a70caf3a152c67c23ce9c4681f24b8e5f814862d8153d9a72e741375358e6d9
+          key: adif-318-d211e1d41adaf7fc341c73a8a3a56c343534aac57043b7474f7df2d528e56d8c
       - name: ADIF published ADI and ADX test files
         if: runner.os == 'Linux'
         shell: bash
         env:
-          QGT_ADIF_TEST_DIR: ${{ runner.temp }}/adif/317/tests
+          QGT_ADIF_TEST_DIR: ${{ runner.temp }}/adif/318/tests
         run: |
-          archive="$HOME/adif-cache/ADIF_317_resources_2026_03_22.zip"
+          archive="$HOME/adif-cache/ADIF_318_resources_2026_10_12.zip"
           if [ ! -f "$archive" ]; then
             mkdir -p "$HOME/adif-cache"
-            curl --fail --location --silent --show-error https://adif.org.uk/317/ADIF_317_resources_2026_03_22.zip --output "$archive"
+            curl --fail --location --silent --show-error https://adif.org.uk/318/ADIF_318_resources_2026_10_12.zip --output "$archive"
           fi
-          echo "1a70caf3a152c67c23ce9c4681f24b8e5f814862d8153d9a72e741375358e6d9  $archive" | sha256sum --check --status
+          echo "d211e1d41adaf7fc341c73a8a3a56c343534aac57043b7474f7df2d528e56d8c  $archive" | sha256sum --check --status
           mkdir -p "$RUNNER_TEMP/adif"
-          unzip -q "$archive" '317/tests/ADIF_317_test_QSOs_2026_03_22.adi' '317/tests/ADIF_317_test_QSOs_2026_03_22.adx' -d "$RUNNER_TEMP/adif"
+          unzip -q "$archive" '318/tests/ADIF_318_test_QSOs_2026_10_12.adi' '318/tests/ADIF_318_test_QSOs_2026_10_12.adx' -d "$RUNNER_TEMP/adif"
           cargo test -p qso-graph-trust --lib --all-features --locked adx::tests::published_adi_and_adx_samples -- --exact --nocapture
       # The OS credential store itself, under the test service only: what keyring writes must be
       # what presence and listing find.
