@@ -137,7 +137,8 @@ main already says (`X.Y.Z` or `X.Y.Z-beta.N`). It publishes `qso-graph-trust-aws
 `qso-graph-trust`, then `qso-graph-trust-cli`, on crates.io with Trusted Publishing, attests the
 packages, and tags the commit
 (`.github/workflows/release.yml`; its decisions are `scripts/release_check.py`'s). To prepare one:
-set the workspace version in `Cargo.toml` and the `=` pins on the internal dependencies, move the
+set the workspace version in `Cargo.toml` and the `=` pins on the internal dependencies, update both
+lock files (`cargo update -w`, and the same in `fuzz/`, whose own lock CI builds `--locked`), move the
 CHANGELOG's Unreleased section under the version, and merge that by pull request. A crate new to
 crates.io publishes once with a token scoped to it alone, `CRATES_IO_FIRST_PUBLISH` in the `crates-io`
 Environment; afterwards Trusted Publishing is set up on it, "require trusted publishing" turned on,
