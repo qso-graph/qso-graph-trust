@@ -552,7 +552,7 @@ mod tests {
         );
         assert!(parse(&b"\n".repeat(MAX_LINES + 1)).is_err());
         assert!(qso(&"x ".repeat(MAX_FIELDS + 1), None, None).is_err());
-        assert_eq!(CONTESTS.len(), 258);
+        assert_eq!(CONTESTS.len(), 262);
         assert_eq!(
             CONTESTS.iter().filter(|c| c.source != "guessed").count(),
             24
@@ -626,7 +626,7 @@ mod tests {
         );
         assert_eq!(
             err.to_string(),
-            "line 2: CONTEST is not in ADIF 3.1.7's Contest_ID list and no single received-call field fits every QSO (lines 3 and 4 differ); correct the exchanges or supply ADIF"
+            "line 2: CONTEST is not in ADIF 3.1.8's Contest_ID list and no single received-call field fits every QSO (lines 3 and 4 differ); correct the exchanges or supply ADIF"
         );
     }
 
@@ -919,7 +919,7 @@ mod tests {
             (
                 CabrilloError::Band,
                 "band",
-                "QSO frequency must fall within an ADIF 3.1.7 band",
+                "QSO frequency must fall within an ADIF 3.1.8 band",
             ),
             (
                 CabrilloError::QsoConversion,

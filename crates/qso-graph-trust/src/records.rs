@@ -147,7 +147,7 @@ pub enum CabrilloError {
     Mode,
     /// QSO frequency must be numeric kHz with at most three decimal places, or a WWROF band designator.
     Frequency,
-    /// QSO frequency must fall within an ADIF 3.1.7 band.
+    /// QSO frequency must fall within an ADIF 3.1.8 band.
     Band,
     /// QSO syntax must be ASCII with space or tab field delimiters.
     QsoAscii,
@@ -233,11 +233,11 @@ impl fmt::Display for CabrilloError {
             Self::DateTime => f.write_str("QSO date must be a valid UTC YYYY-MM-DD and time must be a valid UTC HHMM"),
             Self::Mode => f.write_str("QSO mode must be one of CW, PH, FM, RY, DG"),
             Self::Frequency => f.write_str("QSO frequency must be numeric kHz with at most three decimal places, or a WWROF band designator"),
-            Self::Band => f.write_str("QSO frequency must fall within an ADIF 3.1.7 band"),
+            Self::Band => f.write_str("QSO frequency must fall within an ADIF 3.1.8 band"),
             Self::QsoConversion => f.write_str("QSO must meet LoTW call, band, mode, date, time, and frequency requirements under the selected signing options; a received amateur call must have 3 to 20 letters, digits, or slashes, a letter and a digit, no leading or trailing slash, and no 0, Q, or unassigned 1 prefix"),
             Self::QsoAscii => f.write_str("QSO syntax must be ASCII with space or tab field delimiters"),
             Self::DifferentCallField { first_line, other_line } => write!(f,
-                "CONTEST is not in ADIF 3.1.7's Contest_ID list and no single received-call field fits every QSO (lines {first_line} and {other_line} differ); correct the exchanges or supply ADIF"),
+                "CONTEST is not in ADIF 3.1.8's Contest_ID list and no single received-call field fits every QSO (lines {first_line} and {other_line} differ); correct the exchanges or supply ADIF"),
         }
     }
 }

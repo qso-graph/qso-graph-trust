@@ -68,7 +68,7 @@ How each is tested, and how to report a security problem privately: [SECURITY.md
   its own source, is the reference its signed records and signatures are tested against, byte for byte.
 - **Other open-source projects:** rfrht's [qso-web](https://github.com/rfrht/qso-web), credited below,
   and a survey of 126 ham-radio Rust crates on crates.io, which found no other LoTW signing crate.
-- **Standards:** [ADIF 3.1.7](https://adif.org/317/ADIF_317.htm); RFC 5280 (X.509 certificates),
+- **Standards:** [ADIF 3.1.8](https://adif.org/318/ADIF_318.htm); RFC 5280 (X.509 certificates),
   RFC 4055 and RFC 8017 (RSA), RFC 1952 (gzip); W3C XML 1.0.
 
 ## Who it's for
