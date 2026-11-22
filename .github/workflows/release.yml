@@ -159,7 +159,19 @@ jobs:
       # GitHub's signed statement, through Sigstore, that these exact .crate files were built by this
       # workflow from this commit. crates.io serves the same bytes, so anyone can check a download:
       #   gh attestation verify qso-graph-trust-<version>.crate -R qso-graph/qso-graph-trust
+      # Sigstore's log can answer 404 for an entry it has just written, so a failed attestation
+      # is tried once more after a pause. The second try's result is the step's result.
       - name: Attest the packages
+        id: attest_1
+        continue-on-error: true
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: target/package/*.crate
+      - name: Wait before attesting again
+        if: steps.attest_1.outcome == 'failure'
+        run: sleep 30
+      - name: Attest the packages, second try
+        if: steps.attest_1.outcome == 'failure'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: target/package/*.crate
@@ -235,7 +247,20 @@ jobs:
       - name: SHA256SUMS.txt
         run: (cd dist && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt)
       # Made here, so its provenance is this job's.
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      # Sigstore's log can answer 404 for an entry it has just written, so a failed attestation
+      # is tried once more after a pause. The second try's result is the step's result.
+      - name: Attest the release files
+        id: attest_2
+        continue-on-error: true
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/SHA256SUMS.txt
+      - name: Wait before attesting again
+        if: steps.attest_2.outcome == 'failure'
+        run: sleep 30
+      - name: Attest the release files, second try
+        if: steps.attest_2.outcome == 'failure'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/SHA256SUMS.txt
       # A run that stopped after this is finished by running it again: a Release already on the tag
